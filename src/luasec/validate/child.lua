@@ -447,6 +447,60 @@ local function is_precompiled(chunk)
    return type(chunk) == "string" and chunk:sub(1, 1) == "\27"
 end
 
+-- The screen for the one allocation the size checks in front of `string.rep`,
+-- `string.format` and `table.concat` cannot cover.
+--
+-- `..` compiles to OP_CONCAT, which is a single C-level call: the instruction hook
+-- does not run inside it, and there is no Lua-callable seam in front of it. A
+-- payload that writes `s = s .. s` in a loop doubles its heap as many times as the
+-- loop will iterate, and the loop's whole work lands inside one instruction tick.
+-- Measured with nothing else in the way: 65.6x the ceiling before the parent's
+-- resident-set watchdog, and the child's own heap check firing 4096 instructions
+-- too late to matter.
+--
+-- So this refuses the *shape* rather than trying to bound the operation. It is a
+-- screen and not a bound, and the difference is not a matter of wording: one
+-- character defeats it, `s = s .. (s)` is not caught and neither is
+-- `s[1] = s[1] .. s[1]`, and a payload that builds the text at run time and hands
+-- it to `load` gets the same screen only because the screen is in front of every
+-- chunk. What is left is still bounded - by the parent's watchdog, which is the
+-- reason that watchdog exists - and a payload that evades this is stopped there
+-- rather than not at all.
+--
+-- The cost of the screen is a false positive, and it is why the pattern is this
+-- narrow: only a bare name on both sides, so `out = out .. piece`, which is how
+-- firmware builds a response, is untouched.
+local function self_concatenation(text)
+   if not text:find("..", 1, true) then return nil end
+   -- `()%.%.` is a position capture followed by two literal dots, so the position
+   -- is the first of the two and the right operand starts one past the second.
+   -- Prepending a blank to the left operand is what makes the name match start on
+   -- a word boundary rather than anywhere inside an identifier.
+   for at in text:gmatch("()%.%.") do
+      local left = (" " .. text:sub(1, at - 1)):match("([%a_][%w_]*)%s*$")
+      local right = text:sub(at + 2):match("^%s*([%a_][%w_]*)")
+      if left and right and left == right then
+         -- Lua has no `string.count`; the second return of gsub is the number of
+         -- replacements, which is the line the operator has to look at.
+         local line = select(2, text:sub(1, at - 1):gsub("\n", "\n")) + 1
+         return left, line
+      end
+   end
+   return nil
+end
+
+-- The line the screen tripped on is in the reason, because the point of naming it
+-- is that an operator can go and look at it.
+local function screen(text)
+   local name, line = self_concatenation(text)
+   if name then
+      stop(string.format(
+         "refused to compile a chunk that concatenates a value with itself, at line %d: %s .. %s. "
+         .. "`..` is one C-level call that no limit inside this child can preempt, so the doubling is "
+         .. "bounded from outside instead", line, name, name))
+   end
+end
+
 local function guarded_load(chunk, chunkname, mode)
    if type(chunk) == "string" and not chain_set.load then
       chain_set.load = true
@@ -456,6 +510,18 @@ local function guarded_load(chunk, chunkname, mode)
    if is_precompiled(chunk) or (type(mode) == "string" and mode:find("b", 1, true)) then
       add_sink("load(binary)", tostring(chunkname or ""))
       return nil, "sandbox: binary chunks are disabled"
+   end
+
+   -- The source the driver pasted in is size checked there, before this program
+   -- exists. A chunk assembled at run time is not, and compiling one is
+   -- unbounded work, so it is checked here - after the same screen, which is
+   -- ahead of every chunk the payload compiles rather than only this one.
+   if type(chunk) == "string" then
+      screen(chunk)
+      if #chunk > limits.max_source_bytes then
+         stop(string.format("refused a chunk of %d bytes: larger than the %d byte source limit",
+            #chunk, limits.max_source_bytes))
+      end
    end
 
    -- The "=" prefix is what `caller_frame` looks for to recognise a frame that
@@ -584,6 +650,26 @@ local function decide(failed)
    return failed and "error" or "benign"
 end
 
+-- One verdict table, built from the module state, so a payload that never got as
+-- far as running reports the same shape as one that did. `failed` says whether
+-- the payload's own chunk raised; the reason and its source are decided here so
+-- that a limit that fired always reads as ours, and a payload's own error message
+-- always reads as its.
+local function build_verdict(failed, reason, result)
+   return {
+      verdict = decide(failed),
+      reason = reason,
+      reason_source = (stop_reason or not failed) and "sandbox" or "payload",
+      result = result,
+      output = table.concat(output),
+      instructions = spent,
+      elapsed_ms = math.floor((real_os.clock() - started) * 1000),
+      sinks = sinks,
+      chain = chain,
+      escapes = escapes,
+   }
+end
+
 function __luasec_sandbox(payload, options)
    limits = options
    started = real_os.clock()
@@ -602,6 +688,18 @@ function __luasec_sandbox(payload, options)
 
    build_env()
 
+   -- The screen runs in front of this compile too, which is why it is here rather
+   -- than only inside `load`: the payload the driver pasted in is exactly the
+   -- chunk most likely to be a doubling loop, and `pcall` around `real_load` is
+   -- what keeps the limit sentinel from escaping into the generated program and
+   -- taking the child with it before a verdict is emitted. It fails in exactly one
+   -- way - by raising LIMIT, a local upvalue the payload cannot name - so the
+   -- reason is ours to report and not a string to be guessed at.
+   local screened, screen_error = real_pcall(screen, payload)
+   if not screened then
+      return build_verdict(true, stop_reason or tostring(screen_error))
+   end
+
    local chunk, compile_error = real_load(payload, "@" .. source_name, "t", env)
    if not chunk then
       return {verdict = "error", reason = "payload could not be compiled: " .. tostring(compile_error)}
@@ -611,20 +709,9 @@ function __luasec_sandbox(payload, options)
    local packed = table.pack(real_pcall(chunk))
    real_debug.sethook()
 
-   return {
-      verdict = decide(not packed[1]),
-      reason = stop_reason or (packed[1] and "payload completed" or tostring(packed[2])),
-      -- Whether the words above are ours or the payload's. A payload's own error
-      -- message is attacker text and the report has to label it as such.
-      reason_source = (stop_reason or packed[1]) and "sandbox" or "payload",
-      result = reportable(packed[2]),
-      output = table.concat(output),
-      instructions = spent,
-      elapsed_ms = math.floor((real_os.clock() - started) * 1000),
-      sinks = sinks,
-      chain = chain,
-      escapes = escapes,
-   }
+   return build_verdict(not packed[1],
+      stop_reason or (packed[1] and "payload completed" or tostring(packed[2])),
+      reportable(packed[2]))
 end
 
 function __luasec_emit(verdict)

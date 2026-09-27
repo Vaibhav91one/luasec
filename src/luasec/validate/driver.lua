@@ -450,9 +450,11 @@ function driver.run(source, opts)
       .. "\n__LUASEC_NONCE = " .. string.format("%q", token)
       .. "\n__LUASEC_PAYLOAD = " .. long_string(source)
       .. "\n__LUASEC_LIMITS = "
-      .. string.format("{timeout_ms=%d, max_instructions=%d, max_memory_kb=%d, max_load_depth=%d, source=%q}",
-           limits.timeout_ms, limits.max_instructions, limits.max_memory_kb,
-           limits.max_load_depth, source_name)
+      .. string.format(
+         "{timeout_ms=%d, max_instructions=%d, max_memory_kb=%d, max_load_depth=%d,"
+         .. " max_source_bytes=%d, source=%q}",
+         limits.timeout_ms, limits.max_instructions, limits.max_memory_kb,
+         limits.max_load_depth, limits.max_source_bytes, source_name)
       .. "\n" .. ENTRY
 
    -- The interpreter is the one the analyzer is running under, not whatever

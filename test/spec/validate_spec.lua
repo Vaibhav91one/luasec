@@ -412,11 +412,17 @@ return "done"
       -- inside it and the loop that doubles a string never reaches a check: the
       -- whole chain fits in one tick window. Nothing inside the child can bound
       -- this, so the parent has to.
+      --
+      -- The accumulator is a table field rather than a local, which is also what
+      -- keeps it out of reach of the source screen below. This payload is one the
+      -- screen does not catch, on purpose: what is being proved here is that the
+      -- watchdog holds on its own, and a test that passed only because the
+      -- payload was refused before it ran would prove nothing about it.
       local started = os.clock()
       local verdict = api.validate_payload([[
-local s = ("a"):rep(1024 * 1024)
-for i = 1, 20 do s = s .. s end
-return #s
+local s = {("a"):rep(1024 * 1024)}
+for i = 1, 20 do s[1] = s[1] .. s[1] end
+return #s[1]
 ]], {lua = LUA})
       local elapsed = os.clock() - started
 
@@ -429,13 +435,63 @@ return #s
       assert_true(elapsed < 10, "the validator took " .. elapsed .. "s to give up")
    end)
 
+   it("refuses to compile a chunk that concatenates a value with itself", function()
+      -- A screen, not a bound: one character of indirection defeats it, which is
+      -- why the watchdog above exists. But this shape has no legitimate use in a
+      -- payload - doubling a string is only ever memory exhaustion - so refusing
+      -- it costs nothing and saves the run.
+      local verdict = api.validate_payload([[
+local s = ("a"):rep(1024 * 1024)
+for i = 1, 20 do s = s .. s end
+return #s
+]], {lua = LUA})
+
+      assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
+      assert_match(verdict.exit_reason, "concatenates a value with itself")
+      assert_no_match(verdict.payload_result or "", "^%d+$", "the doubling loop ran")
+   end)
+
+   it("does not mistake an ordinary accumulator for a self-concatenation", function()
+      -- `out = out .. piece` is how firmware builds a response, and a screen that
+      -- refused it would refuse the payloads this tool exists to look at.
+      local verdict = api.validate_payload([[
+local out = ""
+for i = 1, 5 do out = out .. "piece" end
+return out
+]], {lua = LUA})
+
+      assert_equal(verdict.verdict, "benign", verdict.exit_reason)
+      assert_equal(verdict.payload_result, "piecepiecepiecepiecepiece")
+   end)
+
+   it("applies the same screen to a chunk the payload builds at run time", function()
+      -- The screen has to be in front of every chunk, not just the one the driver
+      -- pasted in, or a payload gets a second run at it by calling `load`.
+      local verdict = api.validate_payload([[
+local built = "local s = ('a'):rep(1024 * 1024) s = s .. s return #s"
+return tostring(load(built))
+]], {lua = LUA})
+
+      assert_match(verdict.exit_reason, "concatenates a value with itself")
+   end)
+
+   it("refuses a chunk the payload builds that is larger than the source limit", function()
+      -- The payload pasted in is size checked by the driver; a chunk assembled at
+      -- run time is not, and compiling one is unbounded work.
+      local verdict = api.validate_payload([[
+return load(string.rep("return 1\n", 50000))
+]], {lua = LUA, max_source_bytes = 4096})
+
+      assert_match(verdict.exit_reason, "larger than the 4096 byte source limit")
+   end)
+
    it("keeps a resident-set kill distinct from a wall-clock kill", function()
       -- Two independent reasons for one child. Reading the wrong one out would
       -- send an operator looking for a hang that never happened.
       local memory = api.validate_payload([[
-local s = ("a"):rep(1024 * 1024)
-for i = 1, 20 do s = s .. s end
-return #s
+local s = {("a"):rep(1024 * 1024)}
+for i = 1, 20 do s[1] = s[1] .. s[1] end
+return #s[1]
 ]], {lua = LUA})
       local clock = api.validate_payload("while true do end\n",
          {lua = LUA, max_instructions = 1e12, timeout_ms = 500})
