@@ -1,10 +1,10 @@
 -- Public entry points. Tests and callers use only this module.
 --
---   check_source(src, opts)   analyze one Lua string, return a report (findings)
---   analyze(paths, opts)      analyze files, return a report
---   format(report, name)      render a report
---   rules.load(path)          load a custom rules file
---   validate_payload(src)     run the payload validator
+--   check_source(src, opts)      analyze one Lua string, return a report (findings)
+--   analyze(paths, opts)         analyze files, return a report
+--   format(report, name)         render a report
+--   rules.load(path)             load a custom rules file
+--   validate_payload(src, opts)  run the payload validator, return a verdict
 local parse_context = require "luasec.engine.parse_context"
 local taint_engine = require "luasec.engine.taint"
 local codes = require "luasec.rules.codes"
@@ -104,6 +104,44 @@ function api.analyze(paths, opts)
    end
 
    return sort_findings(findings)
+end
+
+--- Decide whether a Lua payload actually achieves execution.
+--
+-- The payload is untrusted, so it is never run here: it is handed to a child
+-- interpreter with `os` and `io` replaced by recorders and bounded by an
+-- instruction count, a memory ceiling, a load depth and a wall clock. Returns a
+-- verdict table:
+--
+--   verdict          "rce" | "partial" | "benign" | "timeout" | "error".
+--                    "timeout" means a bound stopped it, which is any of the
+--                    four above, not only the clock.
+--   sinks_reached    array of {name, kind, line, source, arg} for every capability
+--                    the payload reached and the sandbox refused
+--   escape_attempts  the subset of those that tried to leave the sandbox
+--   payload_chain    the steps the payload took, in order, deduplicated
+--   exit_reason      why the run ended
+--   reason_source    "sandbox" or "payload": whose words exit_reason is. It is the
+--                    payload's whenever the payload raised the error itself.
+--   payload_result   what the payload returned, if it was a scalar
+--   payload_output   what the payload printed or wrote, including through
+--                    `io.stdout` and `io.stderr`
+--   source           the source name the verdict is traced back to, and the one
+--                    every reported line number is counted in
+--   lua              the dialect the payload was validated under
+--   interpreter      the interpreter binary that was run
+--   duration_ms      CPU time the payload burned in the child
+--
+-- Everything named `payload_*`, plus `exit_reason` when `reason_source` is
+-- "payload" and the `arg` of a sink, is text the payload chose. A caller that
+-- shows any of it to a person should mark it the way `luasec --validate` does.
+--
+-- Options: `timeout_ms`, `max_instructions`, `max_memory_kb`, `max_load_depth`,
+-- `max_source_bytes`, `name` (the source name to trace the verdict to) and `lua`
+-- (the interpreter to run the payload with; defaults to $LUASEC_LUA, then
+-- $LUA_BIN, then `lua` on PATH).
+function api.validate_payload(source, opts)
+   return require("luasec.validate.driver").run(source, opts or {})
 end
 
 return api

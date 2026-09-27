@@ -6,9 +6,25 @@ local codes = require "luasec.rules.codes"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
 local sarif = require "luasec.report.sarif"
+local validate_report = require "luasec.validate.report"
 local version = require "luasec.version"
 
 local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
+
+-- A verdict is an outcome, not a threshold: anything short of "benign" means the
+-- payload did something worth failing a build over, and a failed payload or a
+-- broken sandbox is a different thing again. `escape` is a process-control
+-- attempt that executed nothing, and it fails the build for the same reason any
+-- other reach does: the snippet tried to leave the sandbox.
+local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
+                      escape = EXIT_FINDINGS, partial = EXIT_FINDINGS,
+                      timeout = EXIT_FINDINGS, error = EXIT_ERROR}
+
+-- Which fields of a validation verdict are text the payload chose. It is rendered
+-- into the JSON rather than left to documentation, because the JSON is what a
+-- machine acts on.
+local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the validated snippet "
+   .. "chose; they are reported as data, not as luasec findings"
 
 local SEVERITY_RANK = {low = 1, medium = 2, high = 3, critical = 4}
 local CONFIDENCE_RANK = {low = 1, medium = 2, high = 3, certain = 4}
@@ -87,6 +103,64 @@ local function render(report, format, opts)
    return plain.render(report, opts)
 end
 
+-- Read the payload to validate. One file, or standard input, because a verdict
+-- is about a single snippet: a directory of candidates is several runs.
+local function read_payload(opts)
+   if opts.stdin then
+      return io.read("*a"), "<stdin>"
+   end
+
+   if #opts.paths ~= 1 then
+      return nil, nil, "--validate needs exactly one file, or --stdin"
+   end
+
+   local handle, open_error = io.open(opts.paths[1], "rb")
+   if not handle then
+      return nil, nil, "cannot read " .. opts.paths[1] .. ": " .. tostring(open_error)
+   end
+   local source = handle:read("*a")
+   handle:close()
+   return source, opts.paths[1]
+end
+
+-- The dynamic half of the tool: decide whether a snippet actually achieves
+-- execution, by running it in a child process. It never runs here.
+local function validate(opts)
+   local source, name, read_error = read_payload(opts)
+   if read_error then return fail(read_error) end
+
+   local verdict = api.validate_payload(source, {
+      lua = os.getenv("LUASEC_LUA"),
+      timeout_ms = tonumber(opts.validate_timeout),
+      name = name,
+   })
+
+   local output
+   if opts.format == "json" then
+      -- The note travels with the data: a machine reader has to be able to see,
+      -- without reading this source, which of these fields are the payload's
+      -- words rather than luasec's.
+      local validation = {note = UNTRUSTED_NOTE}
+      for key, value in pairs(verdict) do validation[key] = value end
+      output = json.encode({version = version.luasec, validation = validation})
+   elseif opts.format == "sarif" or opts.format == "html" then
+      return fail("--validate supports --format plain and --format json")
+   else
+      output = validate_report.render(verdict, name)
+   end
+
+   if opts.output then
+      local handle, open_error = io.open(opts.output, "wb")
+      if not handle then return fail("cannot write " .. opts.output .. ": " .. tostring(open_error)) end
+      handle:write(output, "\n")
+      handle:close()
+   else
+      io.stdout:write(output, "\n")
+   end
+
+   return VERDICT_EXIT[verdict.verdict] or EXIT_ERROR
+end
+
 local function run(argv)
    local opts, parse_error = args_parser.parse(argv)
    if not opts then return fail(parse_error) end
@@ -100,6 +174,10 @@ local function run(argv)
       io.stdout:write(string.format("luasec %s (luacheck %s, rules %s)\n",
          version.luasec, version.luacheck, version.rules_pack))
       return EXIT_CLEAN
+   end
+
+   if opts.validate then
+      return validate(opts)
    end
 
    if #opts.paths == 0 and not opts.help and not opts.version then
