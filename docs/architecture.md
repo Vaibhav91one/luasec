@@ -107,11 +107,12 @@ records on a pipe.
 ```
   source ──▶ driver ──▶ [ lua -e child.lua + payload + limits ] ──▶ records ──▶ verdict
               │                    │
-              │                    └── os, io, package, debug, dofile, loadfile,
-              │                        require, load(binary) are recorders;
-              │                        string.rep/format are size checked
+              │                    └── os, io are allowlists; package, debug, dofile,
+              │                        loadfile, require, load(binary) are recorders;
+              │                        string.rep/format and table.concat are size
+              │                        checked, through the string metatable too
               │
-              └── wall clock watchdog, `ulimit -t`, `ulimit -v`
+              └── wall clock watchdog (whole seconds), `ulimit -t`
 ```
 
 What the payload is given is a fresh table with no metatable, so `_G` inside the
@@ -121,6 +122,16 @@ the payload only ever sees recorders that log the call, hand back something
 harmless and let the payload carry on - so the rest of its behaviour stays
 visible.
 
+`os` and `io` are built by naming the members the payload may have rather than by
+copying the real tables. That is load-bearing rather than tidier: a copy hands
+over every member nobody thought about, and `io.stdout` is one of them, a live
+handle on the record channel. The three standard streams the payload does get are
+in-memory captures, and the record channel is the child's standard error with the
+child's standard output on `/dev/null`, so a real stdout handle would be no use
+either. Every record additionally carries a per-run nonce the parent generated and
+only the child is given, so a line on the channel without it is dropped rather
+than parsed.
+
 Every bound is monotonic, which is what makes them un-defeatable: a payload can
 catch the error a limit raises and keep going, but the instruction counter, the
 memory reading and the load depth only ever climb, so the next check still fires.
@@ -128,14 +139,22 @@ memory reading and the load depth only ever climb, so the next check still fires
 - **instructions** - a `debug.sethook` count hook, checked every 100 instructions.
   Re-installed on every coroutine, because the hook belongs to a thread and a new
   thread starts with none.
-- **memory** - `collectgarbage("count")` in the same hook, plus size checks in
-  front of `string.rep` and `string.format`, which are the two standard functions
-  that turn a small argument into a huge allocation inside one C call where no
-  hook can see it coming. `ulimit -v` is a backstop where the platform enforces it.
+- **memory** - `collectgarbage("count")` on every tick, plus size checks in front
+  of `string.rep`, `string.format` and `table.concat`, which are the standard
+  functions that allocate far more than their arguments describe inside a single
+  C call where no hook can see it coming. The `string` check is installed on the
+  metatable every string carries as well as on the `string` table, because
+  `("a"):rep(n)` never looks at the table. There is no kernel memory limit to fall
+  back on: macOS refuses `RLIMIT_AS` and `RLIMIT_DATA` outright. What this bounds
+  is the live Lua heap, not the resident set, and SECURITY.md has the measured
+  peak resident set for each reproducer.
 - **load depth** - every chunk the payload builds runs one level deeper.
-- **wall clock** - enforced by the parent, which kills the child, with `ulimit -t`
-  as a backstop. The child cannot be trusted to notice time passing, because a
-  `while true do end` in a C-level loop would never reach a hook.
+- **wall clock** - enforced by the child on every tick and by the parent, which
+  kills the child, with `ulimit -t` as a kernel backstop. The child cannot be
+  trusted to notice time passing on its own, because a `while true do end` wedged
+  in a C-level call would never reach a hook. The parent's watchdog sleeps a whole
+  number of seconds, because the value reaches `sleep` as text and a fractional
+  one is read by `sleep` as a rounding error.
 
 The verdict vocabulary, in the order the runner decides it:
 
@@ -145,7 +164,7 @@ The verdict vocabulary, in the order the runner decides it:
 | `partial` | it reached a capability that is not execution: a file read or write, or the debugger |
 | `timeout` | a bound stopped it: instructions, memory, wall clock or load depth |
 | `benign` | it ran to completion and reached nothing |
-| `error` | the payload or the sandbox itself failed |
+| `error` | the payload or the sandbox itself failed, including a child running under a dialect the sandbox does not support |
 
 Reaching a sink outranks being stopped: a payload that calls `os.execute` and then
 loops forever is `rce`, with the limit in `exit_reason`, because the thing that
@@ -153,8 +172,20 @@ matters already happened.
 
 The transport is length framed (`<bytes>:<the bytes>`, or a bare integer) so a
 value containing spaces or newlines cannot be mistaken for a field boundary, and
-what the payload printed is captured and reported as `output` rather than written
-to the report channel - a payload that could write there could forge a verdict.
+what the payload printed is captured and reported as `payload_output` rather than
+written to the record channel.
+
+## What a verdict is not
+
+A verdict is an outcome, not a finding, so it has no severity, no CWE and no
+threshold to apply - but some of its fields are still text an attacker chose. What
+the snippet printed (`payload_output`), what it returned (`payload_result`), the
+argument it passed to a sink (`sinks_reached[].arg`) and its own error message
+(`exit_reason`, when `reason_source` is `payload`) are all the payload's words.
+The plain report labels them, escapes control bytes in them and prints them in a
+`payload|` gutter; the JSON names them `payload_*` and carries a `note` saying
+which fields they are. The chain, the sink names, the kinds, the line numbers and
+the verdict itself are luasec's, and come from the sandbox rather than the payload.
 
 ## What is out of scope
 

@@ -46,11 +46,81 @@ hanging, exhausting memory, or executing anything it analyzes. Specifically:
   the child's own command line.
 - Pattern matching is linear time; rules are checked against bounded input.
 
-Two things are worth stating plainly. The parent's wall clock needs `sleep` and a
-POSIX shell, the same external tools `cli/walk.lua` already relies on; without
-them the child is still bounded by its own limits and by `ulimit -t`, but a child
-wedged in a C-level loop would not be killed on time. And `ulimit -v` is not
-enforced on every platform, which is why the memory ceiling also lives in the
-child's own instruction hook and in front of `string.rep` and `string.format`.
+## What the memory ceiling is, measured
+
+The memory ceiling is **cooperative, and it is a live Lua heap ceiling rather than
+a resident set ceiling**. That is not a preference; on macOS it is forced:
+
+    $ /bin/sh -c 'ulimit -v 204800'
+    /bin/sh: line 0: ulimit: virtual memory: cannot modify limit: Invalid argument
+    $ /bin/sh -c 'ulimit -d 204800'
+    /bin/sh: line 0: ulimit: data seg size: cannot modify limit: Invalid argument
+
+macOS refuses `RLIMIT_AS` and `RLIMIT_DATA` outright, so there is no
+kernel-enforced memory limit available to the parent here. `RLIMIT_CPU` does work
+(`ulimit -t 1` kills the child with SIGXCPU, exit status 152), which is why the CPU
+side has a kernel backstop and the memory side does not. `ulimit -v` is still set
+on platforms that honour it, and is a backstop there, not the bound.
+
+What the child does enforce, and what that costs:
+
+- `collectgarbage("count")` is read on every one of the 100-instruction ticks,
+  not every sixty-fourth. The window between two checks is the entire budget a
+  payload has to allocate past the ceiling, and 6400 instructions of
+  `t[i] = ("x"):rep(1024 * 1024)` is about 4GB of it. The overhead is measured:
+  a full five million instruction budget goes from 12ms to 25ms of CPU.
+- The three standard functions that can allocate far more than their arguments
+  describe are size-checked before they run: `string.rep`, `string.format` and
+  `table.concat`.
+- The `string` guard is installed on the metatable every string carries, as well
+  as on the `string` table the payload is given. `("a"):rep(n)` does not go
+  through the `string` table at all, so guarding only the table left one
+  character of syntax between a payload and a 500MB allocation. The payload is
+  given `getmetatable`, so it can read that metatable and can overwrite
+  `__index.rep` to weaken the guard for its own run; it cannot put the real
+  `string.rep` back, because the real table is a local upvalue and that metatable
+  is the only route to it.
+
+Peak resident set, measured on macOS 26.5 / arm64 with `/usr/bin/time -l` around
+the whole run, against the default 64MB ceiling:
+
+| Payload | Verdict | Peak RSS |
+| --- | --- | --- |
+| benign snippet | `benign` | 3.1MB |
+| `("a"):rep(500 * 1024 * 1024)` | `timeout`, refused before allocating | 3.0MB |
+| 4000 x `("x"):rep(1024 * 1024)`, i.e. the 4GB reproducer | `timeout` | 70.5MB |
+| 60000 x 1KB parts then `table.concat` | `timeout` | 85.4MB |
+| `while true do io.open(...) end` | `timeout`, 34376 sink records | 36.1MB |
+
+Two things that number does not hide:
+
+- The 85.4MB case is a live set of about 60MB that `table.concat` would have
+  doubled. The check in front of it refuses that, so the remainder is allocator
+  overhead rather than an allocation the ceiling missed. The practical bound is
+  therefore "the ceiling, plus allocator overhead, plus whatever one tick of
+  ordinary allocation adds" - measured here as up to about 1.3x the ceiling, not
+  1x.
+- A payload that reaches a sink in a loop produces one record per call, and the
+  parent reads them all. That is bounded by the instruction budget: 34376 records
+  and 36MB of peak RSS for the flood above.
+
+## What else is worth stating plainly
+
+The parent's wall clock needs `sleep` and a POSIX shell, the same external tools
+`cli/walk.lua` already relies on. Its `sleep` is given a whole number of seconds,
+rounded up, because the value is passed as text: a fractional second formats as
+something like `1e-07`, which `sleep` reads as a rounding error and returns
+immediately, leaving the payload with no wall clock at all. Without `sleep` the
+child is still bounded by its own limits and by `ulimit -t`, but a child wedged in
+a C-level loop would not be killed on time.
+
+Every field of a verdict that the payload chose - what it printed, what it
+returned, the argument it passed to a sink, and its own error message - is
+labelled as payload text in the plain report, prefixed `payload|`, and named
+`payload_*` in the JSON, with a note in the JSON saying so. Control bytes are
+escaped, so a payload cannot put a newline or a carriage return into a line the
+report is counting. This is about not putting words in someone's log. It is not a
+claim that the payload cannot influence what the tool prints: a payload can
+choose its own output, and the tool shows it, in a gutter, as data.
 
 Report anything that violates the above.

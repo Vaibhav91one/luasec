@@ -40,7 +40,10 @@ Exit codes: `0` clean, `1` findings at or above the threshold, `2` error.
 `--validate` is the dynamic half: it runs one snippet in a child process with
 `os` and `io` replaced by recorders, and reports whether the snippet actually
 reaches execution. It exits `0` for benign, `1` for rce, partial or timeout and
-`2` when the payload or the sandbox itself failed. See
+`2` when the payload or the sandbox itself failed. The verdict names the file and
+the interpreter it came from, and any text the snippet itself produced - what it
+printed, what it returned, the argument it passed to a sink, its own error
+message - is labelled as the snippet's rather than presented as a finding. See
 [docs/architecture.md](docs/architecture.md#the-payload-validator).
 
 ## Why firmware
