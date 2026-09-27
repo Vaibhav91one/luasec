@@ -78,9 +78,19 @@ end
 
 -- ---------------------------------------------------------------- reporting
 
+local function is_file(path)
+   local handle = io.open(path, "rb")
+   if handle then handle:close() return true end
+   return false
+end
+
+-- `dirs` may name directories or individual spec files.
 local function collect_spec_files(dirs)
    local files = {}
    for _, dir in ipairs(dirs) do
+      if dir:match("_spec%.lua$") and is_file(dir) then
+         files[#files + 1] = dir
+      else
       local pipe = io.popen("find '" .. dir:gsub("'", "'\\''") .. "' -name '*_spec.lua' -type f 2>/dev/null | LC_ALL=C sort")
       if pipe then
          for line in pipe:lines() do

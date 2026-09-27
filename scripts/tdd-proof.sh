@@ -37,10 +37,14 @@ set +e
   "package.path='$scratch/src/?.lua;$scratch/src/?/init.lua;$scratch/vendor/?.lua;$scratch/vendor/?/init.lua;$scratch/test/?.lua;'..package.path" \
   - "$scratch" "${specs[@]}" <<'LUA' >/dev/null 2>&1
 local scratch = ...
+local specs = {}
+for i = 2, #arg do
+   specs[#specs + 1] = arg[i]
+end
 local harness = require "harness"
 local failed = false
-for i = 3, #arg do
-   local path = arg[i]:gsub("^" .. scratch, ".")
+for i = 1, #specs do
+   local path = specs[i]:gsub("^" .. scratch, ".")
    local chunk, err = loadfile(path)
    if not chunk then
       print("tdd-proof: cannot load " .. path .. ": " .. tostring(err))
@@ -53,8 +57,14 @@ for i = 3, #arg do
       end
    end
 end
-local _, failures = harness.run({ "." })
-if #failures > 0 then os.exit(1) end
+-- Only the specs this change touched. Sweeping the tree would pick up
+-- test/selfcheck/failing_spec.lua, which fails on purpose, and make the gate
+-- pass for any diff that reverse-applies cleanly.
+local _, failures = harness.run(specs)
+if #failures > 0 then
+   os.exit(1)
+end
+print("tdd-proof: touched specs pass with the implementation present")
 os.exit(0)
 LUA
 status=$?

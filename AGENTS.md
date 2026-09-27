@@ -30,11 +30,15 @@ We never modify `vendor/`. It is pinned (see `vendor/PINNED`) and checked by
 | --- | --- |
 | library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name)`, `rules.load(path)`, `validate_payload(src, opts)` |
 | CLI | `bin/luasec <args>` as a subprocess (flags, exit codes, stdout contracts) |
-| allowed extra | `luasec.util.const_eval`, `luasec.bytecode.header` - public modules in their own right |
+| allowed extra | `luasec.util.util` (string/entropy helpers), `luasec.util.const_eval` (constant folding), `luasec.bytecode.detect`, `luasec.bytecode.header`, `luasec.bytecode.protos` - public modules in their own right, each with a narrow interface |
 
 Forbidden in tests: `require("luacheck.*")`, the `stages.warnings` table shape,
-anything under `luasec.engine.*`, private functions, mocks of internal collaborators,
-and verifying through a side channel (e.g. reading a cache file to prove a write).
+anything under `luasec.engine.*`, `luasec.report.*` internals, private functions,
+mocks of internal collaborators, and verifying through a side channel (e.g. reading
+a cache file to prove a write happened).
+
+A test that asserts on a spec fixture in `test/selfcheck/` is only ever run by
+`make runner-selftest`; `make test` must stay green.
 
 Test names describe behavior, not mechanism:
 `"tainted HTTP parameter reaching os.execute is reported as 709 critical"` = good.
