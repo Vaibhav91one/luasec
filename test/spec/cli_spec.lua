@@ -1,0 +1,41 @@
+local harness = require "harness"
+local describe, it = harness.describe, harness.it
+local assert_equal, assert_true, assert_match, assert_no_match = harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
+
+describe("luasec command line", function()
+   it("prints its version and exits 0", function()
+      local out, code = harness.cli({ "--version" })
+      assert_equal(code, 0, out)
+      assert_match(out, "luasec ", out)
+   end)
+
+   it("reports a finding for a file with untrusted input reaching a sink, and exits 1", function()
+      local out, code = harness.cli({ "test/fixtures/tainted_exec/handler.lua" })
+      assert_equal(code, 1, out)
+      assert_match(out, "709", out)
+      assert_match(out, "handler%.lua:3", out)
+      assert_match(out, "os%.execute", out)
+   end)
+
+   it("reports nothing for a file with only a constant command, and exits 0", function()
+      local out, code = harness.cli({ "test/fixtures/constant_exec/ping.lua" })
+      assert_equal(code, 0, out)
+      assert_no_match(out, "709", out)
+   end)
+
+   it("reports nothing for a file with no sink at all, and exits 0", function()
+      local out, code = harness.cli({ "test/fixtures/clean/report.lua" })
+      assert_equal(code, 0, out)
+   end)
+
+   it("prints help and exits 0", function()
+      local out, code = harness.cli({ "--help" })
+      assert_equal(code, 0, out)
+      assert_match(out, "--format", out)
+   end)
+
+   it("exits 2 when asked to analyze a file that does not exist", function()
+      local _, code = harness.cli({ "test/fixtures/does_not_exist.lua" })
+      assert_equal(code, 2)
+   end)
+end)

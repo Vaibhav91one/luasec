@@ -1,0 +1,11 @@
+# build artifacts
+build/
+# vendored upstream (restored by `make vendor`, pinned in vendor/PINNED)
+vendor/luacheck/
+# worktrees for parallel issue work
+.worktrees/
+# test corpora cloned from the network, never committed
+corpus/
+# local
+*.sarif
+.luasecrc

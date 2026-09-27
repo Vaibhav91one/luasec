@@ -1,0 +1,5 @@
+harness.describe("a suite that passes", function()
+   harness.it("counts as one passing spec", function()
+      harness.assert_true(true)
+   end)
+end)
