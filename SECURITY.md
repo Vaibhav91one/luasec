@@ -81,14 +81,18 @@ default 64MB ceiling, before this bound existed:
     for i = 1, 20 do s = s .. s end
     return #s
 
-    4297359360  maximum resident set size
+    2876342272  maximum resident set size
     4297375744  maximum resident set size
-    4297359360  maximum resident set size
+    4297392128  maximum resident set size
 
-65.6x the ceiling, and the verdict still read `timeout` with "memory ceiling of
-65536kB exceeded", because the child's own check did fire - 4096 instructions
-after the payload had already passed the ceiling by 64x. A verdict that reads as a
-ceiling which held is worse than one that admits it did not.
+Three runs, and it is not even stable: 2743.2MB to 4098.0MB, 42.9x to 65.6x the
+ceiling, depending on where the child's own check happened to land inside the
+chain. An independent measurement of this same payload reported 2697.7MB through
+the CLI and 5288886272 bytes through the API with the clock extended, which is
+the same thing. The verdict still read `timeout` with "memory ceiling of 65536kB
+exceeded", because the child's own check did fire - 4096 instructions after the
+payload had already passed the ceiling by 64x. A verdict that reads as a ceiling
+which held is worse than one that admits it did not.
 
 So the parent starts a second watcher beside the wall-clock watchdog, in the same
 shell group, with the same shape: one child, two independent kill reasons, both
@@ -144,40 +148,60 @@ can allocate between two samples, and the achievable statement is exactly that:
 
 At the default 1ms gap on macOS that window is 2.93ms of `ps` plus 1ms of sleep,
 and at the 32GB/s concatenation throughput measured on this machine that is about
-125MB. So the default settings land at roughly 2x the heap ceiling, and the
-poll interval is what moves it. The same payload, through
-`luasec.api.validate_payload` with `rss_poll_ms` set, worst of five each:
+125MB, so a 96MB threshold predicts a peak near 220MB. The measurement below is
+in that neighbourhood and the poll interval is what moves it. The same payload,
+through `luasec.api.validate_payload` with `rss_poll_ms` set, 10 runs each, worst
+of the ten:
 
 | `rss_poll_ms` | worst peak RSS | x the 64MB ceiling |
 | --- | --- | --- |
-| 1 (default) | 123.97MB | 1.94x |
-| 5 | 139.75MB | 2.18x |
-| 20 | 467.14MB | 7.30x |
-| 100 | 1624.03MB | 25.38x |
+| 1 (default) | 178.69MB | 2.79x |
+| 5 | 174.70MB | 2.73x |
+| 20 | 478.14MB | 7.47x |
+| 100 | 1576.52MB | 24.63x |
 
 The last row is the point of stating the bound in those terms rather than as a
 number: the window is the bound, and a 100ms window is a 1.6GB window. It is
 still bounded - the wall clock and the child's own heap ceiling both still hold -
-but it is 25x the ceiling rather than 2x, which is why 1ms is the default and why
-it is not a knob to turn casually. On Linux the same table is much flatter,
-because there a sample is a `read` of `/proc/<pid>/statm` rather than a fork, and
-`ulimit -v` is a kernel bound underneath it.
+but it is 24x the ceiling rather than 2.8x, which is why 1ms is the default and
+why it is not a knob to turn casually. The 1ms and 5ms rows are the same
+measurement within each other's noise, which is also the point of the next
+paragraph. On Linux the same table is much flatter, because there a sample is a
+`read` of `/proc/<pid>/statm` rather than a fork, and `ulimit -v` is a kernel
+bound underneath it.
+
+This is a distribution, not a deterministic ceiling, and the spread is wide
+enough that publishing a percentile would be misleading. 25 runs of the doubling
+payload at the default setting:
+
+| Route | min | median | p90 | max |
+| --- | --- | --- | --- | --- |
+| `./bin/luasec --validate` | 109.45MB | 123.94MB | 131.78MB | 137.59MB |
+| `validate_payload`, clock at 30s | 105.83MB | 115.38MB | 130.30MB | 134.69MB |
+
+and one 10-run batch taken while the machine was busy produced a single 178.69MB
+sample, 2.79x the ceiling. So the worst number actually observed for the default
+setting is 2.79x, not 2.10x, and that is the one to plan around. A caller who
+wants a hard number should read `rss_limit_kb` for what it is: the kill point,
+not the peak.
 
 ### Peak resident set, measured
 
-macOS 26.5 / arm64, `/usr/bin/time -l` around the whole run, 5 runs each,
-default 64MB ceiling and default 98304kB threshold. `max` is the worst of the
-five; the last column is that worst case against the 64MB ceiling.
+macOS 26.5 / arm64, `/usr/bin/time -l` around the whole run, 10 runs each,
+default 64MB ceiling and default 98304kB threshold. `max` is the worst of the ten;
+the last column is that worst case against the 64MB ceiling. The spread matters
+as much as the worst case and is why the worst case is the one published: the
+doubling row ranged from 114.12MB to 149.86MB over the ten.
 
 | Payload | Verdict | max peak RSS | x ceiling |
 | --- | --- | --- | --- |
-| benign snippet | `benign` | 3.11MB | 0.05x |
-| `("a"):rep(500 * 1024 * 1024)` | `timeout`, refused before allocating | 3.09MB | 0.05x |
-| 4000 x `("x"):rep(1024 * 1024)` | `timeout`, refused in front of the allocation | 67.22MB | 1.05x |
+| benign snippet | `benign` | 3.12MB | 0.05x |
+| `("a"):rep(500 * 1024 * 1024)` | `timeout`, refused before allocating | 3.14MB | 0.05x |
+| 4000 x `("x"):rep(1024 * 1024)` | `timeout`, refused in front of the allocation | 67.25MB | 1.05x |
 | 60000 x 1KB parts then `table.concat` | `timeout`, refused in front of the concat | 81.50MB | 1.27x |
-| `while true do io.open(...) end` | `timeout`, 34376 sink records | 35.39MB | 0.55x |
-| the doubling payload, `s = s .. s` | `timeout`, refused before compiling | 3.12MB | 0.05x |
-| the same loop as a table field, so the screen cannot see it | `timeout`, killed by the parent | 140.14MB | 2.19x |
+| `while true do io.open(...) end` | `timeout`, 34376 sink records | 35.41MB | 0.55x |
+| the doubling payload, `s = s .. s` | `timeout`, refused before compiling | 3.16MB | 0.05x |
+| the same loop as a table field, so the screen cannot see it | `timeout`, killed by the parent | 149.86MB | 2.34x |
 
 Two things that table does not hide:
 
@@ -187,7 +211,7 @@ Two things that table does not hide:
   default 1.5x multiplier is set above.
 - A payload that reaches a sink in a loop produces one record per call, and the
   parent reads them all. That is bounded by the instruction budget: 34376 records
-  and 35.39MB of peak RSS for the flood above.
+  and 35.41MB of peak RSS for the flood above.
 
 ### The screen, which is not a bound
 
@@ -195,23 +219,23 @@ The last two rows are different in kind and the difference is not a matter of
 wording. The child screens the *source shape* of the doubling loop - a bare name
 on both sides of a `..` - and refuses to compile such a chunk, in front of every
 chunk it compiles and not only the one the driver pasted in. That is why the
-second-to-last row is 3.12MB: the payload never ran.
+second-to-last row is 3.16MB: the payload never ran.
 
 It is a screen, not a bound. One character defeats it. `s = s .. (s)` is not
 caught, `s[1] = s[1] .. s[1]` is not caught, and the last row is that second form
-measured, at 140.14MB - stopped by the watcher, not by the screen. Anything
+measured, at 149.86MB - stopped by the watcher, not by the screen. Anything
 assembled at run time meets the screen only because the screen happens to be in
 front of every chunk. The pattern is narrow because the cost of a screen is a
 false positive: `out = out .. piece`, which is how firmware builds a response, is
 untouched.
 
 So: **the honest statement is that the child's heap ceiling is cooperative, the
-child's resident set is bounded from outside at roughly 2x the heap ceiling, and
-the source screen in front of `..` removes the obvious reproducer but bounds
-nothing.** Before this work the tool's peak for that payload was 65.6x the
-ceiling and it said "memory ceiling exceeded"; it is now 0.05x for the payload as
-written and 2.19x for the same loop with one character changed, and it says which
-of the two happened.
+child's resident set is bounded from outside at roughly 2x the heap ceiling with a
+measured tail to 2.79x, and the source screen in front of `..` removes the obvious
+reproducer but bounds nothing.** Before this work the tool's peak for that payload
+was 65.6x the ceiling and it said "memory ceiling exceeded"; it is now 0.05x for
+the payload as written and 2.34x for the same loop with one character changed,
+and it says which of the two happened.
 
 ## What else is worth stating plainly
 

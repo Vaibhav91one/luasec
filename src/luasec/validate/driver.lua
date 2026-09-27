@@ -232,8 +232,9 @@ end
 -- child can see this. `..` compiles to one OP_CONCAT, a single C-level call: the
 -- instruction hook cannot run inside it and a Lua count hook cannot preempt it,
 -- so a loop that doubles a string does its whole work inside one tick window.
--- Measured before this supervisor existed, against a 64MB ceiling: 4297359360
--- bytes of peak resident set, 65.6x the ceiling, and the child still reported
+-- Measured before this supervisor existed, against a 64MB ceiling: three runs of
+-- the doubling payload gave 2876342272, 4297375744 and 4297392128 bytes of peak
+-- resident set, 42.9x to 65.6x the ceiling, and the child still reported
 -- `timeout` and "memory ceiling exceeded" as though the ceiling had held. The
 -- reason that was true is that the ceiling was only ever checked between
 -- allocations, and this one is the allocation.
