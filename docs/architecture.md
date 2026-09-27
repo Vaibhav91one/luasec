@@ -112,7 +112,9 @@ records on a pipe.
               │                        string.rep/format and table.concat are size
               │                        checked, through the string metatable too
               │
-              └── wall clock watchdog (whole seconds), `ulimit -t`
+              ├── wall clock watchdog (whole seconds), `ulimit -t`
+              └── resident-set watchdog (samples the child, kills it past a
+                  threshold): /proc/<pid>/statm on Linux, `ps -o rss=` elsewhere
 ```
 
 What the payload is given is a fresh table with no metatable, so `_G` inside the
@@ -132,22 +134,43 @@ either. Every record additionally carries a per-run nonce the parent generated a
 only the child is given, so a line on the channel without it is dropped rather
 than parsed.
 
-Every bound is monotonic, which is what makes them un-defeatable: a payload can
-catch the error a limit raises and keep going, but the instruction counter, the
-memory reading and the load depth only ever climb, so the next check still fires.
+Every bound inside the child is monotonic, which is what makes those
+un-defeatable: a payload can catch the error a limit raises and keep going, but
+the instruction counter, the memory reading and the load depth only ever climb,
+so the next check still fires. The two watchers in the parent are not defeatable
+at all, for a different reason: they are separate processes whose only inputs
+are the child's pid and two constants the payload never sees.
 
 - **instructions** - a `debug.sethook` count hook, checked every 100 instructions.
   Re-installed on every coroutine, because the hook belongs to a thread and a new
   thread starts with none.
-- **memory** - `collectgarbage("count")` on every tick, plus size checks in front
-  of `string.rep`, `string.format` and `table.concat`, which are the standard
-  functions that allocate far more than their arguments describe inside a single
-  C call where no hook can see it coming. The `string` check is installed on the
-  metatable every string carries as well as on the `string` table, because
-  `("a"):rep(n)` never looks at the table. There is no kernel memory limit to fall
-  back on: macOS refuses `RLIMIT_AS` and `RLIMIT_DATA` outright. What this bounds
-  is the live Lua heap, not the resident set, and SECURITY.md has the measured
-  peak resident set for each reproducer.
+- **memory, heap** - `collectgarbage("count")` on every tick, plus size checks in
+  front of `string.rep`, `string.format` and `table.concat`, which are the
+  standard functions that allocate far more than their arguments describe inside a
+  single C call where no hook can see it coming. The `string` check is installed
+  on the metatable every string carries as well as on the `string` table, because
+  `("a"):rep(n)` never looks at the table. What this bounds is the live Lua heap,
+  not the resident set, and it is a check between allocations rather than a
+  limit: a payload that allocates inside one C call is not seen by it.
+- **memory, resident set** - enforced by the parent, because the heap check
+  cannot be and because nothing inside the child can preempt `..`. `OP_CONCAT` is
+  one C-level call, so a loop doubling a string finishes inside a single tick:
+  measured at 65.6x the ceiling before this watchdog existed. A second shell job
+  beside the wall-clock watchdog samples the child - the second field of
+  `/proc/<pid>/statm` on Linux, which is one `read` and no fork, and
+  `ps -o rss= -p <pid>` elsewhere, which is one fork - and kills it past
+  `rss_limit_kb` (default 1.5x the heap ceiling, above the 1.27x an honest
+  payload reaches). `ulimit -v` is set too and is a real kernel bound on Linux;
+  macOS refuses `RLIMIT_AS` and `RLIMIT_DATA` outright, which is why the
+  watchdog exists rather than only the ulimit. The bound is the threshold plus one
+  sampling window of allocation, and SECURITY.md has the measured peak for every
+  reproducer.
+- **source** - the payload the driver pastes in is size checked before the child
+  program exists, and every chunk the payload compiles is size checked again in
+  the child, so `load` of an assembled chunk is not a way around it. Every chunk
+  is also screened for a self-concatenation, `x = x .. x`, which is the shape
+  `..` takes when a payload uses it to double: a screen, not a bound, and
+  SECURITY.md says which of the two the measured numbers belong to.
 - **load depth** - every chunk the payload builds runs one level deeper.
 - **wall clock** - enforced by the child on every tick and by the parent, which
   kills the child, with `ulimit -t` as a kernel backstop. The child cannot be
@@ -160,15 +183,20 @@ The verdict vocabulary, in the order the runner decides it:
 
 | Verdict | Meaning |
 | --- | --- |
-| `rce` | the payload reached an execution sink: `os.execute`, `io.popen`, `package.loadlib`, `os.exit`, `dofile`, `loadfile`, `require`, or a precompiled chunk |
+| `rce` | the payload reached an execution sink: `os.execute`, `io.popen`, `package.loadlib`, `dofile`, `loadfile`, `require`, or a precompiled chunk |
+| `escape` | it tried to control the process it was running in, and executed nothing |
 | `partial` | it reached a capability that is not execution: a file read or write, or the debugger |
-| `timeout` | a bound stopped it: instructions, memory, wall clock or load depth |
+| `timeout` | a bound stopped it: instructions, heap ceiling, resident set, wall clock or load depth |
 | `benign` | it ran to completion and reached nothing |
 | `error` | the payload or the sandbox itself failed, including a child running under a dialect the sandbox does not support |
 
 Reaching a sink outranks being stopped: a payload that calls `os.execute` and then
 loops forever is `rce`, with the limit in `exit_reason`, because the thing that
-matters already happened.
+matters already happened. The ladder is ordered by how much each verdict
+overstates - execution first, then process control, then a limit stop, then any
+other reach - so that `os.exit`, which ends the process and runs nothing, is
+`escape` and not `rce`. `escape` fails a build on the same exit code as the rest:
+the snippet tried to leave the sandbox, and that is the finding.
 
 The transport is length framed (`<bytes>:<the bytes>`, or a bare integer) so a
 value containing spaces or newlines cannot be mistaken for a field boundary, and

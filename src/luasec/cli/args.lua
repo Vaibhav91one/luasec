@@ -126,8 +126,8 @@ analysis:
   --validate-timeout <ms>    wall clock for one validated payload (default 2000)
   --jobs <n>                 parallel workers
 
-validator exit codes: 0 benign, 1 rce, partial or timeout, 2 the payload or the
-sandbox itself failed.
+validator exit codes: 0 benign, 1 rce, escape, partial or timeout, 2 the payload or
+the sandbox itself failed.
 
 other:
   -h, --help                 this message
