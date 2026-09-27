@@ -45,6 +45,12 @@
 --                     (past the depth cap of 64); the innermost one holds
 --                     the string "os.execute" so the spec can prove the walk
 --                     really stops at the cap.
+--   unknown_version.luac DERIVED: sink_exec.luac with its version byte changed
+--                     from 0x54 to 0x99. A real PUC signature, a version byte
+--                     that names no release, and an "os.execute" sitting in
+--                     the constants. Read as 5.4 it fires 802; the spec asserts
+--                     it does not, because a layout we cannot justify must not
+--                     produce a finding.
 local OUT = "test/fixtures/bytecode"
 
 -- The 5.4 toolchain ships with the repo. The 5.1, 5.2 and 5.3 ones do not, so
@@ -303,6 +309,18 @@ write("hostile_depth.luac", join(
    {1},                                -- nupvalues of the main closure
    nested54(99)
 ))
+
+-- A real 5.4 chunk with its version byte replaced by one that names no
+-- release. Everything after byte 5 is still a well formed 5.4 header and a
+-- well formed 5.4 prototype holding "os.execute", so a reader that defaults
+-- to 5.4 gets a plausible 802 out of a file whose version it never knew.
+do
+   local handle = assert(io.open(OUT .. "/sink_exec.luac", "rb"))
+   local sink = handle:read("*a")
+   handle:close()
+   assert(sink:byte(5) == 0x54, "sink_exec.luac is no longer a 5.4 chunk")
+   write("unknown_version.luac", sink:sub(1, 4) .. str({0x99}) .. sink:sub(6))
+end
 
 print("fixtures written to " .. OUT)
 

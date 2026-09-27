@@ -15,6 +15,10 @@ analyzes. Specifically:
 - The static analyzer never executes the Lua it reads.
 - The payload validator (`--validate`) runs it in a separate process with `os` and
   `io` replaced by recorders, plus instruction, memory and wall-clock limits.
+- Fixture generation is exempt, as authoring rather than analysis:
+  `scripts/make-bytecode-fixtures.lua` shells out to `luac` (operands `%q` escaped)
+  to write committed test bytes. It is not on the analysis path, and nothing
+  `luasec` runs reaches it.
 - Analysis is offline: no network access, no writes outside the requested output.
 - Pattern matching is linear time; rules are checked against bounded input.
 

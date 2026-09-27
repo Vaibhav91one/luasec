@@ -78,8 +78,13 @@ statement about its data, not about its code.
   `certain` confidence and the 801 alongside it is the honest summary.
 - **803** fires when the chunk's flavor or version is not the interpreter we
   assume is running (5.4 by default; `analyze(paths, {assume_version = "5.1"})`
-  overrides it). It does not stop the constant table from being read: a 5.1
-  chunk that names a sink is still a 802.
+  overrides it). It also fires when the version byte names no release at all: the
+  signature is still Lua's, but the file's only statement about its own encoding
+  is one we cannot read, so the format demonstrably is not the one we assume.
+  A *known* older version does not stop the constant table from being read: a 5.1
+  chunk that names a sink is still a 802, because we have a reader for its
+  layout. An *unknown* version does stop it, because there is no reader, and
+  reporting a constant means claiming a layout the file never asserted.
 - **805** fires when a file carries a bytecode signature but cannot be read as
   one: a truncated header, a failed `LUAC_DATA` / `LUAC_INT` / `LUAC_NUM`
   marker, or a prototype walk that stopped at one of its caps (100000 constants,

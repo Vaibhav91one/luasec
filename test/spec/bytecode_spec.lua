@@ -72,6 +72,43 @@ describe("bytecode triage: a precompiled Lua chunk", function()
    end)
 end)
 
+describe("bytecode triage: a version byte we have no reader for", function()
+   it("is reported as a format that does not match the assumed interpreter", function()
+      -- The signature is real, so the file is bytecode and its source cannot be
+      -- analyzed (801). Its version byte names no release, so it is not the
+      -- interpreter we assume is running (803). It is emphatically not 805: we
+      -- are not saying the file failed to parse, we are saying we cannot claim
+      -- to know what it is.
+      local report = analyze("unknown_version")
+      assert_equal(codes(report), "801,803",
+         "an unrecognized version byte is a 801 and a 803")
+
+      local report_801, report_803
+      for _, finding in ipairs(report) do
+         if finding.code == "801" then report_801 = finding end
+         if finding.code == "803" then report_803 = finding end
+      end
+      assert_equal(report_801.name, "Lua (unknown version 0x99)",
+         "the 801 should say which version byte was read")
+      assert_true(report_803.assumed_version == nil or report_803.assumed_version == "5.4",
+         "the 803 names the interpreter we assume, got " .. tostring(report_803.assumed_version))
+   end)
+
+   it("does not report a sink read from a layout the version byte never claimed", function()
+      -- unknown_version.luac is sink_exec.luac with one byte changed, so the
+      -- string "os.execute" really is in the constant table. Reading it means
+      -- walking the file as 5.4 on no evidence but our own assumption, and
+      -- reporting a high severity finding off a layout we cannot justify.
+      local report = analyze("unknown_version")
+      assert_nil(codes(report):find("802", 1, true),
+         "constants must not be read from an unverified layout: " .. codes(report))
+
+      local report_802 = analyze("sink_exec")
+      assert_true(codes(report_802):find("802", 1, true) ~= nil,
+         "the same chunk with a version byte we do know is still a 802")
+   end)
+end)
+
 describe("bytecode triage: malformed and hostile input", function()
    local HOSTILE = {
       {"tiny", "eight bytes: a signature and nothing else"},
@@ -95,13 +132,26 @@ describe("bytecode triage: malformed and hostile input", function()
       end)
    end
 
-   it("gives every hostile chunk a 801 or a 805 and nothing else", function()
+   -- 803 joined the list because a chunk can carry a real PUC signature and a
+   -- version byte that names no release. hostile_random.luac is one: its byte 5
+   -- is random, so it is an unknown version by accident rather than by design.
+   -- 805 would say such a file is "not parseable Lua despite its name", which
+   -- is false -- the signature is there. 803 says what we can actually claim,
+   -- which is that we do not know what it is.
+   --
+   -- 802 stays off the list on purpose. It is the code that carries a severity
+   -- and a CWE, so producing one out of a layout the version byte never claimed
+   -- is exactly the failure this whole set exists to prevent.
+   it("gives every hostile chunk a 801, 803 or 805 and never a 802", function()
       for _, fixture in ipairs(HOSTILE) do
          local report = analyze(fixture[1])
          for _, finding in ipairs(report) do
-            assert_true(finding.code == "801" or finding.code == "805",
+            assert_true(
+               finding.code == "801" or finding.code == "803" or finding.code == "805",
                fixture[1] .. " produced an unexpected " .. finding.code)
          end
+         assert_nil(codes(report):find("802", 1, true),
+            fixture[1] .. " reported a sink read from a layout it never established")
       end
    end)
 end)

@@ -112,6 +112,33 @@ function triage.triage(bytes, opts)
    if not id then return findings end
 
    local parsed, reason = header.parse(bytes, id)
+
+   -- A PUC version byte we have no reader for is not a parse failure. The
+   -- signature is ours, so the file is bytecode and its source cannot be
+   -- analyzed, and the honest summary of the rest is that we cannot say which
+   -- format it is. 805 would assert the file failed to parse, which is a
+   -- claim we cannot make either; 803 is the one that is true.
+   --
+   -- `detect` decides this, and it is the only thing that can: the version byte
+   -- is the file's only statement about its own encoding.
+   if not parsed and id.flavor == "lua" and not id.known then
+      findings[#findings + 1] = finding("801", {
+         name = id.version_string,
+         flavor = id.flavor,
+         version = id.version,
+      })
+      findings[#findings + 1] = finding("803", {
+         name = id.version_string,
+         assumed_version = opts.assume_version or header.ASSUMED_VERSION,
+         reason = reason,
+      })
+      -- No prototype walk, and that is the point. `header.parse` refused
+      -- because the layout is not one we have a reader for, so every constant
+      -- we could report from here would have been read with a layout the file
+      -- never claimed -- and would carry a finding's severity with it.
+      return findings
+   end
+
    if not parsed then
       -- A signature we cannot follow. Not a source parse error, and not a chunk
       -- we can describe either.

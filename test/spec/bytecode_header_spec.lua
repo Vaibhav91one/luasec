@@ -74,6 +74,45 @@ describe("bytecode header", function()
       assert_equal(parsed.format, 0)
    end)
 
+   -- The LuaJIT flags byte, from lj_bcdump.h. Four independent bits, and the
+   -- two this module reports are not adjacent, which is what makes them easy to
+   -- confuse:
+   --
+   --   BCDUMP_F_BE    0x01   the chunk is big endian
+   --   BCDUMP_F_STRIP 0x02   the debug information has been stripped
+   --   BCDUMP_F_FFI   0x04   the chunk uses the FFI
+   --   BCDUMP_F_FR2   0x08   frame 2 of the bytecode, the 5.2+ compatible form
+   local function luajit_chunk(flags)
+      return "\27LJ\2" .. string.char(flags)
+   end
+
+   it("reports a LuaJIT chunk as stripped only when the strip flag is set", function()
+      local CASES = {{0x02, true}, {0x06, true}, {0x0A, true}, {0x00, false},
+                     {0x01, false}, {0x04, false}, {0x08, false}}
+      for _, case in ipairs(CASES) do
+         local parsed = header.parse(luajit_chunk(case[1]))
+         assert_equal(parsed.stripped, case[2],
+            string.format("flags 0x%02X", case[1]))
+      end
+   end)
+
+   it("does not report a LuaJIT chunk as stripped because it is big endian", function()
+      -- BCDUMP_F_BE is bit 0 and BCDUMP_F_STRIP is bit 1. Reading bit 0 here
+      -- calls every big endian chunk stripped, which is a claim about the file
+      -- that the file does not make.
+      local parsed = header.parse(luajit_chunk(0x01))
+      assert_equal(parsed.stripped, false, "big endian is not the strip flag")
+   end)
+
+   it("reports the byte order of a LuaJIT chunk from its endianness flag", function()
+      -- BCDUMP_F_BE is in the same byte we already read, so claiming a fixed
+      -- little endian ignores information the file handed us.
+      assert_equal(header.parse(luajit_chunk(0x00)).endian, "little")
+      assert_equal(header.parse(luajit_chunk(0x01)).endian, "big")
+      assert_equal(header.parse(luajit_chunk(0x03)).endian, "big",
+         "a chunk that is both big endian and stripped is still big endian")
+   end)
+
    it("refuses a chunk that ends inside the header", function()
       local parsed, reason = header.parse(read_fixture("truncated"))
       assert_nil(parsed)
@@ -96,6 +135,35 @@ describe("bytecode header", function()
       local parsed, reason = header.parse(42)
       assert_nil(parsed)
       assert_equal(reason, "not a byte string")
+   end)
+
+   it("refuses a chunk whose version byte names no release", function()
+      -- The signature is real and everything after the version byte is a well
+      -- formed 5.4 header, so a reader that falls back to 5.4 would happily
+      -- return a 5.4 header here. Parsing it would be a claim we cannot make:
+      -- the version byte is the only statement the file makes about its own
+      -- layout, and we do not know what this one means.
+      local parsed, reason = header.parse(read_fixture("unknown_version"))
+      assert_nil(parsed, "a version byte we have no reader for must be refused")
+      assert_true(reason ~= nil, "a refusal needs a reason")
+      assert_true(reason:find("0x99", 1, true) ~= nil,
+         "the reason should name the version byte it refused, got: " .. tostring(reason))
+   end)
+
+   it("refuses a version byte outside every PUC release", function()
+      -- Built from a real 5.4 chunk with only the version byte changed, so the
+      -- version byte is the single reason for the refusal. A shorter hand built
+      -- string would be refused for running out of bytes and pass for the
+      -- wrong reason.
+      local hello = read_fixture("hello")
+      for _, version_byte in ipairs({0x00, 0x50, 0x55, 0x60, 0x99, 0xFF}) do
+         local bytes = hello:sub(1, 4) .. string.char(version_byte) .. hello:sub(6)
+         local parsed, reason = header.parse(bytes)
+         assert_nil(parsed,
+            string.format("version byte 0x%02X should have been refused", version_byte))
+         assert_true(reason:find(string.format("0x%02X", version_byte), 1, true) ~= nil,
+            "the reason should name the byte it refused, got: " .. tostring(reason))
+      end
    end)
 end)
 

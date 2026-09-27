@@ -49,11 +49,18 @@ describe("luasec command line", function()
    end)
 
    it("survives a hostile bytecode chunk and exits 1 rather than crashing", function()
+      -- hostile_random.luac is 4 KB of noise behind a real signature, so its
+      -- version byte is an unknown one. It is reported as bytecode (801) whose
+      -- format we cannot claim to match (803); it used to be an 805, which said
+      -- the file was not parseable Lua, and it does carry a Lua signature.
       local out, code = harness.cli({ "test/fixtures/bytecode/hostile_random.luac" })
       assert_equal(code, 1, out)
       assert_no_match(out, "stack traceback", "a malformed chunk must not raise")
       assert_no_match(out, "attempt to", out)
-      assert_match(out, "805", out)
+      assert_match(out, "801", out)
+      assert_match(out, "803", out)
+      assert_no_match(out, "802", out)
+      assert_no_match(out, "901", out)
    end)
 
    it("reports a 5.1 chunk as bytecode and a version mismatch, not as a parse error", function()

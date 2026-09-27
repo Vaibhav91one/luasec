@@ -34,7 +34,12 @@ header.LUAC_NUM = 370.5
 header.ASSUMED_FLAVOR = "lua"
 header.ASSUMED_VERSION = "5.4"
 
-local PUC_51, PUC_52, PUC_53 = 0x51, 0x52, 0x53
+local PUC_51, PUC_52, PUC_53, PUC_54 = 0x51, 0x52, 0x53, 0x54
+
+-- Which reader handles which PUC version byte, and under what name it parses.
+-- Populated below, once both readers exist; `header.parse` only looks at it at
+-- call time.
+local PUC_READERS
 
 -- A failure is (nil, reason). Reasons are short and safe to show in a report.
 local function fail(reason)
@@ -72,16 +77,20 @@ function header.parse(bytes, id)
    if id.flavor == "luajit" then
       return header.parse_luajit(bytes, id)
    end
-   if id.version_byte == PUC_51 then
-      return header.parse_legacy(bytes, id, "5.1")
+
+   -- Deliberately total: there is no fallback branch, and no "assume the
+   -- newest" default. A version byte with no reader here is a chunk whose
+   -- layout we cannot justify, and guessing would be worse than refusing,
+   -- because the version byte is the only statement the file makes about its
+   -- own encoding. The prototype walk reads the file with `parsed.version`, so
+   -- a guess made here turns into a confident walk of a layout the file never
+   -- claimed, and into findings drawn from it.
+   local reader = PUC_READERS[id.version_byte]
+   if not reader then
+      return fail(string.format("no header reader for PUC version byte 0x%02X",
+         id.version_byte))
    end
-   if id.version_byte == PUC_52 then
-      return header.parse_legacy(bytes, id, "5.2")
-   end
-   if id.version_byte == PUC_53 then
-      return header.parse_marked(bytes, id, "5.3")
-   end
-   return header.parse_marked(bytes, id, "5.4")
+   return reader.read(bytes, id, reader.version)
 end
 
 -- ------------------------------------------------------------- 5.1 and 5.2
@@ -182,6 +191,17 @@ function header.parse_marked(bytes, id, version)
    }
 end
 
+-- The version byte is the file's only statement about its own encoding, so
+-- dispatch is total: every byte we are willing to name, mapped to the reader
+-- that understands it. A byte missing from this table is a chunk we refuse,
+-- never one we read as the nearest neighbour.
+PUC_READERS = {
+   [PUC_51] = {version = "5.1", read = header.parse_legacy},
+   [PUC_52] = {version = "5.2", read = header.parse_legacy},
+   [PUC_53] = {version = "5.3", read = header.parse_marked},
+   [PUC_54] = {version = "5.4", read = header.parse_marked},
+}
+
 -- A chunk is only what it claims when both markers survived. A byte swapped
 -- LUAC_INT is the common case (a big endian producer, or a file that was
 -- shuffled), so it gets its own message rather than "corrupt".
@@ -208,12 +228,30 @@ end
 -- the chunk was stripped, a chunk name. We stop there: the BC format after
 -- that is a different, undocumented layout, and guessing at it is how a
 -- scanner turns into a crash.
+--
+-- The flags byte is four independent bits (lj_bcdump.h), not a set of
+-- enumerated modes, so each is tested where it sits rather than by matching the
+-- whole byte:
+--
+--   BCDUMP_F_BE    0x01   the chunk is big endian
+--   BCDUMP_F_STRIP 0x02   the debug information has been stripped
+--   BCDUMP_F_FFI   0x04   the chunk uses the FFI
+--   BCDUMP_F_FR2   0x08   frame 2 of the bytecode, the 5.2+ compatible form
 function header.parse_luajit(bytes, id)
    local pos = 4  -- ESC "LJ" consumed
    local version_byte, pos = header.read_byte(bytes, pos, "the LuaJIT version byte")
    if not version_byte then return nil, pos end
    local flags, pos = header.read_byte(bytes, pos, "the LuaJIT flags byte")
    if not flags then return nil, pos end
+
+   local BCDUMP_F_BE, BCDUMP_F_STRIP = 0x01, 0x02
+
+   -- One named bit of the flags byte. Arithmetic rather than a bitwise `&`,
+   -- which is 5.3 and later only, so the reader does not tie this module to a
+   -- Lua version while it is busy identifying them.
+   local function flag(bit)
+      return math.floor(flags / bit) % 2 == 1
+   end
 
    return {
       flavor = "luajit",
@@ -224,8 +262,12 @@ function header.parse_luajit(bytes, id)
       luac_data = nil,
       luac_int = nil,
       luac_number = nil,
-      endian = "little",
-      stripped = (flags % 2) == 1,
+      -- Both of these are read out of the byte rather than assumed. A fixed
+      -- "little" would be a claim about the file that the flags byte directly
+      -- contradicts, and reading BCDUMP_F_BE as the strip flag would be a
+      -- second one: every big endian chunk would be called stripped.
+      endian = flag(BCDUMP_F_BE) and "big" or "little",
+      stripped = flag(BCDUMP_F_STRIP),
       end_offset = pos - 1,
    }
 end
