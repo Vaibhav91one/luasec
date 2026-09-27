@@ -13,10 +13,12 @@ local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
 
 -- A verdict is an outcome, not a threshold: anything short of "benign" means the
 -- payload did something worth failing a build over, and a failed payload or a
--- broken sandbox is a different thing again.
+-- broken sandbox is a different thing again. `escape` is a process-control
+-- attempt that executed nothing, and it fails the build for the same reason any
+-- other reach does: the snippet tried to leave the sandbox.
 local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
-                      partial = EXIT_FINDINGS, timeout = EXIT_FINDINGS,
-                      error = EXIT_ERROR}
+                      escape = EXIT_FINDINGS, partial = EXIT_FINDINGS,
+                      timeout = EXIT_FINDINGS, error = EXIT_ERROR}
 
 -- Which fields of a validation verdict are text the payload chose. It is rendered
 -- into the JSON rather than left to documentation, because the JSON is what a

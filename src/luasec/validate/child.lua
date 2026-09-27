@@ -45,17 +45,24 @@ local DEFAULT_SOURCE = "luasec-payload"
 --
 --   exec      the payload reached an execution sink; this is what makes a
 --             verdict `rce`
+--   process   it tried to control the process it is running in
 --   fs_read   it reached data it should not have been able to read
 --   fs_write  it reached something it should not have been able to change
 --   probe     it probed the sandbox itself
 --
 -- `escape` marks the calls that try to leave the sandbox rather than to do their
 -- job: process control, native code, or the debugger.
+--
+-- `os.exit` is `process` and not `exec`, and the distinction is the whole reason
+-- the kind exists. It ends the process; it runs nothing. Reporting it as `exec`
+-- made a snippet that asked to be terminated indistinguishable from one that ran
+-- a command, in the single field an operator is most likely to act on. A payload
+-- that reaches both still verdicts `rce`, because `exec` outranks `process`.
 local CATALOGUE = {
    ["os.execute"]      = {kind = "exec", escape = true},
    ["io.popen"]        = {kind = "exec", escape = true},
    ["package.loadlib"] = {kind = "exec", escape = true},
-   ["os.exit"]         = {kind = "exec", escape = true},
+   ["os.exit"]         = {kind = "process", escape = true},
    ["os.remove"]       = {kind = "fs_write"},
    ["os.rename"]       = {kind = "fs_write"},
    ["os.tmpname"]      = {kind = "fs_write"},
@@ -559,9 +566,18 @@ local function reportable(value)
    return nil
 end
 
+-- The order of this ladder is the order of how much a verdict overstates.
+-- `exec` first, because reaching an execution sink is the only thing here that
+-- means code ran. `process` second, so a payload that ended the process without
+-- executing anything is reported as an escape rather than as an execution. A
+-- limit stop third, so a payload the sandbox had to interrupt is not described by
+-- the sink it happened to reach on its way out.
 local function decide(failed)
    for _, sink in ipairs(sinks) do
       if sink.kind == "exec" then return "rce" end
+   end
+   for _, sink in ipairs(sinks) do
+      if sink.kind == "process" then return "escape" end
    end
    if stop_reason then return "timeout" end
    if #sinks > 0 then return "partial" end
