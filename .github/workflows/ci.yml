@@ -1,0 +1,43 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Lua and fetch vendored luacheck
+        run: make lua vendor
+
+      - name: Vendored luacheck is unmodified
+        run: make vendor-verify
+
+      - name: A failing spec must fail the runner
+        run: make runner-selftest
+
+      - name: Specs
+        run: make test
+
+      - name: Adversarial specs
+        run: make adversarial
+
+      - name: TDD proof
+        if: github.event_name == 'pull_request'
+        run: make tdd-proof "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Scan the project with itself
+        run: make selfscan
+
+      - name: Export SARIF
+        if: always()
+        run: |
+          ./bin/luasec --format sarif -o luasec.sarif src/ || true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: luasec.sarif
+          category: luasec

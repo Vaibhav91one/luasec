@@ -1,0 +1,24 @@
+name: Bug
+about: Something in luasec behaves wrongly
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what did luasec do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Lua that triggers it
+      description: The smallest Lua snippet that shows the behaviour.
+      render: lua
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: luasec version
+    validations:
+      required: true

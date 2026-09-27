@@ -20,6 +20,23 @@ local function sort_findings(findings)
    return findings
 end
 
+--- The rule catalogue: every warning code with its severity, confidence and CWE.
+-- Callers use this to build documentation, editor integrations and dashboards.
+function api.rule_catalogue()
+   local catalogue = {}
+   for _, spec in ipairs(codes.all()) do
+      catalogue[#catalogue + 1] = {
+         code = spec.code,
+         severity = spec.severity,
+         confidence = spec.confidence,
+         cwe = spec.cwe,
+         message = spec.message,
+         fields = spec.fields,
+      }
+   end
+   return catalogue
+end
+
 --- Analyze a single Lua source string.
 -- Returns an array of findings, sorted by location.
 function api.check_source(source, opts)

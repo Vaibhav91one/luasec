@@ -12,6 +12,7 @@ local FLAGS_WITH_VALUE = {
    ["--fail-on"] = "fail_on",
    ["--rules"] = "rules",
    ["--output"] = "output",
+   ["-o"] = "output",
    ["--jobs"] = "jobs",
    ["--max-iterations"] = "max_iterations",
    ["--min-length"] = "min_length",

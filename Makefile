@@ -135,3 +135,7 @@ corpus: scripts/clone-corpus.sh
 .PHONY: clean
 clean:
 	rm -rf build
+
+.PHONY: selfscan
+selfscan: lua vendor
+	@./bin/luasec --format json -o /dev/null src/ && echo "selfscan: ok"
