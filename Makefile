@@ -123,8 +123,15 @@ ci-verify: vendor-verify runner-selftest test adversarial
 # coupled to the new behavior rather than to the old code.
 .PHONY: tdd-proof
 tdd-proof:
-	@if [ -z "$(BASE)" ] || [ -z "$(HEAD)" ]; then echo "usage: make tdd-proof BASE HEAD"; exit 2; fi
-	@bash scripts/tdd-proof.sh "$(BASE)" "$(HEAD)"
+	@base="$(BASE)"; head="$(HEAD)"; \
+	if [ -z "$$base" ] || [ -z "$$head" ]; then \
+	   set -- $(filter-out tdd-proof,$(MAKECMDGOALS)); \
+	   base=$$(echo "$$1" | sed 's/^BASE=//'); head=$$(echo "$$2" | sed 's/^HEAD=//'); \
+	fi; \
+	if [ -z "$$base" ] || [ -z "$$head" ]; then \
+	   echo "usage: make tdd-proof BASE HEAD   (or: make tdd-proof BASE=... HEAD=...)"; exit 2; \
+	fi; \
+	bash scripts/tdd-proof.sh "$$base" "$$head"
 
 # ---------------------------------------------------------------- corpora
 
