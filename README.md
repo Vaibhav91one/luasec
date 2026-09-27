@@ -32,9 +32,16 @@ No luarocks and no C dependencies beyond a locally compiled Lua.
 ```sh
 bin/luasec rootfs/usr/lib/lua/handler.lua
 bin/luasec --format sarif --output findings.sarif rootfs/
+bin/luasec --validate candidate-payload.lua
 ```
 
 Exit codes: `0` clean, `1` findings at or above the threshold, `2` error.
+
+`--validate` is the dynamic half: it runs one snippet in a child process with
+`os` and `io` replaced by recorders, and reports whether the snippet actually
+reaches execution. It exits `0` for benign, `1` for rce, partial or timeout and
+`2` when the payload or the sandbox itself failed. See
+[docs/architecture.md](docs/architecture.md#the-payload-validator).
 
 ## Why firmware
 

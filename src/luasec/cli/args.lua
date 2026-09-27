@@ -16,6 +16,7 @@ local FLAGS_WITH_VALUE = {
    ["--jobs"] = "jobs",
    ["--max-iterations"] = "max_iterations",
    ["--min-length"] = "min_length",
+   ["--validate-timeout"] = "validate_timeout",
 }
 
 local BOOLEAN_FLAGS = {
@@ -24,6 +25,7 @@ local BOOLEAN_FLAGS = {
    ["-h"] = "help",
    ["--whole-program"] = "whole_program",
    ["--validate"] = "validate",
+   ["--stdin"] = "stdin",
    ["--no-raw-scan"] = "no_raw_scan",
    ["--no-dynamic-sinks"] = "no_dynamic_sinks",
    ["--quiet"] = "quiet",
@@ -120,7 +122,12 @@ analysis:
   --no-dynamic-sinks         only report sinks fed by known untrusted data
   --no-raw-scan              skip the lexical scan used when parsing fails
   --validate                 run the payload validator instead of static analysis
+  --stdin                    with --validate, read the payload from standard input
+  --validate-timeout <ms>    wall clock for one validated payload (default 2000)
   --jobs <n>                 parallel workers
+
+validator exit codes: 0 benign, 1 rce, partial or timeout, 2 the payload or the
+sandbox itself failed.
 
 other:
   -h, --help                 this message

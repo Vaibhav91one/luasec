@@ -29,6 +29,10 @@ Both work on the same parsed program.
     |
     v
   [7] report               plain, JSON, SARIF (with codeFlows), HTML
+
+  a single candidate payload, separately:
+
+  source ──▶ [8] validator  child process, recorders for os/io, bounded
 ```
 
 ## Why luacheck is the base
@@ -88,9 +92,74 @@ firmware tree:
 3. **Sink-specific sanitizers**, so recognizing a quoting helper does not
    silence an unrelated class of bug.
 
+## The payload validator
+
+The static pass answers "could this data reach execution". The validator answers
+the complementary question: given a candidate payload, does running it actually
+reach execution, and how far does it get before it is stopped.
+
+It is the only part of luasec that executes anything, so it is built around one
+rule: **the payload never runs in the analyzer's process.** `validate/driver.lua`
+assembles `validate/child.lua`, the payload and the limits into a single
+`lua -e` program, spawns it, and reads back a verdict. The parent only ever sees
+records on a pipe.
+
+```
+  source ──▶ driver ──▶ [ lua -e child.lua + payload + limits ] ──▶ records ──▶ verdict
+              │                    │
+              │                    └── os, io, package, debug, dofile, loadfile,
+              │                        require, load(binary) are recorders;
+              │                        string.rep/format are size checked
+              │
+              └── wall clock watchdog, `ulimit -t`, `ulimit -v`
+```
+
+What the payload is given is a fresh table with no metatable, so `_G` inside the
+payload is that table and there is no `__index` fallback to the real globals. The
+real `io`, `os`, `package` and `debug` are captured in locals before it runs, and
+the payload only ever sees recorders that log the call, hand back something
+harmless and let the payload carry on - so the rest of its behaviour stays
+visible.
+
+Every bound is monotonic, which is what makes them un-defeatable: a payload can
+catch the error a limit raises and keep going, but the instruction counter, the
+memory reading and the load depth only ever climb, so the next check still fires.
+
+- **instructions** - a `debug.sethook` count hook, checked every 100 instructions.
+  Re-installed on every coroutine, because the hook belongs to a thread and a new
+  thread starts with none.
+- **memory** - `collectgarbage("count")` in the same hook, plus size checks in
+  front of `string.rep` and `string.format`, which are the two standard functions
+  that turn a small argument into a huge allocation inside one C call where no
+  hook can see it coming. `ulimit -v` is a backstop where the platform enforces it.
+- **load depth** - every chunk the payload builds runs one level deeper.
+- **wall clock** - enforced by the parent, which kills the child, with `ulimit -t`
+  as a backstop. The child cannot be trusted to notice time passing, because a
+  `while true do end` in a C-level loop would never reach a hook.
+
+The verdict vocabulary, in the order the runner decides it:
+
+| Verdict | Meaning |
+| --- | --- |
+| `rce` | the payload reached an execution sink: `os.execute`, `io.popen`, `package.loadlib`, `os.exit`, `dofile`, `loadfile`, `require`, or a precompiled chunk |
+| `partial` | it reached a capability that is not execution: a file read or write, or the debugger |
+| `timeout` | a bound stopped it: instructions, memory, wall clock or load depth |
+| `benign` | it ran to completion and reached nothing |
+| `error` | the payload or the sandbox itself failed |
+
+Reaching a sink outranks being stopped: a payload that calls `os.execute` and then
+loops forever is `rce`, with the limit in `exit_reason`, because the thing that
+matters already happened.
+
+The transport is length framed (`<bytes>:<the bytes>`, or a bare integer) so a
+value containing spaces or newlines cannot be mistaken for a field boundary, and
+what the payload printed is captured and reported as `output` rather than written
+to the report channel - a payload that could write there could forge a verdict.
+
 ## What is out of scope
 
-- No execution of analyzed code in the static path.
+- No execution of analyzed code in the static path. `--validate` is a separate,
+  explicit mode that runs one snippet, in a child process, under the bounds above.
 - No whole-program analysis by default: `--whole-program` resolves calls across
-  files, which is slower and needs a whole rootfs.
+  files, which is slower and needs a real rootfs.
 - Bytecode is triaged, not decompiled.
