@@ -91,12 +91,14 @@ local function collect_spec_files(dirs)
       if dir:match("_spec%.lua$") and is_file(dir) then
          files[#files + 1] = dir
       else
-      local pipe = io.popen("find '" .. dir:gsub("'", "'\\''") .. "' -name '*_spec.lua' -type f 2>/dev/null | LC_ALL=C sort")
-      if pipe then
-         for line in pipe:lines() do
-            if line ~= "" then table.insert(files, line) end
+         local pipe = io.popen("find '" .. dir:gsub("'", "'\\''") ..
+            "' -name '*_spec.lua' -type f 2>/dev/null | LC_ALL=C sort")
+         if pipe then
+            for line in pipe:lines() do
+               if line ~= "" then table.insert(files, line) end
+            end
+            pipe:close()
          end
-         pipe:close()
       end
    end
    return files
