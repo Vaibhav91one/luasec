@@ -74,6 +74,50 @@ Test names describe behavior, not mechanism:
 A spec file that must fail is named `test/spec/zz_failing_spec.lua` and is excluded
 from `make test`; `make runner-selftest` runs it and asserts a non-zero exit.
 
+## Measuring memory - read this before quoting any RSS number
+
+`/usr/bin/time -l` **misreports the unit of its `maximum resident set size` field
+on macOS.** On this build it prints **bytes**, not the kilobytes macOS documents
+for it. The trap is the obvious one: read the field as kilobytes and every number
+is inflated by 1024x. `/usr/bin/time -l build/lua-5.4.9/src/lua -e 'print("hi")'`
+prints `1687552`, which looks like 1.6GB and is actually 1.6MB - the real value.
+It is not an offset and it is not a broken tool; it is a different unit than the
+one its own documentation implies. Read the raw field as **bytes**.
+
+Do not trust the byte reading on the strength of that argument alone, because
+`time` is a single source. Measure with `getrusage` and check that it agrees:
+
+    cat > /tmp/peak.py <<'PY'
+    import resource, subprocess, sys, time
+    cmd = sys.argv[1:]
+    t0 = time.time()
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    el = time.time() - t0
+    ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+    print("exit=%d  elapsed=%.2fs  peak_child_rss=%.1f MB" % (p.returncode, el, ru.ru_maxrss/1048576.0))
+    for line in (p.stdout + p.stderr).strip().splitlines()[:8]: print("   ", line)
+    PY
+
+    python3 /tmp/peak.py ./bin/luasec --validate <payload>
+
+Calibrate any new harness on something with a known footprint before trusting it
+- a payload whose size you chose yourself is the only honest control.
+
+Two traps in `getrusage` itself, both of which have bitten this repo:
+
+- `RUSAGE_CHILDREN` is a **cumulative high-water mark across every child the
+  process has ever reaped**, and it never resets. Sweep several payloads inside
+  one Python process and the first large one poisons every row after it. Sample in
+  a fresh process per measurement, as `peak.py` above does.
+- On Linux `ru_maxrss` is in kilobytes; on macOS it is in bytes. The same script
+  is off by 1024x across platforms.
+
+Report the **worst of at least 3 runs**, never a single sample. The resident set
+of the validator's doubling payload on this machine ranged 103.0MB to 178.69MB
+over batches of 10 - a 1.7x spread inside one configuration. A single run is not
+a measurement of a distribution this wide, and a number quoted from one is not
+reproducible.
+
 ## Warning codes
 
 | Range | Meaning |

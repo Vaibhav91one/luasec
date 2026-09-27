@@ -160,6 +160,14 @@ of the ten:
 | 20 | 478.14MB | 7.47x |
 | 100 | 1576.52MB | 24.63x |
 
+Re-measured with `getrusage(RUSAGE_CHILDREN)`, 3 runs each, this table comes back
+144.5MB / 160.8MB / 495.8MB / 1651.0MB. The shape and the order of magnitude are
+what the table argues for and both survive; the 1ms and 5ms rows move because the
+machine was not loaded, and the 20ms and 100ms rows move the other way because
+they are dominated by a 1.6GB window that is sensitive to exactly when the sample
+lands. Same code, same payload, and the conclusion - the window is the bound - does
+not depend on which of these numbers you take.
+
 The last row is the point of stating the bound in those terms rather than as a
 number: the window is the bound, and a 100ms window is a 1.6GB window. It is
 still bounded - the wall clock and the child's own heap ceiling both still hold -
@@ -185,6 +193,16 @@ setting is 2.79x, not 2.10x, and that is the one to plan around. A caller who
 wants a hard number should read `rss_limit_kb` for what it is: the kill point,
 not the peak.
 
+A later independent 30-run re-measurement of that same payload, cross-checked with
+`getrusage` rather than `time`, gave 103.0MB / 128.7MB / 142.7MB / 151.0MB
+min/median/p90/max, and did not reproduce the 178.69MB sample. 2.79x therefore
+still stands as the worst number observed, and it is still a loaded-machine number;
+what the re-measurement adds is that on an otherwise idle machine the ceiling of
+the distribution sits nearer 2.36x. Both are the same code path. The published
+figure stays at 2.79x, because a bound should be planned against the worst thing
+seen, not the typical one - but the honest description of it is "worst observed,
+under load", not "typical".
+
 ### Peak resident set, measured
 
 macOS 26.5 / arm64, `/usr/bin/time -l` around the whole run, 10 runs each,
@@ -192,6 +210,17 @@ default 64MB ceiling and default 98304kB threshold. `max` is the worst of the te
 the last column is that worst case against the 64MB ceiling. The spread matters
 as much as the worst case and is why the worst case is the one published: the
 doubling row ranged from 114.12MB to 149.86MB over the ten.
+
+**The unit that number is in.** On this macOS build `/usr/bin/time -l` prints its
+`maximum resident set size` field in **bytes**, not in the kilobytes macOS
+documents for it. Read as kilobytes it looks broken by a factor of 1024 - the
+`lua -e 'print("hi")'` baseline is a 6-digit number that is 1.6MB, not 1.6GB.
+Every figure in this section is the raw field read as bytes. That is not a
+convenient reading, it is the checked one: `getrusage(RUSAGE_CHILDREN)` around the
+same command reproduces each row to three significant figures, and on a
+deliberately pinned workload - a bare interpreter holding one live 100MiB string -
+the two agree exactly, 211484672 bytes and 201.7MB. So these numbers are measured
+twice by independent methods and are not resting on one tool's unit.
 
 | Payload | Verdict | max peak RSS | x ceiling |
 | --- | --- | --- | --- |
@@ -202,6 +231,14 @@ doubling row ranged from 114.12MB to 149.86MB over the ten.
 | `while true do io.open(...) end` | `timeout`, 34376 sink records | 35.41MB | 0.55x |
 | the doubling payload, `s = s .. s` | `timeout`, refused before compiling | 3.16MB | 0.05x |
 | the same loop as a table field, so the screen cannot see it | `timeout`, killed by the parent | 149.86MB | 2.34x |
+
+Re-measured independently with `getrusage`, 10 runs each, worst of the ten:
+3.1MB / 3.1MB / 67.2MB / 81.5MB / 33.6MB / 3.1MB / 134.8MB. Every row lands on
+its published figure except two, and neither is a disagreement: the flood row is
+33.6MB where this says 35.41MB (the same 34376 records, and the difference is
+parent-side buffer growth), and the last row is the wide one that the next
+paragraph is about. The five rows that are the *point* of the table - the ones
+that show a refusal happening before an allocation - reproduce exactly.
 
 Two things that table does not hide:
 
