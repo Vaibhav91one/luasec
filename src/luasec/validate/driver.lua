@@ -257,6 +257,7 @@ local function resident_watchdog(limits, token)
    return {
       "(",
       string.format("__luasec_close=%d", math.floor(limits.rss_limit_kb / 2)),
+      "__luasec_seen=0",
       "while kill -0 $__luasec_child 2>/dev/null; do",
       "__luasec_rss=''",
       -- Linux: statm's second field is resident pages, read by the shell's own
@@ -279,7 +280,7 @@ local function resident_watchdog(limits, token)
       -- resident-set kill is silently reported as the wall clock instead.
       "if [ -n \"$__luasec_rss\" ]; then",
       "__luasec_rss=$((__luasec_rss))",
-      "__luasec_quiet=0",
+      "__luasec_seen=1",
       "if [ \"$__luasec_rss\" -gt " .. limits.rss_limit_kb .. " ]; then",
       -- Written before the kill, and the parent reads to end of pipe, so the
       -- reason survives a child that never got to report a verdict of its own.
@@ -296,14 +297,19 @@ local function resident_watchdog(limits, token)
          .. "; exit 0; }",
       "fi",
       "else",
-      -- No reading at all: `ps` is absent, or the child has not started. Fifty
-      -- of those in a row is a platform that cannot report a resident set, and
-      -- saying so is better than a bound that silently is not there.
+      -- No reading. That is a child that has not started, a child that has become
+      -- a zombie (`ps` reports nothing for one, measured), or a platform with no
+      -- way to report a resident set at all. Only the last is worth a word, and
+      -- only a platform that has never answered once can be that - which is what
+      -- `__luasec_seen` distinguishes, so that a payload which dies at the moment
+      -- it is first sampled is not reported as a platform that cannot be measured.
+      "if [ $__luasec_seen -eq 0 ]; then",
       "__luasec_quiet=$((__luasec_quiet + 1))",
       "if [ $__luasec_quiet -ge " .. RSS_UNAVAILABLE_AFTER .. " ]; then",
       "printf '" .. RSSWATCH .. " " .. token
          .. " %d:no way to read a process resident set on this platform\\n' 0",
       "exit 0",
+      "fi",
       "fi",
       "sleep " .. poll .. " 2>/dev/null || { printf '" .. RSSWATCH .. " " .. token
          .. " %d:cannot sleep for a fraction of a second\\n' " .. limits.rss_poll_ms
