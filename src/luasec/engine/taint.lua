@@ -71,7 +71,9 @@ local function new_state()
       value_taint = setmetatable({}, {__mode = "k"}),  -- luacheck value -> taint set
       global_taint = {},                              -- dotted global path -> taint set
       table_fields = setmetatable({}, {__mode = "k"}), -- Table node -> {key -> taint set}
+      global_tables = {},                              -- global name -> Table node
       findings = {},
+      reported = {},                                  -- dedupe: one finding per site
    }
 end
 
@@ -128,6 +130,62 @@ local function callee_path(node, item, state, depth)
    return direct
 end
 
+-- The Table node a base expression refers to, following locals and globals.
+local function resolve_table_node(base, item, state)
+   if not base then return nil end
+   if base.tag == "Table" then return base end
+
+   if base.tag == "Id" then
+      if base.var then
+         -- Reaching definitions first: this keeps table identity flow-sensitive.
+         if item and item.used_values then
+            for _, value in ipairs(item.used_values[base.var] or {}) do
+               if value.node and value.node.tag == "Table" then return value.node end
+            end
+         end
+
+         -- Fallback for the module pattern, `M.go = function() ... M ... end`.
+         -- luacheck deliberately leaves an upvalue access unresolved there, to
+         -- avoid reasoning about a self-referential table, so there is no
+         -- reaching definition to read. We resolve the table's identity from the
+         -- variable's definitions instead, and only when they all name the same
+         -- table: a variable that is reassigned to a different table is left
+         -- unresolved rather than resolved wrongly.
+         local single = nil
+         for _, value in ipairs(base.var.values or {}) do
+            if value.node and value.node.tag == "Table" then
+               if single and single ~= value.node then return nil end
+               single = value.node
+            end
+         end
+         if single then return single end
+      else
+         return state.global_tables[base[1]]
+      end
+   end
+
+   if base.tag == "Index" then
+      local outer = resolve_table_node(base[1], item, state)
+      local fields = outer and state.table_fields[outer]
+      if fields and base[2] and base[2].tag == "String" and fields.nodes then
+         return fields.nodes[base[2][1]]
+      end
+   end
+
+   return nil
+end
+
+local function table_fields_of(base, item, state)
+   local table_node = resolve_table_node(base, item, state)
+   if not table_node then return nil end
+   local fields = state.table_fields[table_node]
+   if not fields then
+      fields = {}
+      state.table_fields[table_node] = fields
+   end
+   return fields
+end
+
 -- ------------------------------------------------------------ expressions
 
 local taint_of_expr
@@ -154,16 +212,8 @@ local function taint_of_index(node, item, state, depth)
    set_union_into(result, taint_of_expr(node[2], item, state, depth + 1))
 
    -- Table field taint: t.cmd = x, then use t.cmd
-   local table_node = node[1]
-   local fields = table_node.tag == "Table" and state.table_fields[table_node]
-   if not fields and table_node.tag == "Id" and table_node.var and item and item.used_values then
-      for _, value in ipairs(item.used_values[table_node.var] or {}) do
-         if value.node and value.node.tag == "Table" then
-            fields = state.table_fields[value.node]
-            if fields then break end
-         end
-      end
-   end
+   local fields = table_fields_of(node[1], item, state)
+   local table_node = resolve_table_node(node[1], item, state)
    if fields and node[2] and node[2].tag == "String" then
       set_union_into(result, fields[node[2][1]] or new_set())
    end
@@ -255,9 +305,13 @@ taint_of_expr = function(node, item, state, depth)
 end
 
 -- Record taint written into a table constructor or a field assignment.
-local function record_table_write(node, item, state, depth)
+-- Record the taint a write puts somewhere: a table constructor's fields, or a
+-- single field assignment. `value_node` is what is being written, which is not
+-- the left-hand side itself: reading the field back through the left-hand side
+-- would just find the empty set we are creating.
+local function record_table_write(node, value_node, item, state, depth)
    depth = depth or 0
-   if depth > 16 then return end
+   if depth > 16 or type(node) ~= "table" then return end
    local tag = node.tag
 
    if tag == "Table" then
@@ -273,23 +327,13 @@ local function record_table_write(node, item, state, depth)
          end
       end
    elseif tag == "Index" and node[2] and node[2].tag == "String" then
-      local base = node[1]
-      local table_node
-      if base.tag == "Table" then
-         table_node = base
-      elseif base.tag == "Id" and base.var and item and item.used_values then
-         for _, value in ipairs(item.used_values[base.var] or {}) do
-            if value.node and value.node.tag == "Table" then table_node = value.node break end
-         end
-      end
-      if table_node then
-         local fields = state.table_fields[table_node]
-         if not fields then fields = {} state.table_fields[table_node] = fields end
+      local fields = table_fields_of(node[1], item, state)
+      if fields and value_node then
          set_union_into(field_set(fields, node[2][1]),
-            taint_of_expr(node, item, state, depth + 1))
+            taint_of_expr(value_node, item, state, depth + 1))
       end
    elseif tag == "Paren" then
-      record_table_write(node[1], item, state, depth + 1)
+      record_table_write(node[1], value_node, item, state, depth + 1)
    end
 end
 
@@ -298,6 +342,14 @@ end
 emit = function(state, spec, node, chstate, extra)
    local code = codes.get(spec.code)
    if not code then return end
+
+   -- The propagation loop revisits each item until nothing changes, so the same
+   -- call site is checked many times. One finding per site.
+   local column = node.offset - (chstate.line_offsets[node.line] or 0) + 1
+   local key = table.concat({spec.code, tostring(node.line), tostring(column),
+      tostring(spec.name or spec.pattern)}, "|")
+   if state.reported[key] then return end
+   state.reported[key] = true
 
    local column = node.offset - (chstate.line_offsets[node.line] or 0) + 1
    local end_column = column + (node.end_offset - node.offset)
@@ -429,6 +481,15 @@ local function propagate(chstate, state, opts)
             local tag = item.tag
 
             if tag == "Local" or tag == "Set" or tag == "OpSet" then
+               -- Field writes (`M.cmd = x`) never appear in set_variables, because
+               -- only plain locals get a value object there.
+               for index, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[index]
+                  if lhs_node.tag == "Index" then
+                     record_table_write(lhs_node, written, item, state, 0)
+                  end
+               end
+
                for _, value in pairs(item.set_variables or {}) do
                   local value_taint = taint_of_expr(value.node, item, state, 0)
 
@@ -442,17 +503,18 @@ local function propagate(chstate, state, opts)
                   end
 
                   if value.node then
-                     record_table_write(value.node, item, state, 0)
-                  end
-
-                  if value.var_node and value.var_node.tag == "Index" then
-                     record_table_write(value.var_node, item, state, 0)
+                     record_table_write(value.node, nil, item, state, 0)
                   end
                end
 
                -- Globals have no reaching-definition model, so track them by name.
-               for _, lhs_node in ipairs(item.lhs or {}) do
+               for index, lhs_node in ipairs(item.lhs or {}) do
                   if lhs_node.tag == "Id" and not lhs_node.var and item.rhs then
+                     local rhs_node = item.rhs[index]
+                     if rhs_node and rhs_node.tag == "Table" then
+                        state.global_tables[lhs_node[1]] = rhs_node
+                        record_table_write(rhs_node, nil, item, state, 0)
+                     end
                      local value_taint = taint_of_expr(item.rhs[1], item, state, 0)
                      if not set_is_empty(value_taint) then
                         local existing = state.global_taint[lhs_node[1]]
@@ -482,7 +544,7 @@ local function propagate(chstate, state, opts)
                   check_sink(node, item, state, chstate, opts)
                end
                if node then
-                  record_table_write(node, item, state, 0)
+                  record_table_write(node, nil, item, state, 0)
                end
             end
          end
