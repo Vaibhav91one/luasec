@@ -8,6 +8,8 @@
 local parse_context = require "luasec.engine.parse_context"
 local taint_engine = require "luasec.engine.taint"
 local codes = require "luasec.rules.codes"
+local detect = require "luasec.bytecode.detect"
+local bytecode_triage = require "luasec.bytecode.triage"
 
 local api = {}
 
@@ -87,7 +89,15 @@ function api.analyze(paths, opts)
    end
 
    for _, file in ipairs(files) do
-      for _, finding in ipairs(api.check_source(file.source, opts)) do
+      -- A precompiled chunk is triaged, not parsed: there is no source for the
+      -- taint engine to work on, and feeding it bytes only produces a 901.
+      local per_file
+      if detect.is_bytecode(file.source) then
+         per_file = bytecode_triage.triage(file.source, opts)
+      else
+         per_file = api.check_source(file.source, opts)
+      end
+      for _, finding in ipairs(per_file) do
          finding.file = file.path
          findings[#findings + 1] = finding
       end

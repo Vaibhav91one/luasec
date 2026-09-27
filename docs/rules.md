@@ -63,6 +63,29 @@ default), `low` (shape only, no proven flow).
 | 804 | medium | - | highly obfuscated source |
 | 805 | low | - | file is not parseable Lua despite its name |
 
+### 8xx notes
+
+`luasec` does not decompile. A bytecode file always carries an 801: the source is
+not available to analyze, and any statement about what the chunk does is a
+statement about its data, not about its code.
+
+- **801** fires for every file whose first bytes are `\27Lua` (5.1 to 5.4) or
+  `\27LJ` (LuaJIT). A bytecode file never produces a 901.
+- **802** fires when a string constant names an execution sink from the platform
+  registry, either as a whole dotted path (`"os.execute"`) or as the two
+  adjacent constants a compiled call leaves behind (`"os"` then `"execute"`).
+  Adjacency is a heuristic, not a proven data flow, so the finding never claims
+  `certain` confidence and the 801 alongside it is the honest summary.
+- **803** fires when the chunk's flavor or version is not the interpreter we
+  assume is running (5.4 by default; `analyze(paths, {assume_version = "5.1"})`
+  overrides it). It does not stop the constant table from being read: a 5.1
+  chunk that names a sink is still a 802.
+- **805** fires when a file carries a bytecode signature but cannot be read as
+  one: a truncated header, a failed `LUAC_DATA` / `LUAC_INT` / `LUAC_NUM`
+  marker, or a prototype walk that stopped at one of its caps (100000 constants,
+  64 levels of nesting, 100000 prototypes). Each is a property of the parser,
+  not of the input, and the walk never allocates on a claimed length.
+
 ## 9xx - meta
 
 | Code | Severity | CWE | Meaning |
