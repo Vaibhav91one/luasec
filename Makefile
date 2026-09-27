@@ -121,6 +121,17 @@ ci-verify: vendor-verify runner-selftest test adversarial
 # Reverse-apply only the src/ changes of BASE..HEAD inside a scratch worktree and
 # run the specs that the range added. They must FAIL, proving the tests are
 # coupled to the new behavior rather than to the old code.
+
+# The recipe above reads its operands out of MAKECMDGOALS, but make still
+# considers every bare word on the command line a goal to build. Give the shas an
+# empty recipe so make does not look for a file named after the commit and exit 2
+# after the proof has already printed its verdict. Guarded on tdd-proof actually
+# being a goal, so `make test` does not acquire a rule for the word "test".
+ifneq ($(filter tdd-proof,$(MAKECMDGOALS)),)
+$(filter-out tdd-proof,$(MAKECMDGOALS)):
+	@:
+endif
+
 .PHONY: tdd-proof
 tdd-proof:
 	@base="$(BASE)"; head="$(HEAD)"; \
