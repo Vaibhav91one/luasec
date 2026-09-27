@@ -117,9 +117,31 @@ os.exit(0)
 return "the payload kept running"
 ]], {lua = LUA})
 
-      assert_equal(verdict.verdict, "rce", verdict.exit_reason)
+      -- Not `rce`. Ending the process is not executing anything, and a verdict that
+      -- says a snippet achieved code execution when it only asked to be terminated
+      -- is over-strong in the one field an operator is most likely to act on.
+      assert_equal(verdict.verdict, "escape", verdict.exit_reason)
       assert_match(verdict.exit_reason, "os%.exit")
       assert_no_match(verdict.payload_result or "", "kept running")
+   end)
+
+   it("keeps a process-control escape in the escape list, not only in the verdict", function()
+      local verdict = api.validate_payload("os.exit(1)\n", {lua = LUA})
+
+      assert_equal(verdict.escape_attempts[1].name, "os.exit")
+      assert_equal(verdict.sinks_reached[1].kind, "process")
+   end)
+
+   it("still verdicts a payload that both escapes and executes as rce", function()
+      -- `os.exit` stops the payload where it stands, so the two cannot come in
+      -- that order. This is the order they can come in: a sink that runs
+      -- something and returns, and then the process-control attempt.
+      local verdict = api.validate_payload([[
+io.popen("id")
+os.exit(0)
+]], {lua = LUA})
+
+      assert_equal(verdict.verdict, "rce", verdict.exit_reason)
    end)
 
    it("stops a payload that nests load calls deeper than the limit allows", function()
@@ -383,6 +405,74 @@ return "done"
 
       assert_equal(verdict.verdict, "benign", verdict.exit_reason)
       assert_equal(verdict.payload_result, "nil", "the payload read the analyzer's environment")
+   end)
+
+   it("kills a payload that allocates faster than any limit inside the child can see", function()
+      -- `..` is one C-level concatenation, so the instruction hook cannot run
+      -- inside it and the loop that doubles a string never reaches a check: the
+      -- whole chain fits in one tick window. Nothing inside the child can bound
+      -- this, so the parent has to.
+      local started = os.clock()
+      local verdict = api.validate_payload([[
+local s = ("a"):rep(1024 * 1024)
+for i = 1, 20 do s = s .. s end
+return #s
+]], {lua = LUA})
+      local elapsed = os.clock() - started
+
+      assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
+      assert_match(verdict.exit_reason, "resident set")
+      assert_true(verdict.rss_kb ~= nil, "the verdict does not say what the child had reached")
+      assert_true(verdict.rss_kb > verdict.rss_limit_kb,
+         string.format("stopped at %d kB, which is not over the %d kB limit",
+            verdict.rss_kb or -1, verdict.rss_limit_kb or -1))
+      assert_true(elapsed < 10, "the validator took " .. elapsed .. "s to give up")
+   end)
+
+   it("keeps a resident-set kill distinct from a wall-clock kill", function()
+      -- Two independent reasons for one child. Reading the wrong one out would
+      -- send an operator looking for a hang that never happened.
+      local memory = api.validate_payload([[
+local s = ("a"):rep(1024 * 1024)
+for i = 1, 20 do s = s .. s end
+return #s
+]], {lua = LUA})
+      local clock = api.validate_payload("while true do end\n",
+         {lua = LUA, max_instructions = 1e12, timeout_ms = 500})
+
+      assert_match(memory.exit_reason, "resident set")
+      assert_no_match(memory.exit_reason, "wall clock")
+      assert_match(clock.exit_reason, "wall clock")
+      assert_no_match(clock.exit_reason, "resident set")
+   end)
+
+   it("does not kill a payload that only reaches the allocator overhead above its ceiling", function()
+      -- The supervisor's threshold has to sit above what an honest payload
+      -- reaches, or it reports a memory exhaustion the payload never caused. This
+      -- one is refused by the child's own check and peaks at about 1.3x the
+      -- ceiling, so the reason has to be the child's and not the supervisor's.
+      local verdict = api.validate_payload([[
+local parts = {}
+for i = 1, 60000 do parts[i] = ("y"):rep(1024) end
+return #table.concat(parts)
+]], {lua = LUA})
+
+      assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
+      assert_match(verdict.exit_reason, "table%.concat would allocate")
+      assert_no_match(verdict.exit_reason, "resident set",
+         "the supervisor killed a payload that stayed inside its limits")
+   end)
+
+   it("takes the resident-set threshold as an option rather than a fixed one", function()
+      local verdict = api.validate_payload([[
+local parts = {}
+for i = 1, 60000 do parts[i] = ("y"):rep(1024) end
+return #table.concat(parts)
+]], {lua = LUA, rss_limit_kb = 20000})
+
+      assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
+      assert_match(verdict.exit_reason, "resident set", verdict.exit_reason)
+      assert_equal(verdict.rss_limit_kb, 20000)
    end)
 
    it("gives the payload the ordinary base library", function()
