@@ -116,6 +116,15 @@ ci: vendor-verify test
 ci-verify: vendor-verify runner-selftest test adversarial
 	@echo "ci-verify: PASS"
 
+# Accept the two positional shas of `make tdd-proof BASE HEAD` as goals. Make
+# would otherwise refuse to run the recipe because those goals do not exist.
+# A goal that is not a git sha is still an error, so typos are not swallowed.
+%:
+	@case "$$@" in \
+	  [0-9a-f]*) : ;; \
+	  *) echo "unknown target: $$@ (expected a git sha, e.g. make tdd-proof 83e9c9a 7b576bb)"; exit 2 ;; \
+	esac
+
 # ---------------------------------------------------------------- TDD proof
 
 # Reverse-apply only the src/ changes of BASE..HEAD inside a scratch worktree and

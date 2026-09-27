@@ -78,9 +78,11 @@ function sarif.render(report, opts)
 
       if finding.trace and #finding.trace > 0 then
          local locations = {}
-         for _, step in ipairs(finding.trace) do
-            local step_location = vim_deepcopy_location(finding, step)
-            locations[#locations + 1] = step_location
+         for order, step in ipairs(finding.trace) do
+            locations[#locations + 1] = {
+               location = vim_deepcopy_location(finding, step),
+               executionOrder = order,
+            }
          end
          result.codeFlows = {{
             threadFlows = {{
