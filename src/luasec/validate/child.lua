@@ -5,22 +5,41 @@
 -- it has to bootstrap with nothing but the standard libraries it is about to
 -- take away - no `require`, no `package.path`.
 --
--- Two rules make the rest of this file auditable:
+-- Three rules make the rest of this file auditable:
 --
 --   1. The real `io`, `os`, `package` and `debug` are captured in locals before
 --      the payload runs, and the payload is only ever handed recorders. There is
 --      no path from the payload's world back to the originals.
 --   2. The payload's world is `env`, a fresh table with no metatable, so `_G`
 --      inside the payload is that table and there is no __index fallback to the
---      real globals.
+--      real globals. `os` and `io` are built from an explicit list of names, not
+--      copied, so a member the catalogue does not think about cannot arrive by
+--      omission.
+--   3. The record channel is not the child's standard output. Records go to the
+--      child's standard error, which the parent sends to the record pipe, and the
+--      parent points the child's standard output at /dev/null - so even a real
+--      handle on stdout could not put a byte in the channel the parent parses.
+--      On top of that every record carries a nonce the parent generated and the
+--      payload cannot read, so a line that reaches the channel without it is
+--      noise and is dropped.
 
 local real_io, real_os, real_debug = io, os, debug
 local real_load, real_pcall, real_collectgarbage = load, pcall, collectgarbage
-local real_string, real_coroutine = string, coroutine
-local emit = real_io.write
+local real_string, real_coroutine, real_table = string, coroutine, table
 
-local PAYLOAD_SOURCE = "luasec-payload"
-local CHUNK = "@" .. PAYLOAD_SOURCE
+-- The report channel. `emit` is captured into a local, and the payload is never
+-- handed this handle or any way of naming it. `RECORD.write` alone would be the
+-- unbound C function, which writes to the default output, so the file is bound
+-- here rather than by the caller.
+local RECORD = real_io.stderr
+local emit = function(first, second) return RECORD:write(first, second) end
+
+-- The dialects the sandbox was written against. A verdict describes the Lua that
+-- produced it, so a child running under anything else refuses the payload rather
+-- than reporting an outcome it cannot vouch for.
+local SUPPORTED_DIALECTS = {["Lua 5.3"] = true, ["Lua 5.4"] = true, ["LuaJIT"] = true}
+
+local DEFAULT_SOURCE = "luasec-payload"
 
 -- The verdict vocabulary the parent speaks.
 --
@@ -54,6 +73,20 @@ local CATALOGUE = {
    ["collectgarbage"]  = {kind = "probe", escape = true},
 }
 
+-- The members of `os` and `io` the payload may have. Everything else is absent
+-- rather than blocked, which is the point: `io.stdout` is a real handle on the
+-- report channel and the only safe thing to do with it is not to have it. The
+-- `io` list is empty on purpose - every member the payload gets is one built
+-- below, and a real one (`io.close` and `io.flush` act on the default output
+-- file) has no place in here.
+--
+-- `getmetatable` is in the base library below because payloads use it, and on
+-- its own it reaches nothing - but it is also the way to the string metatable,
+-- which is why the size guard is installed on that metatable rather than only on
+-- the `string` table.
+local OS_MEMBERS = {"clock", "date", "difftime", "time", "setlocale"}
+local IO_MEMBERS = {}
+
 -- Every limit raises this one sentinel. The payload cannot forge it (it is a
 -- local upvalue) and the runner tells a limit stop apart from the payload's own
 -- error by identity, not by message.
@@ -64,11 +97,12 @@ local chain_set = {}
 local limits, env
 local spent, started, ticks, stop_reason = 0, 0, 0, nil
 local output, output_bytes = {}, 0
+local source_name = DEFAULT_SOURCE
 
 -- Anything the payload writes is captured rather than emitted. The child's
--- standard output is the report channel, so a payload that could write to it
--- could forge a verdict, and could also put arbitrary bytes in front of whoever
--- is reading the tool's output.
+-- standard output is not the report channel, but a payload's bytes still must not
+-- reach whoever is reading this tool's output, so the capture is also what the
+-- report labels as payload text.
 local OUTPUT_LIMIT = 4096
 
 local function capture_output(...)
@@ -98,8 +132,14 @@ local function blob(value)
    return #encoded .. ":" .. encoded
 end
 
+-- The nonce arrives as a global of this program's own environment, which the
+-- payload does not get: the payload's _ENV is `env`. It is copied into a local
+-- upvalue here so that the payload has no name to read even if it could reach a
+-- global, and so a line that lacks it is not a record the parent will parse.
+local nonce
+
 local function record(tag, fields)
-   local parts = {tag}
+   local parts = {tag, nonce}
    for _, value in ipairs(fields) do
       parts[#parts + 1] = value
    end
@@ -115,7 +155,7 @@ local function caller_frame(level)
    level = level or 3
    while true do
       local info = real_debug.getinfo(level, "Sl")
-      if not info then return PAYLOAD_SOURCE, 0 end
+      if not info then return source_name, 0 end
       local source = info.source or ""
       if source ~= "[C]" and not source:match("^=") then
          return source:gsub("^@", ""), info.currentline or 0
@@ -155,6 +195,26 @@ local function fake_handle()
    }
 end
 
+-- One of the three standard streams, as the payload sees it. The real ones are
+-- file handles on the child's own descriptors, and one of those descriptors is
+-- where the records go, so what the payload gets here is not a handle at all:
+-- writes land in the same capture as `print`, reads return nothing, and neither
+-- can move a verdict.
+local function captured_stream()
+   return {
+      write = function(_, ...)
+         capture_output(...)
+         return true
+      end,
+      read = function() return nil end,
+      lines = function() return function() return nil end end,
+      seek = function() return 0 end,
+      setvbuf = function() return true end,
+      flush = function() return true end,
+      close = function() return true end,
+   }
+end
+
 -- A blocked call records where it happened, hands back something harmless, and
 -- lets the payload carry on so the rest of its behaviour becomes visible.
 local function block(name)
@@ -186,15 +246,24 @@ local function open_recorder()
    end
 end
 
--- A table of recorders replacing one standard library. Names in the catalogue
--- that live under `prefix` are blocked; everything else is copied through, so
--- `os.time` and `os.date` still work.
-local function guarded(original, prefix)
+-- A library the payload can see, built by naming what it may have. This is not a
+-- copy of the real one on purpose: a copy hands over every member nobody
+-- thought about, and `io.stdout` is one of them - a live handle on the bytes
+-- the parent parses. An allowlist cannot leak by omission, so the absence of a
+-- name here is the guarantee.
+--
+-- Names in the catalogue that live under `prefix` are blocked; the rest of the
+-- allowlist is passed through, so `os.time` and `os.date` still work.
+local function allowed(original, names, prefix)
    local copy = {}
-   for k, v in pairs(original) do copy[k] = v end
+   for _, name in ipairs(names) do
+      local value = original[name]
+      if value ~= nil then copy[name] = value end
+   end
    for name in pairs(CATALOGUE) do
-      if name:sub(1, #prefix) == prefix then
-         copy[name:sub(#prefix + 1)] = name == "io.open" and open_recorder() or block(name)
+      if name:sub(1, #prefix) == prefix and #name > #prefix then
+         local member = name:sub(#prefix + 1)
+         copy[member] = name == "io.open" and open_recorder() or block(name)
       end
    end
    return copy
@@ -204,7 +273,9 @@ end
 
 -- How many instructions pass between two checks of the hook. Small enough that
 -- a short payload still reports a real count, large enough that the hook itself
--- is not the thing being measured.
+-- is not the thing being measured. Every tick also reads the heap and the clock,
+-- which costs about 0.24us per tick against a 12ms baseline for the whole
+-- five million instruction budget.
 local INSTRUCTIONS_PER_TICK = 100
 
 -- The instruction budget is counted, not sampled, so a payload cannot spend its
@@ -220,13 +291,14 @@ local function hook()
    if spent > limits.max_instructions then
       stop(string.format("instruction limit of %d exceeded", limits.max_instructions))
    end
-   if ticks % 64 == 0 then
-      if real_collectgarbage("count") > limits.max_memory_kb then
-         stop(string.format("memory ceiling of %dkB exceeded", limits.max_memory_kb))
-      end
-      if (real_os.clock() - started) * 1000 > limits.timeout_ms then
-         stop(string.format("wall clock of %dms exceeded", limits.timeout_ms))
-      end
+   -- Every tick, and not every sixty-fourth. The window between two checks is
+   -- exactly the budget a payload has to allocate past the ceiling, and 6400
+   -- instructions of `t[i] = ("x"):rep(1024 * 1024)` is 4GB of it.
+   if real_collectgarbage("count") > limits.max_memory_kb then
+      stop(string.format("memory ceiling of %dkB exceeded", limits.max_memory_kb))
+   end
+   if (real_os.clock() - started) * 1000 > limits.timeout_ms then
+      stop(string.format("wall clock of %dms exceeded", limits.timeout_ms))
    end
 end
 
@@ -234,11 +306,12 @@ end
 
 local load_depth = 0
 
--- `string.rep` and `string.format` are the only standard functions that turn a
--- small argument into a huge allocation inside a single C call, where the
--- instruction hook cannot see it coming. Both are size checked before they run,
--- so the ceiling holds on the platforms where the address space limit is not
--- enforced.
+-- How much of the ceiling is still unallocated. The memory check cannot run
+-- inside a C call, so the functions that can allocate far more than their
+-- arguments describe are checked against this before they run: `string.rep`,
+-- `string.format` (above) and `table.concat` (below). There is no address space
+-- limit to fall back on either - macOS refuses `RLIMIT_AS` - which is why the
+-- ceiling is enforced here as well as in the hook.
 local function bytes_left()
    return math.max(limits.max_memory_kb - real_collectgarbage("count"), 0) * 1024
 end
@@ -278,6 +351,61 @@ local function guarded_string()
    copy.format = function(fmt, ...)
       guard_size("string.format", format_bound(tostring(fmt), ...))
       return real_string.format(fmt, ...)
+   end
+   return copy
+end
+
+-- The guard goes where a method call actually looks. `("a"):rep(n)` never
+-- touches the `string` table: it goes through the metatable every string
+-- carries, whose __index is the real `string`. Guarding the table alone left
+-- that route wide open, and it is one character of syntax away from the whole
+-- allocation the guard exists to refuse. So the guarded copy is installed as the
+-- metatable's __index as well, and `string.rep` and `("a"):rep` are the same
+-- function from the payload's side of the sandbox.
+--
+-- The payload is given `getmetatable`, so it can read this metatable, and it can
+-- overwrite `__index.rep` to weaken the guard for itself. It cannot put the real
+-- `string.rep` back: the real table is a local upvalue, and this is the only
+-- route to it, so the worst it can do is lose the ceiling for its own run.
+local function install_string_guard()
+   local guarded = guarded_string()
+   local meta = real_debug.getmetatable("")
+   if meta then meta.__index = guarded end
+   return guarded
+end
+
+local function concat_size(subject, separator, first, last)
+   if type(subject) == "string" then return #subject end
+   if type(subject) ~= "table" then return 0 end
+   local from = tonumber(first) or 1
+   local to = tonumber(last) or #subject
+   if to < from then return 0 end
+   local size = (type(separator) == "string" and #separator or 0) * (to - from + 1)
+   for i = from, to do
+      local piece = subject[i]
+      if type(piece) == "string" then size = size + #piece end
+   end
+   return size
+end
+
+-- `table.concat` is the one standard function left that can turn a heap already
+-- at the ceiling into roughly twice the ceiling, in a single C call where the
+-- instruction hook cannot see it coming: every part is live, and the result is a
+-- fresh string as long as all of them put together. Its result size is the sum
+-- of the parts, which is the same walk the real function makes, so it is known
+-- before the allocation rather than after it. Measured on this machine: without
+-- this check, 60000 one kilobyte parts concatenate into a 60MB result and take
+-- the child's peak resident set to 210MB against a 64MB ceiling.
+--
+-- Everything else in `table` allocates in proportion to something that is already
+-- live, so at worst it doubles the set, and the periodic check catches that on
+-- the next tick.
+local function guarded_table()
+   local copy = {}
+   for k, v in pairs(real_table) do copy[k] = v end
+   copy.concat = function(subject, separator, first, last)
+      guard_size("table.concat", concat_size(subject, separator, first, last))
+      return real_table.concat(subject, separator, first, last)
    end
    return copy
 end
@@ -323,7 +451,12 @@ local function guarded_load(chunk, chunkname, mode)
       return nil, "sandbox: binary chunks are disabled"
    end
 
-   local fn, err = real_load(chunk, "@luasec-generated", "t", env)
+   -- The "=" prefix is what `caller_frame` looks for to recognise a frame that
+   -- belongs to the sandbox. A chunk the payload built has no file behind it, so
+   -- naming it "=..." means a sink reached inside one is attributed to the
+   -- payload's own line that called into it - a place the operator can go and
+   -- look - instead of to this generated chunk, which is nowhere on their disk.
+   local fn, err = real_load(chunk, "=luasec-generated", "t", env)
    if not fn then return nil, err end
    return with_depth(fn)
 end
@@ -357,14 +490,15 @@ local function build_env()
                           "ipairs", "next", "pairs", "pcall",
                           "select", "tonumber", "tostring", "type",
                           "xpcall", "rawequal", "rawget", "rawlen", "rawset",
-                          "_VERSION", "utf8", "math", "table"}) do
+                          "_VERSION", "utf8", "math"}) do
       env[name] = _G[name]
    end
-   env.string = guarded_string()
+   env.string = install_string_guard()
+   env.table = guarded_table()
    env.coroutine = guarded_coroutine()
 
-   env.os = guarded(real_os, "os.")
-   env.io = guarded(real_io, "io.")
+   env.os = allowed(real_os, OS_MEMBERS, "os.")
+   env.io = allowed(real_io, IO_MEMBERS, "io.")
    -- There is no environment to see: an embedded interpreter usually has none,
    -- and handing the payload the analyzer's own would put the operator's paths
    -- into a report they are about to file or paste.
@@ -399,11 +533,17 @@ local function build_env()
       capture_output(...)
       capture_output("\n")
    end
+   -- The three standard streams are the capture, not the report channel. The
+   -- report channel is the child's standard error, and no member of this table
+   -- is a handle on it.
+   env.io.stdout = captured_stream()
+   env.io.stderr = captured_stream()
+   env.io.stdin = captured_stream()
    -- Writing to the payload's own output is harmless, so it is not a sink, but
    -- the bytes must still go to the capture rather than to the report channel.
    env.io.write = env.print
-   -- `warn` writes to standard error, which the parent merges into the same
-   -- stream as the report.
+   -- `warn` writes to standard error, which is where the records go, so it is a
+   -- capture too rather than anything a payload can steer.
    env.warn = function(...) env.print("[warn] ", ...) end
    env._G = env
 end
@@ -431,9 +571,22 @@ end
 function __luasec_sandbox(payload, options)
    limits = options
    started = real_os.clock()
+   nonce = tostring(__LUASEC_NONCE or "")
+   source_name = (type(options.source) == "string" and options.source ~= "") and options.source
+      or DEFAULT_SOURCE
+
+   -- A verdict describes the Lua that produced it. Running the payload under a
+   -- dialect the sandbox was not written for would report an outcome nobody
+   -- should rely on, so the payload does not run at all.
+   if not SUPPORTED_DIALECTS[_VERSION] then
+      return {verdict = "error",
+              reason = "the payload validator supports Lua 5.3 and 5.4, and this interpreter is "
+               .. tostring(_VERSION)}
+   end
+
    build_env()
 
-   local chunk, compile_error = real_load(payload, CHUNK, "t", env)
+   local chunk, compile_error = real_load(payload, "@" .. source_name, "t", env)
    if not chunk then
       return {verdict = "error", reason = "payload could not be compiled: " .. tostring(compile_error)}
    end
@@ -445,6 +598,9 @@ function __luasec_sandbox(payload, options)
    return {
       verdict = decide(not packed[1]),
       reason = stop_reason or (packed[1] and "payload completed" or tostring(packed[2])),
+      -- Whether the words above are ours or the payload's. A payload's own error
+      -- message is attacker text and the report has to label it as such.
+      reason_source = (stop_reason or packed[1]) and "sandbox" or "payload",
       result = reportable(packed[2]),
       output = table.concat(output),
       instructions = spent,
@@ -462,12 +618,15 @@ function __luasec_emit(verdict)
       blob(verdict.result or ""),
       string.format("%d", verdict.instructions or 0),
       string.format("%d", verdict.elapsed_ms or 0),
+      blob(verdict.reason_source or "sandbox"),
+      blob(_VERSION),
+      blob(source_name),
    })
    for _, sink in ipairs(verdict.sinks or {}) do
       record("__LUASEC_SINK__", {
          blob(sink.name),
          string.format("%d", sink.line or 0),
-         blob(sink.source or PAYLOAD_SOURCE),
+         blob(sink.source or source_name),
          blob(sink.kind or "probe"),
          blob(sink.arg or ""),
       })
@@ -486,4 +645,7 @@ function __luasec_emit(verdict)
          record("__LUASEC_OUTPUT__", {blob(line)})
       end
    end
+   -- Every record has been written by now, and a child the watchdog kills
+   -- mid-emit would lose the tail of the verdict, so nothing is left buffered.
+   RECORD:flush()
 end

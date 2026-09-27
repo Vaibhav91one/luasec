@@ -18,6 +18,12 @@ local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
                       partial = EXIT_FINDINGS, timeout = EXIT_FINDINGS,
                       error = EXIT_ERROR}
 
+-- Which fields of a validation verdict are text the payload chose. It is rendered
+-- into the JSON rather than left to documentation, because the JSON is what a
+-- machine acts on.
+local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the validated snippet "
+   .. "chose; they are reported as data, not as luasec findings"
+
 local SEVERITY_RANK = {low = 1, medium = 2, high = 3, critical = 4}
 local CONFIDENCE_RANK = {low = 1, medium = 2, high = 3, certain = 4}
 
@@ -124,11 +130,17 @@ local function validate(opts)
    local verdict = api.validate_payload(source, {
       lua = os.getenv("LUASEC_LUA"),
       timeout_ms = tonumber(opts.validate_timeout),
+      name = name,
    })
 
    local output
    if opts.format == "json" then
-      output = json.encode({version = version.luasec, validation = verdict})
+      -- The note travels with the data: a machine reader has to be able to see,
+      -- without reading this source, which of these fields are the payload's
+      -- words rather than luasec's.
+      local validation = {note = UNTRUSTED_NOTE}
+      for key, value in pairs(verdict) do validation[key] = value end
+      output = json.encode({version = version.luasec, validation = validation})
    elseif opts.format == "sarif" or opts.format == "html" then
       return fail("--validate supports --format plain and --format json")
    else

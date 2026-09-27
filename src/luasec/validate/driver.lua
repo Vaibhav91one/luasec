@@ -11,18 +11,41 @@
 
 local driver = {}
 
--- The child announces itself with one of these, once, on the last line it prints.
-local MARKER = "__LUASEC_REPORT__"
--- The shell prints this when it, or the kernel, killed the child.
+-- The records the child sends, and the line the shell prints when it, or the
+-- kernel, killed the child.
+local MARKERS = {
+   __LUASEC_REPORT__ = true,
+   __LUASEC_SINK__ = true,
+   __LUASEC_CHAIN__ = true,
+   __LUASEC_ESCAPE__ = true,
+   __LUASEC_OUTPUT__ = true,
+   __LUASEC_WALLCLOCK__ = true,
+}
 local KILLED = "__LUASEC_WALLCLOCK__"
 
+-- Every limit arrives in the child as a literal in the program text, so a value
+-- with a fractional part would raise inside `string.format("%d", ...)` instead of
+-- being rounded - and a value of zero would leave the watchdog with nothing to
+-- sleep for. `whole_number` normalises both, and clamps a caller who asks for
+-- more than any machine should honour.
 local LIMITS = {
-   timeout_ms = 2000,
-   max_instructions = 5000000,
-   max_memory_kb = 65536,
-   max_load_depth = 32,
-   max_source_bytes = 262144,
+   {key = "timeout_ms", default = 2000, low = 1, high = 3600000},
+   {key = "max_instructions", default = 5000000, low = 100, high = 1e15},
+   {key = "max_memory_kb", default = 65536, low = 1024, high = 1 << 30},
+   {key = "max_load_depth", default = 32, low = 1, high = 1000},
+   {key = "max_source_bytes", default = 262144, low = 1, high = 1 << 24},
 }
+
+local function whole_number(value, spec)
+   local number = tonumber(value)
+   if not number or number ~= number or number <= -math.huge or number >= math.huge then
+      number = spec.default
+   end
+   number = math.floor(number + 0.5)
+   if number < spec.low then number = spec.low end
+   if number > spec.high then number = spec.high end
+   return number
+end
 
 -- Appended to the child program once the payload and the limits are in scope.
 local ENTRY = [[
@@ -46,52 +69,96 @@ local function read_field(text, pos)
    return text:sub(pos, stop_at - 1), stop_at
 end
 
-local function read_fields(line)
-   local fields, pos = {}, 1
+-- Read the fields that follow the tag and nonce. A field that is not followed by
+-- a space, or is followed by anything else, means the line is not a record.
+local function read_fields(line, from)
+   local fields = {}
+   local pos = from or 1
    while pos <= #line do
-      if pos > 1 then
-         if line:sub(pos, pos) ~= " " then return nil end
-         pos = pos + 1
-      end
       local value, next_pos = read_field(line, pos)
       fields[#fields + 1] = value
-      pos = next_pos
+      if next_pos > #line then break end
+      if line:sub(next_pos, next_pos) ~= " " then return nil end
+      pos = next_pos + 1
    end
    return fields
 end
 
--- The child prints one record per line. Anything else on the stream is noise:
--- the payload's own writes are recorders, so only a harness failure can add
--- anything, and the last marker line wins.
-local function collect(output)
+-- A per-run token for the record channel. The child stamps it on every record
+-- and only the child is given it, so a line that arrives without it is not a
+-- record: it is the shell talking, a Lua warning, or a payload that reached the
+-- channel by some other route. All three are dropped, which is what makes the
+-- records unforgeable rather than merely hard to forge.
+local function nonce()
+   local handle = io.open("/dev/urandom", "rb")
+   if handle then
+      local bytes = handle:read(16)
+      handle:close()
+      if bytes and #bytes == 16 then
+         return (bytes:gsub(".", function(char) return string.format("%02x", char:byte()) end))
+      end
+   end
+   -- No entropy device. A weaker token still separates our records from a
+   -- payload's, because the payload has no route to it at all.
+   math.randomseed(os.time() + math.floor(os.clock() * 1e6))
+   return string.format("%016x%016x", math.random(0, 2 ^ 31 - 1), math.random(0, 2 ^ 31 - 1))
+end
+
+-- The verdicts this version knows. A record can only come from the child, and the
+-- child only ever writes one of these, but a verdict is the one field everything
+-- downstream trusts, so an unrecognised one is an error rather than a pass.
+local VERDICTS = {rce = true, partial = true, benign = true, timeout = true, error = true}
+
+-- The child sends one record per line, and each one is `<tag> <nonce> <fields>`.
+local function collect(output, token)
    local report = {verdict = "error", exit_reason = "the validator child produced no verdict",
-                   sinks_reached = {}, payload_chain = {}, escape_attempts = {}, printed = {}}
+                   sinks_reached = {}, payload_chain = {}, escape_attempts = {}, printed = {},
+                   killed = nil}
 
    for line in tostring(output):gmatch("[^\n]+") do
-      local fields = read_fields(line)
-      if fields then
-         if fields[1] == MARKER then
-            report.verdict = fields[2]
-            report.exit_reason = fields[3]
-            report.result = fields[4]
-            report.instructions = tonumber(fields[5])
-            report.duration_ms = tonumber(fields[6])
-         elseif fields[1] == "__LUASEC_SINK__" then
-            report.sinks_reached[#report.sinks_reached + 1] =
-               {name = fields[2], line = tonumber(fields[3]), source = fields[4],
-                kind = fields[5], arg = fields[6]}
-         elseif fields[1] == "__LUASEC_CHAIN__" then
-            report.payload_chain[#report.payload_chain + 1] = fields[2]
-         elseif fields[1] == "__LUASEC_ESCAPE__" then
-            report.escape_attempts[#report.escape_attempts + 1] =
-               {name = fields[2], line = tonumber(fields[3])}
-         elseif fields[1] == "__LUASEC_OUTPUT__" then
-            report.printed[#report.printed + 1] = fields[2]
+      local tag, echoed = line:match("^(%S+) (%S+) ")
+      if tag and echoed == token and MARKERS[tag] then
+         local fields = read_fields(line, #tag + #echoed + 3)
+         if fields then
+            if tag == "__LUASEC_REPORT__" then
+               if VERDICTS[fields[1]] then
+                  report.verdict = fields[1]
+                  report.exit_reason = fields[2]
+               else
+                  report.exit_reason = "the validator child reported a verdict this version does not know: "
+                     .. tostring(fields[1])
+               end
+               report.payload_result = fields[3]
+               report.instructions = tonumber(fields[4])
+               report.duration_ms = tonumber(fields[5])
+               report.reason_source = fields[6]
+               report.lua = fields[7]
+               report.source = fields[8]
+               report.payload_result = fields[3]
+               report.instructions = tonumber(fields[4])
+               report.duration_ms = tonumber(fields[5])
+               report.reason_source = fields[6]
+               report.lua = fields[7]
+               report.source = fields[8]
+            elseif tag == "__LUASEC_SINK__" then
+               report.sinks_reached[#report.sinks_reached + 1] =
+                  {name = fields[1], line = tonumber(fields[2]), source = fields[3],
+                   kind = fields[4], arg = fields[5]}
+            elseif tag == "__LUASEC_CHAIN__" then
+               report.payload_chain[#report.payload_chain + 1] = fields[1]
+            elseif tag == "__LUASEC_ESCAPE__" then
+               report.escape_attempts[#report.escape_attempts + 1] =
+                  {name = fields[1], line = tonumber(fields[2])}
+            elseif tag == "__LUASEC_OUTPUT__" then
+               report.printed[#report.printed + 1] = fields[1]
+            elseif tag == "__LUASEC_WALLCLOCK__" then
+               report.killed = tonumber(fields[1])
+            end
          end
       end
    end
 
-   if #report.printed > 0 then report.output = table.concat(report.printed, "\n") end
+   if #report.printed > 0 then report.payload_output = table.concat(report.printed, "\n") end
    report.printed = nil
    return report
 end
@@ -128,22 +195,40 @@ end
 -- it is inert data and never shell syntax. The watchdog kills the child at the
 -- wall clock, so the parent blocks only until the pipe closes.
 --
--- The group runs with stderr on /dev/null because the shell narrates a killed
--- background job to its own stderr, printing the whole command line; the
--- child's stderr is merged into the pipe by the child's own `2>&1`, before the
--- group's redirect applies, so a harness failure still reaches the report.
-local function capture(interpreter, program, limits)
+-- The two streams are pointed at different places on purpose:
+--
+--   * the child's standard error is the record channel, and it is the pipe the
+--     parent reads. Records go there.
+--   * the child's standard output is /dev/null, so even a real handle on stdout
+--     could not put a byte in the channel the parent parses. The redirections are
+--     in that order on purpose: `2>&1` first sends stderr to the pipe the
+--     command inherited, then `1>/dev/null` moves stdout out of the way.
+--   * the shell group's own stderr is /dev/null, because the shell narrates a
+--     killed background job to its own stderr, printing the whole command line.
+--
+-- The watchdog's sleep is a whole number of seconds, rounded up. `sleep` is fed
+-- the value as text, and a fractional second formats as something like 1e-07 -
+-- which `sleep` reads as a rounding error and returns immediately, leaving the
+-- payload with no wall clock at all, or reads as ten million seconds. A whole
+-- second is the only value every `sleep` agrees on; the deadline it guards stays
+-- the child's own per-tick check, and this is the backstop for a payload wedged
+-- where no check can run.
+local function capture(interpreter, program, limits, token)
+   local watchdog_seconds = math.ceil(limits.timeout_ms / 1000)
    local command = "(\n" .. table.concat({
-      -- Two bounds the kernel enforces, independent of anything the child or
-      -- the watchdog can be talked out of. `ulimit -v` is not honoured on every
-      -- platform, hence the memory ceiling also lives in the child's hook; the
-      -- CPU limit gets a second of headroom so the child normally reports the
-      -- stop itself, with a clearer reason, before the kernel steps in.
+      -- Two bounds the kernel may enforce, independent of anything the child or
+      -- the watchdog can be talked out of. `ulimit -v` is refused outright on
+      -- macOS - measured: "ulimit: virtual memory: cannot modify limit: Invalid
+      -- argument" - so the memory ceiling lives in the child, where it is
+      -- checked, and this is only a backstop where a platform honours it. The
+      -- CPU limit is honoured on macOS (measured: the child dies of SIGXCPU) and
+      -- gets a second of headroom so the child normally reports the stop itself,
+      -- with a clearer reason, before the kernel steps in.
       "ulimit -v " .. (limits.max_memory_kb + 65536) .. " 2>/dev/null || true",
       "ulimit -t " .. (math.floor(limits.timeout_ms / 1000) + 1) .. " 2>/dev/null || true",
-      shell_quote(interpreter) .. " -e " .. shell_quote(program) .. " 2>&1 &",
+      shell_quote(interpreter) .. " -e " .. shell_quote(program) .. " 2>&1 1>/dev/null &",
       "__luasec_child=$!",
-      "( sleep " .. (limits.timeout_ms / 1000) .. "; kill -9 $__luasec_child 2>/dev/null ) >/dev/null 2>&1 &",
+      "( sleep " .. watchdog_seconds .. "; kill -9 $__luasec_child 2>/dev/null ) >/dev/null 2>&1 &",
       "__luasec_watchdog=$!",
       "wait $__luasec_child",
       "__luasec_status=$?",
@@ -151,7 +236,8 @@ local function capture(interpreter, program, limits)
       -- A child the watchdog or the kernel killed never got to answer. 137 is
       -- SIGKILL, 152 is SIGXCPU from `ulimit -t`; say which, because otherwise a
       -- child that ran out of time is indistinguishable from one that crashed.
-      "case $__luasec_status in 137|152) printf '" .. KILLED .. " %d\\n' $__luasec_status;; esac",
+      -- The nonce is the parent's, so this line is a record like any other.
+      "case $__luasec_status in 137|152) printf '" .. KILLED .. " " .. token .. " %d\\n' $__luasec_status;; esac",
       "exit $__luasec_status",
    }, "\n") .. "\n) 2>/dev/null"
 
@@ -166,8 +252,8 @@ end
 -- Returns the verdict table.
 function driver.run(source, opts)
    local limits = {}
-   for key, fallback in pairs(LIMITS) do
-      limits[key] = tonumber(opts[key]) or fallback
+   for _, spec in ipairs(LIMITS) do
+      limits[spec.key] = whole_number(opts[spec.key], spec)
    end
 
    -- A verdict that never got as far as a child, which is a failure of the
@@ -191,27 +277,43 @@ function driver.run(source, opts)
       return refuse("payload contains a NUL byte")
    end
 
+   -- The name the verdict is traced back to. It becomes the payload's chunk name,
+   -- which is what every reported line number is counted in, so a verdict without
+   -- it points at nothing an operator can go and look at.
+   local source_name = (type(opts.name) == "string" and opts.name ~= "")
+      and opts.name or "luasec-payload"
+
    -- `lua -e` treats an option argument that starts with "-" as another option
    -- and reports "needs argument", and child.lua opens with a comment, so the
    -- program gets a leading newline to keep its first argument parseable.
+   local token = nonce()
    local program = "\n-- luasec validator child\n" .. child_source()
+      .. "\n__LUASEC_NONCE = " .. string.format("%q", token)
       .. "\n__LUASEC_PAYLOAD = " .. long_string(source)
       .. "\n__LUASEC_LIMITS = "
-      .. string.format("{timeout_ms=%d, max_instructions=%d, max_memory_kb=%d, max_load_depth=%d}",
-           limits.timeout_ms, limits.max_instructions, limits.max_memory_kb, limits.max_load_depth)
+      .. string.format("{timeout_ms=%d, max_instructions=%d, max_memory_kb=%d, max_load_depth=%d, source=%q}",
+           limits.timeout_ms, limits.max_instructions, limits.max_memory_kb,
+           limits.max_load_depth, source_name)
       .. "\n" .. ENTRY
 
+   -- The interpreter is the one the analyzer is running under, not whatever
+   -- `lua` happens to be on PATH: a verdict describes the Lua that produced it,
+   -- and bin/luasec exports this so the two are the same build. The child checks
+   -- the dialect for itself and refuses the payload under one it does not
+   -- support, and the version it ran under comes back in the verdict.
+   local interpreter = opts.lua or os.getenv("LUASEC_LUA") or os.getenv("LUA_BIN") or "lua"
+
    local started = os.clock()
-   local output = capture(opts.lua or os.getenv("LUA_BIN") or "lua", program, limits)
+   local output = capture(interpreter, program, limits, token)
    local elapsed = math.floor((os.clock() - started) * 1000)
 
-   local report = collect(output)
+   local report = collect(output, token)
+   report.interpreter = interpreter
 
    -- The child never got to answer, so the shell tells us a bound stopped it.
    -- Anything else that left no report is a harness failure, not a verdict.
    if report.verdict == "error" and report.exit_reason:find("no verdict", 1, true) then
-      local killed = output:match(KILLED .. " (%d+)")
-      if killed then
+      if report.killed then
          report.verdict = "timeout"
          report.exit_reason = string.format("wall clock of %dms exceeded; the validator child was killed",
             limits.timeout_ms)
@@ -220,6 +322,7 @@ function driver.run(source, opts)
             .. "check that the interpreter exists and can run a chunk"
       end
    end
+   report.killed = nil
 
    -- `duration_ms` is the CPU time the payload burned inside the child, which is
    -- the only clock both processes can agree on; the wall clock is bounded
