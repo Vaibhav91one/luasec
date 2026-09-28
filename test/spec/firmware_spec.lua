@@ -136,6 +136,19 @@ describe("721: writing flash or firmware configuration", function()
          "a scratch file is not firmware state, and reading a partition is not a write")
    end)
 
+   it("reports a firmware write whose mode the source does not state, at low confidence", function()
+      local report = api.check_source([[
+local function go(mode)
+   local f = io.open("/dev/mtd0", mode)
+   f:close()
+end
+]])
+      local found = with_code(report, "721")
+      assert_equal(#found, 1, "the path is firmware state and the mode is unknown")
+      assert_equal(found[1].confidence, "low",
+         "nothing proves it writes, so nothing may claim it does")
+   end)
+
    it("names the request source when the flash path itself is attacker controlled", function()
       local report = api.check_source([[
 local function go()
@@ -180,5 +193,235 @@ end
       assert_equal(read_code, 1, "a finding above the failure threshold exits non-zero")
       assert_match(reads, "%[723%] medium: sensitive file read", reads)
       assert_no_match(reads, "%[721%]", "a read of /etc/shadow is not a firmware write")
+   end)
+end)
+
+describe("725: changing the environment a chunk runs in", function()
+   it("reports setfenv and debug.setmetatable applied to the global table", function()
+      local report = fixture("sandbox_escape.lua")
+      local found = with_code(report, "725")
+      assert_equal(#found, 5, "two setfenv spellings, a metatable on _G, and both search paths")
+      local apis = {}
+      for _, finding in ipairs(found) do apis[#apis + 1] = finding.name end
+      table.sort(apis)
+      assert_equal(table.concat(apis, " "),
+         "debug.setfenv debug.setmetatable package.cpath package.path setfenv")
+   end)
+
+   it("reports reassignment of _G, _ENV and package.loaded", function()
+      local report = api.check_source([[
+_G = {}
+_ENV = {}
+package.loaded = {}
+]])
+      local found = with_code(report, "725")
+      assert_equal(#found, 3)
+      local apis = {}
+      for _, finding in ipairs(found) do apis[#apis + 1] = finding.name end
+      table.sort(apis)
+      assert_equal(table.concat(apis, " "), "_ENV _G package.loaded")
+   end)
+
+   it("does not report a local _G, a local metatable, or a module published to the cache", function()
+      local report = fixture("sandbox_clean.lua")
+      assert_equal(#with_code(report, "725"), 0,
+         "a local named _G is not the global table, and caching a module is ordinary")
+   end)
+end)
+
+describe("726: destructive or self-modifying operation", function()
+   it("reports removal or renaming of a firmware path", function()
+      local report = fixture("destructive.lua")
+      local found = with_code(report, "726")
+      assert_equal(#found, 6, "six of the seven operations touch a firmware path")
+      local names = {}
+      for _, finding in ipairs(found) do names[#names + 1] = finding.name end
+      table.sort(names)
+      assert_equal(table.concat(names, " "), "os.remove os.remove os.remove os.remove os.remove os.rename",
+         "a rename is reported on the path it destroys, and a /tmp path is not reported")
+   end)
+
+   it("does not report a scratch file or a path the script only reads", function()
+      local report = fixture("clean_remove.lua")
+      assert_equal(#with_code(report, "726"), 0,
+         "/tmp/scratch is this script's own file and /etc/passwd is only opened")
+   end)
+
+   it("reports a truncating write to a file the script already wrote", function()
+      local report = fixture("self_modify.lua")
+      local found = with_code(report, "726")
+      assert_equal(#found, 1, "only the second open truncates what the first wrote")
+      assert_equal(found[1].line, 7, "the rewrite is the finding, not the install")
+      assert_equal(found[1].path, "/etc/init.d/tunnel")
+   end)
+end)
+
+describe("727: unbounded growth in a loop", function()
+   it("reports a loop that appends with no limit the source states", function()
+      local report = fixture("unbounded_growth.lua")
+      local found = with_code(report, "727")
+      assert_equal(#found, 4, "a computed limit, a while, an unknown iterator and a repeat")
+      local names = {}
+      for _, finding in ipairs(found) do names[#names + 1] = finding.name end
+      table.sort(names)
+      assert_equal(table.concat(names, " "), "Forin Fornum Repeat While")
+   end)
+
+   it("does not report a loop whose turns come from a container", function()
+      local report = api.check_source([[
+local function copy(t, out)
+   for key, value in pairs(t) do out[#out + 1] = value end
+   for index, value in ipairs(t) do out[#out + 1] = value end
+   for index = 1, #t do out[#out + 1] = t[index] end
+   for line in (t.text or ""):gmatch("[^\n]+") do out[#out + 1] = line end
+   for line in t.handle:lines() do out[#out + 1] = line end
+   return out
+end
+]])
+      assert_equal(#with_code(report, "727"), 0,
+         "a container's size, a line count and a match count are all ceilings the source states")
+   end)
+
+   it("does not report a loop that returns before it can come back around", function()
+      local report = api.check_source([[
+local function read_all(handle)
+   local out = {}
+   while true do
+      local line = handle:read()
+      if not line then return out end
+      out[#out + 1] = line
+   end
+end
+]])
+      assert_equal(#with_code(report, "727"), 0,
+         "while true is the ordinary way to spell a loop that ends by returning")
+   end)
+
+   it("reports a doubling even inside a loop the source bounds", function()
+      local report = api.check_source([[
+local function double(times)
+   local s = "x"
+   for i = 1, times do s = s .. s end
+   return s
+end
+]])
+      local found = with_code(report, "727")
+      assert_equal(#found, 1, "32 turns of a doubling is 4 GB, whatever the count is")
+      assert_equal(found[1].name, "Fornum")
+   end)
+
+   it("does not report a loop with a literal limit, or an append outside one", function()
+      local report = fixture("bounded_growth.lua")
+      assert_equal(#with_code(report, "727"), 0,
+         "a loop the source bounds cannot outgrow the device")
+   end)
+
+   it("reports a repeat count the request chooses, and not one the script computes", function()
+      local report = api.check_source([[
+local function pad(unit, indent)
+   return string.rep(unit, luci.http.formvalue("n")),
+          string.rep("  ", indent + 1),
+          string.rep("-", 40)
+end
+]], {std = "luci"})
+      local found = with_code(report, "727")
+      assert_equal(#found, 1,
+         "a count of 40 is a ceiling and a recursion depth is a design, not an attack")
+      assert_equal(found[1].name, "string.rep")
+      assert_equal(found[1].line, 2)
+   end)
+end)
+
+describe("728: untrusted data used as a search pattern", function()
+   it("reports a computed pattern in every library that takes one", function()
+      local report = fixture("dynamic_pattern.lua")
+      local found = with_code(report, "728")
+      assert_equal(#found, 6, "four Lua string functions and two ngx ones")
+      local names = {}
+      for _, finding in ipairs(found) do names[#names + 1] = finding.name end
+      table.sort(names)
+      assert_equal(table.concat(names, " "),
+         "ngx.re.find ngx.re.gsub string.find string.gmatch string.gsub string.match")
+   end)
+
+   it("does not report a pattern the source states, or a plain find", function()
+      local report = fixture("literal_pattern.lua")
+      assert_equal(#with_code(report, "728"), 0,
+         "a literal pattern is a search, and string.find with plain=true is not a pattern")
+   end)
+
+   it("names the request source when the pattern comes from the request", function()
+      local report = api.check_source([[
+local function go(subject)
+   return string.gsub(subject, luci.http.formvalue("p"), "")
+end
+]], {std = "luci"})
+      local found = with_code(report, "728")
+      assert_equal(#found, 1)
+      assert_equal(found[1].source, "luci.http.formvalue")
+      assert_equal(found[1].confidence, "high", "the dataflow is unambiguous")
+   end)
+end)
+
+describe("firmware rules: cost and hostile input", function()
+   -- One block per line count, each exercising every code in this module, so
+   -- the scaling measured is the module's and not one of its detectors. "@" is
+   -- the block's index.
+   local BLOCK = [[
+-- generated block @
+local function handler_@(req, p)
+   local v@ = req and p or nil
+   uci.set("system", "@system[0]", "opt_@", v@)
+   io.open("/etc/config/n_@", "w"):write(tostring(v@))
+   io.open("/etc/init.d/svc_@", "w")
+   io.open("/proc/self/environ", "r")
+   setfenv(1, v@)
+   os.remove("/etc/config/n_@")
+   local s = ""
+   for k = 1, v@ do s = s .. "x" end
+   string.gsub(s, v@, "")
+   return s
+end
+]]
+
+   local function generated(blocks)
+      local out = {}
+      for index = 0, blocks - 1 do
+         out[#out + 1] = (BLOCK:gsub("@", function() return tostring(index) end))
+      end
+      -- Lua requires return to be the last statement in a block.
+      out[#out + 1] = "return handler_0\n"
+      return table.concat(out)
+   end
+
+   it("keeps the findings per line constant as the file grows", function()
+      local function findings(blocks)
+         return #api.check_source(generated(blocks), {std = "+openwrt"})
+      end
+      local small, large = findings(50), findings(200)
+      assert_equal(large, 4 * small,
+         "four times the source is four times the findings: no detector drifts")
+   end)
+
+   it("stays linear on a file an attacker wrote to be expensive", function()
+      local hostile = table.concat({
+         -- One long run of one character, as a path, in every set.
+         ('io.open("/%s", "r")\nio.open("/etc/shadow%s", "r")\n'):format(("a"):rep(4000), ("b"):rep(4000)),
+         -- Many short segments, and one that nearly matches every basename rule.
+         ('io.open("%s/x", "r")\n'):format(("/abcdefghij"):rep(400)),
+         -- A concat chain 3000 deep on a firmware path.
+         ('local a = "x"\nio.open("/etc/config/"%s, "w")\n'):format((" .. a"):rep(3000)),
+         -- A local definition cycle used as a path.
+         "local a, b\n", "a = b\nb = a\n", 'io.open(a, "w")\n',
+         -- Loops nested 120 deep around one append.
+         "local s = ''\n", ("for i = 1, n do\n"):rep(120), "s = s .. 'x'\n", ("end\n"):rep(120),
+      })
+      local report = api.check_source(hostile, {std = "+openwrt"})
+      assert_true(#report >= 0, "an expensive file is analyzed, not refused")
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "901",
+            "an unexpected shape must degrade to silence, not a parse failure: "
+               .. tostring(finding.message))
+      end
    end)
 end)
