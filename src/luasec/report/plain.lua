@@ -28,6 +28,12 @@ function plain.render(report, opts)
       if finding.source then
          text = text .. " [source: " .. finding.source .. "]"
       end
+      if finding.sanitizer then
+         text = text .. " [through " .. finding.sanitizer .. "]"
+      end
+      if finding.exposed_as then
+         text = text .. " [exposed as " .. finding.exposed_as .. "]"
+      end
       if finding.snippet then
          text = text .. "\n    " .. finding.snippet
       end

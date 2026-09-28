@@ -97,31 +97,55 @@ local function looks_like_lua(path)
    return false
 end
 
+-- Run a command with an untrusted path, without the path ever being part of the
+-- command text.
+--
+-- Lua's %q escapes only " and \, so a directory named '/tmp/$(cmd)' would
+-- otherwise run a command substitution inside luasec itself, and SECURITY.md says
+-- filenames come from attackers. Command substitution output is not re-parsed as
+-- shell syntax, so handing the path over as a file and reading it with $(cat ...)
+-- is safe where interpolating it is not.
+local function popen_with_path(command, path)
+   local tmp = os.tmpname()
+   local handle = assert(io.open(tmp, "wb"))
+   handle:write(path)
+   handle:close()
+   local command_text = string.format(
+      'p="$(cat %s)" || exit 0; %s', string.format("%q", tmp), command)
+   return io.popen(command_text, "r"), tmp
+end
+
 local function list_dir(path)
    local files = {}
-   local pipe = io.popen("find " .. string.format("%q", path) ..
-      " -type f 2>/dev/null | LC_ALL=C sort")
+   local pipe, tmp = popen_with_path('find "$p" -type f -print0 2>/dev/null | LC_ALL=C sort -z', path)
    if not pipe then return files end
-   for line in pipe:lines() do
-      if line ~= "" then files[#files + 1] = line end
+   -- NUL separated: a filename may contain a newline, and line-separated output
+   -- would report it as two paths, one of which never existed. `lines` cannot
+   -- take a NUL, so the whole stream is read and split here.
+   local blob = pipe:read("*a")
+   for name in tostring(blob or ""):gmatch("[^\0]+") do
+      files[#files + 1] = name
    end
    pipe:close()
+   os.remove(tmp)
    return files
 end
 
 local function file_exists(path)
-   local pipe = io.popen("test -f " .. string.format("%q", path) .. " && echo yes")
+   local pipe, tmp = popen_with_path('test -f "$p" && echo yes', path)
    if not pipe then return false end
    local answer = pipe:read("*l")
    pipe:close()
+   os.remove(tmp)
    return answer == "yes"
 end
 
 local function is_dir(path)
-   local pipe = io.popen("test -d " .. string.format("%q", path) .. " && echo yes")
+   local pipe, tmp = popen_with_path('test -d "$p" && echo yes', path)
    if not pipe then return false end
    local answer = pipe:read("*l")
    pipe:close()
+   os.remove(tmp)
    return answer == "yes"
 end
 

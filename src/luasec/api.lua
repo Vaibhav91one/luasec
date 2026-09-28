@@ -154,8 +154,14 @@ function api.check_source(source, opts)
 
    local findings = taint_engine.run(chstate, opts)
 
+   -- The cross-function and exposed-sink passes both visit every call site and
+   -- every named function. On a file with tens of thousands of them that is
+   -- minutes of work for a heuristic, so above this many lines they are skipped
+   -- and 904 says so rather than the report quietly claiming a clean function.
+   local expensive = #chstate.lines > (opts.max_function_lines or 4000)
+
    -- Taint across function boundaries, unless the file is too large for it.
-   if chstate.resolved_locals ~= false and not opts.no_interprocedural then
+   if chstate.resolved_locals ~= false and not opts.no_interprocedural and not expensive then
       local state = taint_engine.new_state()
       taint_engine.run(chstate, opts, state)
       local seen = {}
@@ -185,7 +191,7 @@ function api.check_source(source, opts)
    -- 708: an exported function whose execution sink nothing in this file feeds.
    -- The sink exists; the input lives somewhere we cannot see.
    if chstate.resolved_locals ~= false and not opts.no_interprocedural
-         and opts.report_exposed_sinks ~= false then
+         and opts.report_exposed_sinks ~= false and not expensive then
       local function sink_key(exposed)
          if not (exposed.sink_line and exposed.sink_offset) then return nil end
          local start = exposed.sink_offset - (chstate.line_offsets[exposed.sink_line] or 0) + 1
@@ -230,6 +236,17 @@ function api.check_source(source, opts)
       end
    end
    findings = deduped
+
+   if expensive then
+      findings[#findings + 1] = {
+         code = "904", line = 1, column = 1, end_column = 1,
+         severity = codes.get("904").severity, confidence = "certain",
+         cwe = "CWE-0", name = "very large file",
+         node_count = chstate.node_count, mode = "no cross-function analysis",
+         message = codes.render(codes.get("904"), {name = "very large file"})
+            .. "; cross-function and exposed-sink analysis were skipped",
+      }
+   end
 
    if chstate.resolved_locals == false then
       findings[#findings + 1] = {

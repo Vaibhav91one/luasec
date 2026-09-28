@@ -70,8 +70,10 @@ register {code = "706", severity = "high", cwe = "CWE-94",
 register {code = "707", severity = "high", cwe = "CWE-94",
    message = "LuaJIT FFI escape hatch used ({name})"}
 
-register {code = "708", severity = "medium", cwe = "CWE-78",
-   message = "execution sink reached only through a wrapper ({name})"}
+-- Severity follows the sink it replaces, so it is registered as high; the
+-- emitted finding copies the severity of the code it stands in for.
+register {code = "708", severity = "high", cwe = "CWE-78",
+   message = "execution sink in an exported function that nothing in this file feeds ({name})"}
 
 register {code = "709", severity = "critical", cwe = "CWE-78", confidence = "high",
    message = "untrusted data reaches command execution ({name})",

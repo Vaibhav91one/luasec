@@ -5,7 +5,6 @@ local args = {}
 local FLAGS_WITH_VALUE = {
    ["--format"] = "format",
    ["--std"] = "std",
-   ["--profile"] = "profile",
    ["--severity-threshold"] = "severity_threshold",
    ["--min-confidence"] = "min_confidence",
    ["--baseline"] = "baseline",
@@ -14,8 +13,6 @@ local FLAGS_WITH_VALUE = {
    ["--output"] = "output",
    ["-o"] = "output",
    ["--jobs"] = "jobs",
-   ["--max-iterations"] = "max_iterations",
-   ["--min-length"] = "min_length",
    ["--max-nodes"] = "max_nodes",
    ["--validate-timeout"] = "validate_timeout",
 }
@@ -30,9 +27,7 @@ local BOOLEAN_FLAGS = {
    ["--no-raw-scan"] = "no_raw_scan",
    ["--no-dynamic-sinks"] = "no_dynamic_sinks",
    ["--quiet"] = "quiet",
-   ["--codes"] = "codes",
    ["--ranges"] = "ranges",
-   ["--verbose"] = "verbose",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -86,6 +81,11 @@ function args.parse(argv)
             opts[key] = value
          end
          index = index + 2
+      elseif token == "--" then
+         for rest = index + 1, #argv do
+            opts.paths[#opts.paths + 1] = argv[rest]
+         end
+         break
       elseif token:sub(1, 1) == "-" and token ~= "-" then
          return nil, "unknown option " .. token
       else
@@ -117,8 +117,8 @@ selection:
   --ignore <patterns>        suppress matching codes
   --enable <patterns>        force matching codes on
   --rules <file>             load additional sink/source declarations
-  --profile <name>           strict, audit (default) or quick
   --severity-threshold <s>   lowest severity to report: low, medium, high, critical
+                            (a file that could not be analyzed is always reported)
   --min-confidence <c>       lowest confidence to report: certain, high, medium, low
    --baseline <file.json>    report only what is new since that json report
    --fail-on <severity>       exit 1 at or above this severity

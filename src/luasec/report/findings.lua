@@ -87,6 +87,10 @@ local function project(raw, status)
       end_column = number(raw.end_column),
    }
    if raw.snippet then out.snippet = text(raw.snippet) end
+   -- Whether the data crossed a quoting helper decides if a 709 is exploitable,
+   -- so it is part of the contract rather than an engine detail.
+   if raw.sanitizer then out.sanitizer = text(raw.sanitizer) end
+   if raw.exposed_as then out.exposed_as = text(raw.exposed_as) end
    if status then out.status = status end
    out.trace = normalize_trace(raw.trace, out)
    return out

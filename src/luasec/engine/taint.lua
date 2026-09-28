@@ -65,15 +65,36 @@ local function any_quoted(descriptors)
    return false
 end
 
--- Does a function body look like shell quoting? A quote character literal, or
--- an escape that doubles a quote, is the shape every shell quoting helper has.
+-- Does a function body look like shell quoting?
+--
+-- It has to actually quote: a literal that is a single-quoted shell word, or a
+-- gsub whose pattern is the doubled-quote escape. Merely containing an
+-- apostrophe is not enough -- `log_it(s)` writing "user's input" is not a
+-- quoting helper, and treating it as one would hide a real injection.
 local function looks_like_shell_quote(node, depth)
    depth = depth or 0
    if depth > 24 or type(node) ~= "table" then return false end
    if node.tag == "String" then
       local text = node[1]
-      if type(text) == "string" and (text:find("'") or text:find('"\\""')) then
-         return true
+      if type(text) == "string" then
+         if #text >= 2 and text:sub(1, 1) == "'" and text:sub(-1) == "'" then
+            return true
+         end
+         if text:find("''", 1, true) or text:find("\\'") then
+            return true
+         end
+      end
+   elseif node.tag == "Call" or node.tag == "Invoke" then
+      local callee = node[1]
+      if callee and callee.tag == "Index" and callee[2] and callee[2][1] == "gsub" then
+         for index = 2, #node do
+            local argument = node[index]
+            if argument and argument.tag == "String" and type(argument[1]) == "string" then
+               if argument[1]:find("''", 1, true) or argument[1]:find("\\'") then
+                  return true
+               end
+            end
+         end
       end
    end
    for index = 1, #node do
@@ -552,7 +573,8 @@ end
 build_trace = function(node, sources)
    local trace = {}
    for _, source in ipairs(sources) do
-      trace[#trace + 1] = {kind = "source", name = source.id, line = source.line}
+      trace[#trace + 1] = {kind = "source", name = source.display_id or source.id,
+         line = source.line}
    end
    trace[#trace + 1] = {kind = "sink", name = nil, line = node.line}
    return trace
@@ -627,6 +649,9 @@ local function check_sink(node, item, state, chstate, opts)
 
    for _, tainted_arg in ipairs(tainted_args) do
       local sources = set_list(tainted_arg.taint)
+      for _, descriptor in ipairs(sources) do
+         descriptor.display_id = (descriptor.id:gsub("|quoted$", ""))
+      end
       local source = sources[1]
       local taint_spec = {
          code = kind == "dyncode" and "710" or "709",
@@ -636,7 +661,7 @@ local function check_sink(node, item, state, chstate, opts)
       emit(state, taint_spec, node, chstate, {
          name = path,
          confidence = source.confidence or code_confidence(taint_spec.code),
-         source = source.id,
+         source = source.display_id or source.id,
          sources = sources,
          trace = build_trace(tainted_arg.node, sources),
          snippet = snippet_at(chstate, tainted_arg.node),
@@ -847,11 +872,24 @@ taint.args_of = args_of
 taint.is_constant = const_eval.is_constant
 
 -- The line whose items are a function's body, or nil.
-taint.line_of_function = function(chstate, function_node)
+-- One pass to find a function's line was O(lines) per call, and the
+-- interprocedural pass does it once per call site. Index once instead.
+local line_index_cache = {chstate = nil, by_node = nil}
+
+local function line_index(chstate)
+   if line_index_cache.chstate == chstate then return line_index_cache.by_node end
+   local by_node = {}
    for _, line in ipairs(chstate.lines) do
-      if line.node == function_node then return line end
+      if line.node and not by_node[line.node] then
+         by_node[line.node] = line
+      end
    end
-   return nil
+   line_index_cache.chstate, line_index_cache.by_node = chstate, by_node
+   return by_node
+end
+
+taint.line_of_function = function(chstate, function_node)
+   return line_index(chstate)[function_node]
 end
 
 -- Value objects bound to a formal parameter at the function's entry item.

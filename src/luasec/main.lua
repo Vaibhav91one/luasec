@@ -33,6 +33,17 @@ local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
 local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the validated snippet "
    .. "chose; they are reported as data, not as luasec findings"
 
+-- Findings that describe what WE could not do, rather than what the code does.
+-- A threshold must never turn "we did not analyze this" into "clean", because an
+-- operator running --severity-threshold high over a firmware tree would get a
+-- green build for every file that failed to parse.
+local INCOHERENT = {
+   ["901"] = true,  -- could not parse
+   ["904"] = true,  -- analyzed approximately
+   ["021"] = true,  -- a suppression the operator asked for could not be read
+   ["902"] = true,  -- dialect the parser cannot read
+}
+
 local SEVERITY_RANK = {low = 1, medium = 2, high = 3, critical = 4}
 local CONFIDENCE_RANK = {low = 1, medium = 2, high = 3, certain = 4}
 
@@ -71,7 +82,7 @@ local function apply_rules(findings, opts)
          end
       end
 
-      if keep and opts.severity_threshold then
+      if keep and opts.severity_threshold and not INCOHERENT[finding.code] then
          if (SEVERITY_RANK[finding.severity] or 0) < (SEVERITY_RANK[opts.severity_threshold] or 0) then
             keep = false
          end

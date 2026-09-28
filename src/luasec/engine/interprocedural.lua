@@ -83,10 +83,17 @@ function interprocedural.exposed_sinks(chstate, opts)
    local state = taint_engine.new_state()
    local exposed = {}
 
+   -- Functions this file calls are not exposures: whatever feeds them is here,
+   -- and if it is untrusted the flow is already reported as 709.
+   local called = {}
+   for _, site in ipairs(callgraph.call_sites(chstate)) do
+      called[site.callee] = true
+   end
+
    for _, line in ipairs(chstate.lines) do
       local function_node = line.node
       if function_node and function_node.tag == "Function" and function_node.name then
-         local has_sink = callgraph.has_sink(chstate, function_node)
+         local has_sink = not called[function_node] and callgraph.has_sink(chstate, function_node)
          if has_sink then
             local reached = {}
             callgraph.sink_from_arguments(chstate, state, function_node, reached)
