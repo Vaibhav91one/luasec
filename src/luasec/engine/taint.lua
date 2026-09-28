@@ -459,6 +459,13 @@ local function check_sink(node, item, state, chstate, opts)
    local args = args_of(node)
    local kind = sink.kind or "shell"
 
+   -- Writing attacker data into a configuration that a service later executes is
+   -- a different finding (722) with the path it can reach, so the firmware rule
+   -- module owns it.
+   if kind == "config" then
+      return
+   end
+
    if sink.kind == "expose" then
       if opts.report_sink_shapes ~= false then
          emit(state, sink, node, chstate, {name = path})

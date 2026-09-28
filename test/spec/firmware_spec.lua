@@ -47,13 +47,16 @@ describe("722: configuration injection through uci", function()
          "a value fixed in the source cannot be injected by a caller")
    end)
 
-   it("does not add a 722 to a statement already reported as untrusted data", function()
+   it("reports a request-supplied configuration value as 722, once, not also as 709", function()
       local report = fixture("uci_tainted_value.lua", {std = "openwrt+luci"})
       local codes = {}
       for _, finding in ipairs(report) do codes[#codes + 1] = finding.code end
       table.sort(codes)
-      assert_equal(table.concat(codes, ","), "709",
-         "the value comes from the request, so 722 must not be reported beside the 709")
+      assert_equal(table.concat(codes, ","), "722",
+         "a configuration write is its own finding, and one statement yields one finding")
+      local found = with_code(report, "722")
+      assert_equal(found[1].chain, "/etc/config/system.@system[0].hostname",
+         "the finding must name the configuration path the value can reach")
    end)
 
    it("treats every declared config API as a configuration write", function()

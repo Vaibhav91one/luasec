@@ -34,14 +34,19 @@ local BOOLEAN_FLAGS = {
    ["--verbose"] = "verbose",
 }
 
--- Options that take a list, repeatable and comma separated.
-local LIST_OPTIONS = {only = true, ignore = true, enable = true}
+-- Options that take a list. They are accepted both as `--opt value` and
+-- `--opt=value`, and each occurrence is repeatable and comma separated.
+local LIST_OPTIONS = {only = "only", ignore = "ignore", enable = "enable"}
 
 local function add_list(target, name, value)
    target[name] = target[name] or {}
    for part in value:gmatch("[^,]+") do
       target[name][#target[name] + 1] = part
    end
+end
+
+for name in pairs(LIST_OPTIONS) do
+   FLAGS_WITH_VALUE["--" .. name] = name
 end
 
 --- Parse argv (array, without the program name).

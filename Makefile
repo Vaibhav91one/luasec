@@ -107,6 +107,10 @@ upstream-specs: vendor
 
 .PHONY: adversarial
 adversarial: lua vendor
+	@mkdir -p test/adversarial
+	@if [ -z "$$(find test/adversarial -name '*_spec.lua' -type f 2>/dev/null | head -1)" ]; then \
+	   echo "adversarial: FAIL - test/adversarial has no specs; the gate would pass vacuously"; exit 1; \
+	fi
 	@$(LUA_RUN) test/run.lua test/adversarial
 
 .PHONY: ci
