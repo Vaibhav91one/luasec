@@ -33,13 +33,20 @@ local function number(value)
    return tonumber(value) or 0
 end
 
---- One trace step: kind, the line it is on, and its name. The sink step has no
--- name of its own, so it gets the finding's sink rather than an empty one.
-local function step(raw, fallback_name)
+--- One trace step: kind, the line it is on, its name, and the FILE it is in.
+-- The sink step has no name of its own, so it gets the finding's sink rather
+-- than an empty one.
+--
+-- The file is part of the contract. A whole-program flow starts in one file and
+-- ends in another, and a consumer that renders every step against the finding's
+-- own file sends the reader to the wrong function on the wrong line: the source
+-- step of a cross-file 709 is in the handler, not where the sink is.
+local function step(raw, fallback_name, fallback_file)
    return {
       kind = text(raw.kind),
       line = number(raw.line),
       name = text(raw.name or fallback_name),
+      file = text(raw.file or fallback_file),
    }
 end
 
@@ -53,11 +60,11 @@ local function normalize_trace(raw, finding)
    local sources, rest, sink = {}, {}, nil
    for _, entry in ipairs(raw) do
       if entry.kind == "source" then
-         sources[#sources + 1] = step(entry)
+         sources[#sources + 1] = step(entry, nil, finding.file)
       elseif entry.kind == "sink" then
-         sink = step(entry, finding.sink)
+         sink = step(entry, finding.sink, finding.file)
       else
-         rest[#rest + 1] = step(entry)
+         rest[#rest + 1] = step(entry, nil, finding.file)
       end
    end
 

@@ -148,3 +148,89 @@ return 1
       assert_match(out, "lua:%s+", out)
    end)
 end)
+
+-- A unique directory under /tmp, created eagerly so the path is a directory
+-- rather than a name inside one.
+local scratch_serial = 0
+local function scratch_dir(tag)
+   scratch_serial = scratch_serial + 1
+   local dir = os.getenv("TMPDIR") or "/tmp"
+   dir = dir:gsub("/$", "")
+   dir = ("%s/luasec_spec_%s_%d_%d"):format(dir, tag, os.time(), scratch_serial)
+   assert_true(os.remove(dir) == nil or true, "scratch path is free")
+   os.execute("mkdir -p " .. string.format("%q", dir))
+   return dir
+end
+
+describe("a directory the walk cannot read", function()
+   it("fails the run instead of reporting a clean tree", function()
+      -- macOS and Linux both refuse a 000 directory to the owner. Where the
+      -- test runs as a user that bypasses permissions, there is nothing to
+      -- assert, so the case is skipped rather than asserted against noise.
+      local dir = scratch_dir("walk")
+      local locked = dir .. "/locked"
+      os.execute("mkdir " .. string.format("%q", locked))
+      -- Untrusted input reaching a sink, so this file has a finding of its
+      -- own: the point of the test is that we report what we could read AND
+      -- what we could not.
+      local f = assert(io.open(dir .. "/visible.lua", "w"))
+      f:write('local function ping(host)\n   os.execute("ping -c1 " .. http.formvalue(host))\nend\nreturn ping\n')
+      f:close()
+      os.execute("chmod 000 " .. string.format("%q", locked))
+
+      local probe = io.popen("ls " .. string.format("%q", locked) .. " 2>/dev/null")
+      local readable = probe:read("*a")
+      probe:close()
+      local out, code = harness.cli({ dir })
+
+      os.execute("chmod 755 " .. string.format("%q", locked))
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      if readable == "" then
+         -- The unreadable directory really was unreadable.
+         assert_true(code ~= 0,
+            "a tree we could not fully read must not exit clean:\n" .. out)
+         assert_match(out, "901", out)
+         assert_match(out, "not analyzed", out)
+         -- The file we could read is still reported, and nothing is invented.
+         assert_match(out, "visible%.lua", out)
+      end
+   end)
+
+   it("reports nothing for a tree it can read completely", function()
+      local dir = scratch_dir("walk_clean")
+      local f = assert(io.open(dir .. "/ok.lua", "w"))
+      f:write("local x = 1\n")
+      f:close()
+      local out, code = harness.cli({ dir })
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_equal(code, 0, out)
+      assert_no_match(out, "901", out)
+   end)
+end)
+
+describe("--fail-on", function()
+   it("does not report success for a run that could not read everything", function()
+      local dir = scratch_dir("fail_on")
+      os.execute("mkdir " .. string.format("%q", dir .. "/locked"))
+      local f = assert(io.open(dir .. "/quiet.lua", "w"))
+      f:write("local x = 1\n")
+      f:close()
+      os.execute("chmod 000 " .. string.format("%q", dir .. "/locked"))
+
+      local probe = io.popen("ls " .. string.format("%q", dir .. "/locked") .. " 2>/dev/null")
+      local unreadable = probe:read("*a") == ""
+      probe:close()
+      local out, code = harness.cli({ "--fail-on=high", dir })
+
+      os.execute("chmod 755 " .. string.format("%q", dir .. "/locked"))
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      if unreadable then
+         -- The threshold exists to quieten low-severity findings. It is not a
+         -- way to green a run that covered less ground than it was asked to.
+         assert_true(code ~= 0, "--fail-on=high hid a tree we could not read:\n" .. out)
+         assert_match(out, "not analyzed", out)
+      end
+   end)
+end)

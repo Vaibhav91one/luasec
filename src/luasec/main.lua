@@ -234,11 +234,42 @@ local function run(argv)
    local options_ok, options_error = api.validate_options(opts)
    if not options_ok then return fail(options_error) end
 
-   local files, walk_error = walk.collect(opts.paths)
-   if not files then return fail(walk_error) end
+   local files, walk_errors = walk.collect(opts.paths)
+   if not files then return fail(walk_errors) end
 
-   local report = api.analyze(files, opts)
+   -- A path we could not read is reported as its own finding, so the run fails
+   -- on it instead of quietly covering less ground than asked.
+   local report = {}
+   for _, problem in ipairs(walk_errors or {}) do
+      report[#report + 1] = {
+         code = "901", line = 1, column = 1, end_column = 1,
+         severity = "low", confidence = "certain", cwe = "CWE-0",
+         name = problem.path or "unreadable path",
+         file = problem.path,
+         message = "not analyzed: " .. problem.message,
+      }
+   end
+   for _, finding in ipairs(api.analyze(files, opts)) do
+      report[#report + 1] = finding
+   end
    report = apply_rules(report, opts)
+
+   -- Ground we did not cover. A file that could not be read and a directory
+   -- that could not be listed are both absences, not clean results, and
+   -- --fail-on exists to quieten low-severity findings rather than to excuse
+   -- them. This is checked before the baseline too: a baseline knows which
+   -- findings are old, not which parts of the tree were skipped.
+   local unanalyzed = 0
+   for _, finding in ipairs(report) do
+      local message = type(finding.message) == "string" and finding.message or ""
+      if message:find("not analyzed", 1, true)
+         or message:find("cannot read file", 1, true) then
+         unanalyzed = unanalyzed + 1
+      end
+   end
+   -- Counted here, acted on after the report is written: a run that skipped
+   -- part of its input still has to show what it found.
+   local ground_missing = unanalyzed > 0
 
    local threshold_rank = SEVERITY_RANK[opts.fail_on or "low"] or 0
 
@@ -255,12 +286,17 @@ local function run(argv)
       -- without a baseline.
       local written = emit(list, opts.format or "plain", opts)
       if written then return written end
+      if ground_missing then return EXIT_FINDINGS end
       return exceeded and EXIT_NEW or EXIT_CLEAN
    end
 
    local list = report_contract.normalize(report)
    local written = emit(list, opts.format or "plain", opts)
    if written then return written end
+
+   if ground_missing then
+      return EXIT_FINDINGS
+   end
 
    if #list == 0 then
       return EXIT_CLEAN

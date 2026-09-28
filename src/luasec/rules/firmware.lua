@@ -1061,6 +1061,8 @@ local HANDLER_NAMES = {
 -- A `handle*` prefix is the same weak signal: a library may well have a
 -- handle_connection. Kept only when the file declares itself a controller, which
 -- the dispatcher path checks, so a prefix alone is not enough.
+local HANDLER_PREFIXES = {"handle", "handler"}
+
 local function is_handler_name(key, is_controller)
    if HANDLER_NAMES[key] then return true end
    if not is_controller then return false end

@@ -115,7 +115,10 @@ function sarif.render(report, opts)
             -- reads. A `message` here is not an option - the schema forbids
             -- extra properties on a threadFlowLocation.
             locations[#locations + 1] = {
-               location = physical(uri, step_region(finding, step, step.kind == "sink")),
+               -- A whole-program step can be in a different file from the
+               -- finding, which is reported at the sink. Render each step
+               -- against its own file, or the flow points at the wrong line.
+               location = physical(step.file or uri, step_region(finding, step, step.kind == "sink")),
                executionOrder = order,
                importance = step.kind == "source" and "essential"
                   or step.kind == "sink" and "important" or "unimportant",

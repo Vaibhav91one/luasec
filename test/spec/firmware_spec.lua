@@ -692,3 +692,16 @@ end
       end
    end)
 end)
+
+describe("724: a controller field that is not a hook", function()
+   it("still reports the hook that comes after it", function()
+      local report = fixture("controller_field_order.lua", {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "one exposed handler, so one 724")
+      assert_equal(found[1].exposed_as, "on_after_commit")
+      -- The fault this guards against presented itself as 901, a parse error on
+      -- a file that parses. Nothing may be reported for a file that was read.
+      assert_equal(#with_code(report, "901"), 0,
+         "a readable controller is not a parse failure")
+   end)
+end)

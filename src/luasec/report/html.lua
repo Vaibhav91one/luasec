@@ -74,7 +74,7 @@ local function flow_html(finding)
          "<li><b>%s</b> %s <span class='loc'>%s:%d</span></li>",
          escape(step.kind),
          escape(step.name ~= "" and step.name or step.kind),
-         escape(finding.file ~= "" and finding.file or "source.lua"),
+         escape((step.file ~= "" and step.file or finding.file) or "source.lua"),
          step.line)
    end
 

@@ -123,19 +123,85 @@ local function popen_with_path(command, path)
    return io.popen(command_text, "r"), tmp
 end
 
-local function list_dir(path)
-   local files = {}
-   local pipe, tmp = popen_with_path('find "$p" -type f -print0 2>/dev/null | LC_ALL=C sort -z', path)
-   if not pipe then return files end
-   -- NUL separated: a filename may contain a newline, and line-separated output
-   -- would report it as two paths, one of which never existed. `lines` cannot
-   -- take a NUL, so the whole stream is read and split here.
-   local blob = pipe:read("*a")
-   for name in tostring(blob or ""):gmatch("[^\0]+") do
-      files[#files + 1] = name
+-- Directories in `path` we are not allowed to read.
+--
+-- Neither find's exit status nor its stderr catches an unreadable EMPTY
+-- directory on every platform, and an empty directory is exactly the case that
+-- matters: it is the tree that looks complete and is not. BSD find has no
+-- -readable, so each candidate is asked about with test -r.
+--
+-- Two traps, both of which produce a silently empty answer here: -prune
+-- matches the top directory first and cuts the entire walk, and `-exec cmd {}
+-- +` passes every match as trailing arguments, so a `sh -c` script has to loop
+-- over "$@" rather than read "$1".
+local function unreadable_dirs(path)
+   local pipe, tmp = popen_with_path(
+      'find "$p" -type d -exec sh -c \'for x in "$@"; do '
+      .. 'test -r "$x" || printf "%s\\n" "$x"; done\' _ {} + 2>/dev/null', path)
+   if not pipe then return {} end
+   local out = {}
+   for name in tostring(pipe:read("*a") or ""):gmatch("[^\n]+") do
+      out[#out + 1] = name
    end
    pipe:close()
    os.remove(tmp)
+   return out
+end
+
+local function list_dir(path)
+   local files = {}
+   -- Two signals, because neither one alone is reliable. find's exit status
+   -- depends on the platform and on whether the unreadable directory happened
+   -- to be empty; its stderr is where "Permission denied" actually lands. Both
+   -- are checked, and either one means this listing is partial: "could not read
+   -- this tree" and "this tree has no Lua in it" print the same thing otherwise,
+   -- and the first must never be reported as the second.
+   local errfile = os.tmpname()
+   local pipe, tmp = popen_with_path(
+      'find "$p" -type f -print0 2>' .. string.format("%q", errfile), path)
+   if not pipe then
+      os.remove(errfile)
+      return nil, ("could not list directory: %s"):format(path)
+   end
+   -- NUL separated: a filename may contain a newline, and line-separated output
+   -- would report it as two paths, one of which never existed. `lines` cannot
+   -- take a NUL, so the whole stream is read and split here.
+   local output = pipe:read("*a")
+   local ok, reason = pipe:close()
+   os.remove(tmp)
+
+   local partial
+   local complaints = io.open(errfile, "r")
+   if complaints then
+      local said = complaints:read("*a")
+      complaints:close()
+      -- Reported for the path, not for whatever find phrased it as.
+      if said and said:gsub("%s", "") ~= "" then
+         partial = ("could not list %s: permission denied reading part of the tree"):format(path)
+      end
+   end
+   os.remove(errfile)
+
+   -- find lists what it can and exits non-zero for the rest, so a partial
+   -- listing is still a listing. Throwing it away would drop every readable
+   -- file in the tree because of one unreadable directory; keeping it silent
+   -- would claim we read the whole tree. Return both.
+   if not partial and not ok and reason and reason ~= "" then
+      partial = ("could not list %s: find %s"):format(path, reason)
+   end
+
+   for name in tostring(output or ""):gmatch("[^\0]+") do
+      files[#files + 1] = name
+   end
+   -- Sorted here rather than by `sort -z`, which BSD sort does not have.
+   table.sort(files)
+   for _, unreadable in ipairs(unreadable_dirs(path)) do
+      -- Reported for the directory that was skipped, which is the thing an
+      -- operator has to go and fix.
+      partial = ("could not read directory %s"):format(unreadable)
+      break
+   end
+   if partial then return files, partial end
    return files
 end
 
@@ -158,17 +224,31 @@ local function is_dir(path)
 end
 
 --- Expand a list of paths into a sorted, de-duplicated array of files to analyze.
--- Returns files, or nil plus an error message for paths that do not exist.
+-- Returns files plus a list of paths that could not be walked, or nil plus an
+-- error message for a path that does not exist. A directory we cannot read is
+-- collected as an error and the rest of the scan continues: the operator wants
+-- both the findings and the knowledge that a piece was skipped.
 function walk.collect(paths)
-   local files, seen = {}, {}
+   local files, seen, errors = {}, {}, {}
 
    for _, path in ipairs(paths) do
       if is_dir(path) then
-         for _, file in ipairs(list_dir(path)) do
+         local listed, list_error = list_dir(path)
+         local skipped = path
+         if not listed then
+            errors[#errors + 1] = {message = list_error, path = skipped}
+         else
+         -- A partial listing is still a listing, and still an error: the files
+         -- we did get are analyzed, and the part we could not read is reported.
+         if list_error then
+            errors[#errors + 1] = {message = list_error, path = skipped}
+         end
+         for _, file in ipairs(listed) do
             if not seen[file] and looks_like_lua(file) then
                seen[file] = true
                files[#files + 1] = file
             end
+         end
          end
       elseif file_exists(path) then
          if not seen[path] then
@@ -180,7 +260,7 @@ function walk.collect(paths)
       end
    end
 
-   return files
+   return files, errors
 end
 
 return walk

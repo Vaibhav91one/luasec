@@ -10,7 +10,7 @@ fixtures. The corpora are cloned by `make corpus` and are gitignored.
 | `corpus/luci` | 73 | current LuCI libraries |
 | `corpus/luci-1806` | 460 | LuCI at openwrt-18.06: the `.lua` web layer, written as root-executing CGI |
 | `corpus/luajit` | 29 | LuaJIT, the dialect firmware vendors use for speed |
-| **total** | **566** | |
+| **total** | **562** | |
 
 Command:
 
@@ -20,20 +20,27 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-119 findings over 566 files (21%), after five rounds of fixing false positives
+148 findings over 562 files, 75 of them carrying at least one (13%), after five
+rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
-embedded. An earlier version of this document claimed 178; that number never
-added up, because the per-code table below was audited correctly and only the
-headline was wrong. The command is here so the number can be reproduced rather
-than believed.
+embedded.
+
+This number has been wrong three times, each time because the headline was
+edited by hand and the per-code table was not. `test/spec/precision_spec.lua`
+now parses this file, sums the per-code counts, and fails the build if the
+headline and the table disagree, so the two cannot drift apart again. The
+command above is here so the number can be reproduced rather than believed.
+
+
 
 Hand-audited sample by code:
 
 | Code | Count | Assessment |
 | --- | --- | --- |
+| 724 RPC handler | 27 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
 | 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed |
-| 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. The corpus has no hardcoded credential in it at all, so the true positives this rule can make are covered by fixtures, not by this table |
+| 747 hardcoded secret | 2 | was 17 and every one of the 17 was a false positive; see below. Two remain, and the release review then found the rule missing the forms firmware actually uses: a `uci.set` key argument, a CBI `.default`/`.value` field, and a value concatenated from constants at author time. Those are fixtures, not corpus, because the corpus contains no hardcoded credential |
 | 901 parse failure | 14 | true: real Lua using gettext escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. A dialect gap, honestly reported |
 | 727 unbounded growth | 12 | true after narrowing: string accumulation in a loop with no visible ceiling |
 | 707 FFI escape | 9 | true: LuaJIT source |
@@ -41,6 +48,11 @@ Hand-audited sample by code:
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
 | 709 injection | 3 | true, and the one that matters |
 | 701 shape-only | 3 | true: a sink whose argument the analyzer could not trace |
+| 703 file write | 6 | true: writes outside /tmp and /var/run |
+| 702 env manipulation | 4 | true: setfenv grants and _G metatables |
+| 704 unencrypted transport | 1 | true: a request body over plain HTTP |
+| 705 dynamic require | 5 | true after the rule was un-inverted; see below |
+| 725 env escape | 1 | true after 725 was narrowed from every setfenv to the dangerous ones |
 
 ## What the corpus fixed
 

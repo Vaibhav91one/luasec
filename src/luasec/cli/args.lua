@@ -124,7 +124,11 @@ selection:
    --fail-on <severity>       exit 1 at or above this severity
 
 analysis:
-  --whole-program            resolve calls across files
+  --whole-program            resolve calls across files. Follows require edges
+                             and passes taint into a required module's
+                         parameters, but NOT a value a module RETURNS: a
+                         function that hands back its argument is opaque, and a
+                         flow that crosses such a return is not reported.
   --no-dynamic-sinks         only report sinks fed by known untrusted data
   --no-raw-scan              skip the lexical scan used when parsing fails
   --validate                 run the payload validator instead of static analysis

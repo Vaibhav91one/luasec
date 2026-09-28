@@ -424,11 +424,27 @@ local function parameters_of(fn)
 end
 
 -- The string value of a node, or nil when it is not a string literal.
-local function string_value(node)
-   if type(node) == "table" and node.tag == "String" and type(node[1]) == "string" then
+-- A secret split across concatenations at author time is still a literal in the
+-- binary: `local key = "AAAA" .. "BBBB"` is one constant. Fold String and Concat
+-- into the value the program will actually hold. The depth cap keeps a crafted
+-- file proportional to its size.
+local MAX_CONSTANT_CONCAT_DEPTH = 8
+
+local function string_value(node, depth)
+   if type(node) ~= "table" then return nil end
+   if node.tag == "String" and type(node[1]) == "string" then
       return node[1]
    end
-   return nil
+   depth = depth or 0
+   -- luacheck spells concatenation as an `Op` node whose slot 1 is the operator
+   -- name, so the operands are slots 2 and 3.
+   if node.tag ~= "Op" or node[1] ~= "concat" or depth > MAX_CONSTANT_CONCAT_DEPTH then
+      return nil
+   end
+   local left = string_value(node[2], depth + 1)
+   local right = string_value(node[3], depth + 1)
+   if not left or not right then return nil end
+   return left .. right
 end
 
 -- A PEM block is reported by its header, which is not secret, plus the length.
@@ -456,6 +472,80 @@ local function report_secret(ctx, literal, label, kind, tier)
       -- A PEM block is redacted by its header: the body is the key.
       redacted = kind == "pem" and pem_mask(value) or mask(value),
    })
+end
+
+-- The called function's name, however this parser spells the two call forms:
+-- `Call` puts the name at [1] for a.b:c(...) and the receiver at [2] for a:b(...).
+local function called_name(node)
+   if type(node) ~= "table" then return "" end
+   -- `a:b(...)` is an Invoke: slot 1 is the object, slot 2 the method name.
+   if node.tag == "Invoke" then return string_value(node[2]) or "" end
+   local callee = node[1]
+   if type(callee) ~= "table" then return "" end
+   -- `a.b(...)` is a Call whose callee is an Index: the name is the base, a dot
+   -- and the field.
+   if callee.tag == "Index" then
+      local base = type(callee[1]) == "table" and callee[1][1] or nil
+      local field = string_value(callee[2])
+      if type(base) == "string" and field then return base .. "." .. field end
+      return field or ""
+   end
+   if callee.tag == "Id" and type(callee[1]) == "string" then return callee[1] end
+   return ""
+end
+
+-- Config writers, by the name the call actually carries. Anything else is not
+-- read this way: `set` alone appears in a hundred innocent tables.
+local CONFIG_WRITERS = {["uci.set"] = true, ["cursor.set"] = true}
+local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
+
+local function config_writer(node)
+   local name = called_name(node)
+   if name == "" then return false end
+   if CONFIG_WRITERS[name] then return true end
+   local tail = name:match("([%w_]+)$")
+   if tail == nil or not CONFIG_WRITE_METHODS[tail] then return false end
+   -- `x:set(k, v)` has no dot in its name, and is still a config write. The
+   -- name and the value still have to look like a credential, so this is
+   -- reported only when a secret-shaped literal follows a secret-shaped name.
+   return true
+end
+
+-- The CBI builders that take a field label as their first String argument.
+local CBI_BUILDERS = {option = true, value = true, entry = true, sectionvalue = true,
+                      ["list_value"] = true, ["section_value"] = true}
+
+-- The label a CBI builder call carries, following one local binding so
+-- `local o = s.option("Password", "d"); o.default = "x"` still resolves.
+local function cbi_field_label(node)
+   local name = called_name(node)
+   local tail = name:match("([%w_]+)$") or name
+   if not CBI_BUILDERS[tail] then return nil end
+   -- `option("Password", "desc")` names the field first; `entry(section,
+   -- "Key", "desc")` names it second, after the section it belongs to. Both
+   -- openings are checked, and a name_tier hit decides which is which.
+   local first = node.tag == "Invoke" and 3 or 2
+   for position = first, first + 1 do
+      local label = string_value(node[position])
+      if label and name_tier(label) then return label end
+   end
+   return nil
+end
+
+local function cbi_label_of_base(base, depth)
+   if type(base) ~= "table" then return nil end
+   depth = depth or 0
+   if base.tag == "Call" or base.tag == "Invoke" then
+      return cbi_field_label(base)
+   end
+   if base.tag ~= "Id" or not base.var or depth > 4 then return nil end
+   for _, value in ipairs(base.var.values or {}) do
+      if value.node then
+         local label = cbi_label_of_base(value.node, depth + 1)
+         if label then return label end
+      end
+   end
+   return nil
 end
 
 detectors[#detectors + 1] = function(ctx)
@@ -502,13 +592,21 @@ detectors[#detectors + 1] = function(ctx)
             local label = target[1]
             if target.tag == "Id" and type(label) == "string" and name_tier(label) then
                consider(values[index], label)
-            elseif target.tag == "Index" and target[2] and target[2].tag == "String" then
-               local key = target[2][1]
-               if name_tier(key) then
+            elseif target.tag == "Index" then
+               local key = string_value(target[2])
+               if key and name_tier(key) then
                   local base = target[1]
                   consider(values[index],
                      base.tag == "Id" and type(base[1]) == "string"
                         and (base[1] .. "." .. key) or key)
+               else
+                  -- The CBI form:
+                  -- `s.option("Password", "desc").default = "<literal>"`. The
+                  -- builder call names the field, this assignment carries the
+                  -- value, and the field name itself means nothing: "default",
+                  -- "value" and "datavalue" are the field of every CBI control.
+                  local label = cbi_label_of_base(target[1])
+                  if label then consider(values[index], label) end
                end
             end
          end
@@ -525,15 +623,31 @@ detectors[#detectors + 1] = function(ctx)
          -- A literal passed to a parameter the program itself named as a secret
          -- is just as embedded as one assigned to a variable.
          local fn = defined_function(node)
-         if not fn then return end
-         local parameters = parameters_of(fn)
-         local first = node.tag == "Invoke" and 3 or 2
-         for position = first, #node do
-            local parameter = parameters[position - first + 1]
-            if type(parameter) == "string" and name_tier(parameter) then
-               consider(node[position], parameter)
+         if fn then
+            local parameters = parameters_of(fn)
+            local first = node.tag == "Invoke" and 3 or 2
+            for position = first, #node do
+               local parameter = parameters[position - first + 1]
+               if type(parameter) == "string" and name_tier(parameter) then
+                  consider(node[position], parameter)
+               end
             end
          end
+
+         -- uci.set("wireless", "default", "key", "<literal>") writes a secret
+         -- into the flash config without ever naming a variable. The key is a
+         -- String argument, the value is the argument after it, and the call has
+         -- to be a config writer or this would fire on any two adjacent strings.
+         if config_writer(node) then
+            local first_argument = node.tag == "Invoke" and 3 or 2
+            for position = first_argument, #node do
+               local key = string_value(node[position])
+               if key and name_tier(key) then
+                  consider(node[position + 1], key)
+               end
+            end
+         end
+
       end
    end)
 

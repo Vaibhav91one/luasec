@@ -26,3 +26,24 @@ describe("SARIF report", function()
          "an editor needs one SARIF rule per registered code")
    end)
 end)
+
+describe("a SARIF flow that crosses a file", function()
+   it("renders each step against the file that step is in", function()
+      -- The flow starts in the handler and ends in the module it requires. A
+      -- consumer that draws every step against the finding's own file sends the
+      -- reader to the sink twice and to the source never, which is worse than
+      -- publishing no flow at all.
+      local out = harness.cli({ "--format", "sarif", "--whole-program", "--std", "+luci",
+         "test/fixtures/whole_program/cross_file" })
+      assert_match(out, '"codeFlows"', out)
+
+      -- Each location prints its artifact URI and then the region it points at,
+      -- so a uri followed by a line number is one step of the flow.
+      assert_match(out,
+         '"uri":%s*"[^"]*handler%.lua".-"startLine":%s*5',
+         "the source step is located in the handler:\n" .. out)
+      assert_match(out,
+         '"uri":%s*"[^"]*util%.lua".-"startLine":%s*5',
+         "the sink step is located in the required module:\n" .. out)
+   end)
+end)
