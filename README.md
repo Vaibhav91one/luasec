@@ -35,7 +35,12 @@ bin/luasec --format sarif --output findings.sarif rootfs/
 bin/luasec --validate candidate-payload.lua
 ```
 
-Exit codes: `0` clean, `1` findings at or above the threshold, `2` error.
+Exit codes: `0` clean, `1` findings at or above the threshold **or a file that
+could not be analyzed**, `2` error, `3` new findings since a `--baseline`.
+
+A file luasec could not parse, or could only analyze approximately, is never
+filtered out by a severity threshold and never passes a run. Silence from
+luasec means "looked at it and found nothing", not "did not look".
 
 `--validate` is the dynamic half: it runs one snippet in a child process with
 `os` and `io` replaced by recorders, and reports whether the snippet actually

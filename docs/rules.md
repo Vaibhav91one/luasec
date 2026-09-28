@@ -19,7 +19,7 @@ default), `low` (shape only, no proven flow).
 | 705 | high | CWE-94 | module name computed at runtime |
 | 706 | high | CWE-94 | native library loaded from a non-constant path |
 | 707 | high | CWE-94 | LuaJIT FFI escape hatch used |
-| 708 | severity of the wrapped sink | CWE-78 | execution sink in an exported function that nothing in this file feeds |
+| 708 | severity of the wrapped sink | CWE-78 | execution sink in an exported function that this file never calls and never feeds |
 | 709 | critical | CWE-78 | untrusted data reaches command execution |
 | 710 | critical | CWE-94 | untrusted data reaches dynamic code evaluation |
 | 711 | high | CWE-78 | shell command written as a backtick literal |
@@ -95,7 +95,7 @@ statement about its data, not about its code.
 
 | Code | Severity | CWE | Meaning |
 | --- | --- | --- | --- |
-| 901 | low | - | source could not be parsed, lexical scan only |
+| 901 | low | - | source could not be parsed, lexical scan only. Never filtered by `--severity-threshold`, and fails the run |
 | 902 | low | - | source uses a Lua construct the parser does not support |
 | 903 | low | - | API seen that is not available in the configured Lua standard |
-| 904 | medium | - | flow-sensitive analysis skipped for a large file; results are approximate |
+| 904 | medium | - | analysis degraded for a large file; results are approximate. Never filtered by `--severity-threshold`, and fails the run |
