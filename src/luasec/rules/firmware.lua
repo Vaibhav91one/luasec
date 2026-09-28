@@ -677,11 +677,18 @@ local function loop_body(node)
 end
 
 -- Does this expression mention a length? `#t` is the number of turns a loop
--- over t can take, so a limit or a bound that mentions one is a ceiling. One
--- bounded-depth walk, and a negative answer is the common case.
+-- over t can take, so a limit or a bound that mentions one is a ceiling.
+--
+-- A shape deeper than the depth cap answers yes, not no. Every other bounded
+-- walk in this module answers "no finding" when it runs out of budget, and this
+-- one must too: an expression nobody can read is not evidence of a ceiling, but
+-- it is certainly not evidence of an unbounded loop either, and a silent miss
+-- is the cheaper mistake to make than a finding on a shape we do not
+-- understand.
 local function mentions_length(node, depth)
    depth = depth or 0
-   if depth > 16 or type(node) ~= "table" then return false end
+   if depth > 16 then return true end
+   if type(node) ~= "table" then return false end
    if node.tag == "Op" and node[1] == "len" then return true end
    for index = 1, #node do
       if mentions_length(node[index], depth + 1) then return true end
@@ -758,9 +765,10 @@ end
 local statement_growth, statement_exits, block_check
 
 -- Walk a block, applying `check` to each statement at its own nesting level.
--- `check` is a statement-level function; whether it descends into a nested
--- loop's body is its own business, because a growth counts however deep it is
--- while a return or break belongs only to the loop that encloses it.
+-- Both checks take the context first, so one walk serves both; whether a check
+-- descends into a nested loop's body is its own business, because a growth
+-- counts however deep it is while a return or break belongs only to the loop
+-- that encloses it.
 block_check = function(ctx, block, depth, check)
    if type(block) ~= "table" or depth > 24 then return nil end
    if block.tag then return check(ctx, block, depth) end
@@ -827,6 +835,7 @@ statement_growth = function(ctx, statement, depth)
    return nil
 end
 
+-- ctx is in the signature only so one walk serves both statement checks.
 statement_exits = function(ctx, statement, depth)
    depth = depth or 0
    if type(statement) ~= "table" or depth > 24 then return nil end
