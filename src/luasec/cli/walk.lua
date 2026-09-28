@@ -170,24 +170,33 @@ local function list_dir(path)
    local ok, reason = pipe:close()
    os.remove(tmp)
 
-   local partial
-   local complaints = io.open(errfile, "r")
-   if complaints then
-      local said = complaints:read("*a")
-      complaints:close()
-      -- Reported for the path, not for whatever find phrased it as.
-      if said and said:gsub("%s", "") ~= "" then
-         partial = ("could not list %s: permission denied reading part of the tree"):format(path)
-      end
-   end
+   -- find's stderr is dropped: the readability probe below is the signal that
+   -- works on every platform, and this path reports against the directory
+   -- rather than repeating find's wording.
    os.remove(errfile)
 
    -- find lists what it can and exits non-zero for the rest, so a partial
    -- listing is still a listing. Throwing it away would drop every readable
    -- file in the tree because of one unreadable directory; keeping it silent
-   -- would claim we read the whole tree. Return both.
-   if not partial and not ok and reason and reason ~= "" then
-      partial = ("could not list %s: find %s"):format(path, reason)
+   -- would claim we read the whole tree. Return both, and return every skipped
+   -- directory rather than the first: naming one of three leaves the operator
+   -- two more fix-and-rerun cycles to find out whether they got them all.
+   local problems = {}
+
+   for _, unreadable in ipairs(unreadable_dirs(path)) do
+      -- Reported against the directory that was skipped, which is the thing an
+      -- operator has to go and fix, rather than against the scan root.
+      problems[#problems + 1] = {
+         message = ("could not read directory %s"):format(unreadable),
+         path = unreadable,
+      }
+   end
+
+   if not ok and reason and reason ~= "" and #problems == 0 then
+      problems[#problems + 1] = {
+         message = ("could not list %s: find %s"):format(path, reason),
+         path = path,
+      }
    end
 
    for name in tostring(output or ""):gmatch("[^\0]+") do
@@ -195,13 +204,7 @@ local function list_dir(path)
    end
    -- Sorted here rather than by `sort -z`, which BSD sort does not have.
    table.sort(files)
-   for _, unreadable in ipairs(unreadable_dirs(path)) do
-      -- Reported for the directory that was skipped, which is the thing an
-      -- operator has to go and fix.
-      partial = ("could not read directory %s"):format(unreadable)
-      break
-   end
-   if partial then return files, partial end
+   if #problems > 0 then return files, problems end
    return files
 end
 
@@ -239,9 +242,10 @@ function walk.collect(paths)
             errors[#errors + 1] = {message = list_error, path = skipped}
          else
          -- A partial listing is still a listing, and still an error: the files
-         -- we did get are analyzed, and the part we could not read is reported.
-         if list_error then
-            errors[#errors + 1] = {message = list_error, path = skipped}
+         -- we did get are analyzed, and every directory we could not read is
+         -- reported, each against its own path.
+         for _, problem in ipairs(list_error or {}) do
+            errors[#errors + 1] = problem
          end
          for _, file in ipairs(listed) do
             if not seen[file] and looks_like_lua(file) then

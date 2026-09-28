@@ -61,3 +61,39 @@ return ping
       assert_equal(report[1].column, 4, "os.execute is at column four on line two")
    end)
 end)
+
+describe("a source the later analysis stages reject", function()
+   it("reports a duplicate label as a parse failure instead of dying", function()
+      -- The parser accepts this and linearize rejects it, by raising a bare
+      -- table. Unprotected that is a Lua traceback and no report at all, from
+      -- one malformed file in a 562-file rootfs.
+      local report = api.check_source([[
+goto done
+::done::
+goto done
+::done::
+]], {std = "lua54"})
+
+      assert_true(#report > 0, "the file is reported, not dropped")
+      assert_equal(codes(report), "901",
+         "a file the analysis stages reject is a parse failure, reported as one")
+   end)
+
+   it("reports a goto with no visible label as a parse failure", function()
+      local report = api.check_source("goto nowhere\n", {std = "lua54"})
+      assert_equal(codes(report), "901", "reported, not a crash")
+   end)
+
+   it("still analyzes a goto that is well formed", function()
+      local report = api.check_source([[
+for i = 1, 3 do
+   if i == 2 then goto continue end
+   os.execute("ping -c1 " .. http.formvalue("h"))
+   ::continue::
+end
+]], {std = "+luci"})
+
+      assert_no_match(codes(report), "901", "a valid goto is not a parse failure")
+      assert_equal(codes(report), "709", "the file is analyzed in full")
+   end)
+end)

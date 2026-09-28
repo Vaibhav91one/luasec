@@ -494,21 +494,43 @@ local function called_name(node)
    return ""
 end
 
--- Config writers, by the name the call actually carries. Anything else is not
--- read this way: `set` alone appears in a hundred innocent tables.
-local CONFIG_WRITERS = {["uci.set"] = true, ["cursor.set"] = true}
+-- The CBI fields that hold the value the user types. Everything else on a
+-- control is metadata about it.
+local CBI_VALUE_FIELDS = {default = true, value = true, datavalue = true}
+
+-- Config writers, by the name the call actually carries. This is the set the
+-- OpenWrt profile declares, not a guess: a suffix match on `set` fires on
+-- `m.set`, `db:set` and every other method that happens to be called set, and
+-- `t:set("password", "...")` on an ordinary table is not a config write.
+local CONFIG_WRITER_CALLS = {
+   ["uci.set"] = true, ["uci.add"] = true, ["uci.sets"] = true,
+}
+
 local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 
+-- `uci.cursor()` and the cursor it returns, so `cursor:set(k, v)` is read as a
+-- config write and `db:set(k, v)` is not.
+local CURSOR_MAKERS = {["uci.cursor"] = true, ["cursor"] = true}
+
+local function is_cursor(node, depth)
+   if type(node) ~= "table" then return false end
+   depth = depth or 0
+   if node.tag == "Call" or node.tag == "Invoke" then
+      return CURSOR_MAKERS[called_name(node)] == true
+   end
+   if node.tag ~= "Id" or not node.var or depth > 4 then return false end
+   for _, value in ipairs(node.var.values or {}) do
+      if value.node and is_cursor(value.node, depth + 1) then return true end
+   end
+   return false
+end
+
 local function config_writer(node)
-   local name = called_name(node)
-   if name == "" then return false end
-   if CONFIG_WRITERS[name] then return true end
-   local tail = name:match("([%w_]+)$")
-   if tail == nil or not CONFIG_WRITE_METHODS[tail] then return false end
-   -- `x:set(k, v)` has no dot in its name, and is still a config write. The
-   -- name and the value still have to look like a credential, so this is
-   -- reported only when a secret-shaped literal follows a secret-shaped name.
-   return true
+   if node.tag == "Invoke" then
+      return CONFIG_WRITE_METHODS[string_value(node[2]) or ""] == true
+         and is_cursor(node[1])
+   end
+   return CONFIG_WRITER_CALLS[called_name(node)] == true
 end
 
 -- The CBI builders that take a field label as their first String argument.
@@ -602,10 +624,16 @@ detectors[#detectors + 1] = function(ctx)
                else
                   -- The CBI form:
                   -- `s.option("Password", "desc").default = "<literal>"`. The
-                  -- builder call names the field, this assignment carries the
-                  -- value, and the field name itself means nothing: "default",
-                  -- "value" and "datavalue" are the field of every CBI control.
-                  local label = cbi_label_of_base(target[1])
+                  -- builder call names the field and this assignment carries
+                  -- the value.
+                  --
+                  -- Only the fields that carry a value count. A CBI control has
+                  -- one of those and about a dozen that describe it, and the
+                  -- descriptors are all short strings: reporting
+                  -- `public_key.datatype = "and(base64,rangelength(44,44))"`
+                  -- as a hardcoded credential is the same class of mistake as
+                  -- the 17 false positives this rule once produced.
+                  local label = CBI_VALUE_FIELDS[key] and cbi_label_of_base(target[1])
                   if label then consider(values[index], label) end
                end
             end

@@ -234,3 +234,68 @@ describe("--fail-on", function()
       end
    end)
 end)
+
+describe("asking for one code does not hide ground we did not cover", function()
+   it("still reports an unreadable directory under --only", function()
+      local dir = scratch_dir("only_locked")
+      os.execute("mkdir " .. string.format("%q", dir .. "/locked"))
+      local f = assert(io.open(dir .. "/a.lua", "w"))
+      f:write('os.execute("x")\n')
+      f:close()
+      os.execute("chmod 000 " .. string.format("%q", dir .. "/locked"))
+
+      local probe = io.popen("ls " .. string.format("%q", dir .. "/locked") .. " 2>/dev/null")
+      local unreadable = probe:read("*a") == ""
+      probe:close()
+      local out, code = harness.cli({ "--only", "708", dir })
+
+      os.execute("chmod 755 " .. string.format("%q", dir .. "/locked"))
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      if unreadable then
+         -- Exit 1 with an empty report would read as a contradiction. --only
+         -- narrows what the operator wants to read; it does not remove the
+         -- evidence that a directory was never analyzed.
+         assert_match(out, "901", out)
+         assert_match(out, "not analyzed", out)
+         assert_true(code ~= 0, "a run that skipped ground must not exit clean:\n" .. out)
+      end
+   end)
+
+   it("names every unreadable directory, not only the first", function()
+      local dir = scratch_dir("many_locked")
+      for _, name in ipairs({"l1", "l2", "l3"}) do
+         os.execute("mkdir " .. string.format("%q", dir .. "/" .. name))
+         os.execute("chmod 000 " .. string.format("%q", dir .. "/" .. name))
+      end
+
+      local probe = io.popen("ls " .. string.format("%q", dir .. "/l1") .. " 2>/dev/null")
+      local unreadable = probe:read("*a") == ""
+      probe:close()
+      local out, code = harness.cli({ dir })
+
+      for _, name in ipairs({"l1", "l2", "l3"}) do
+         os.execute("chmod 755 " .. string.format("%q", dir .. "/" .. name))
+      end
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      if unreadable then
+         local count = select(2, out:gsub("could not read directory", ""))
+         assert_equal(count, 3,
+            "one fix-and-rerun per directory is three cycles; name all of them:\n" .. out)
+         assert_true(code ~= 0, out)
+      end
+   end)
+
+   it("fails a run whose file could not be parsed, whatever the threshold", function()
+      local dir = scratch_dir("badparse")
+      local f = assert(io.open(dir .. "/broken.lua", "w"))
+      f:write('local x = "unterminated\n')
+      f:close()
+      local out, code = harness.cli({ "--fail-on=high", dir })
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_true(code ~= 0,
+         "--fail-on quiets low-severity findings; it does not excuse a file "
+         .. "that was never analyzed:\n" .. out)
+   end)
+end)

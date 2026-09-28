@@ -8,9 +8,14 @@ fixtures. The corpora are cloned by `make corpus` and are gitignored.
 | Corpus | Files collected | What it is |
 | --- | --- | --- |
 | `corpus/luci` | 73 | current LuCI libraries |
-| `corpus/luci-1806` | 460 | LuCI at openwrt-18.06: the `.lua` web layer, written as root-executing CGI |
+| `corpus/luci-1806` | 460 | LuCI at the pinned `openwrt-18.06` branch: the `.lua` web layer, written as root-executing CGI |
 | `corpus/luajit` | 29 | LuaJIT, the dialect firmware vendors use for speed |
 | **total** | **562** | |
+
+`make corpus` clones all three, so the numbers below are reproducible with the
+command above. The 18.06 tree is pinned rather than tracked, because a
+measurement against a moving branch is not a measurement: the commit is named so
+a reader can tell whether they are looking at the same code.
 
 Command:
 
@@ -20,7 +25,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-148 findings over 562 files, 75 of them carrying at least one (13%), after five
+146 findings over 562 files, 74 of them carrying at least one (13%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
@@ -40,7 +45,7 @@ Hand-audited sample by code:
 | --- | --- | --- |
 | 724 RPC handler | 27 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
 | 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed |
-| 747 hardcoded secret | 2 | was 17 and every one of the 17 was a false positive; see below. Two remain, and the release review then found the rule missing the forms firmware actually uses: a `uci.set` key argument, a CBI `.default`/`.value` field, and a value concatenated from constants at author time. Those are fixtures, not corpus, because the corpus contains no hardcoded credential |
+| 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
 | 901 parse failure | 14 | true: real Lua using gettext escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. A dialect gap, honestly reported |
 | 727 unbounded growth | 12 | true after narrowing: string accumulation in a loop with no visible ceiling |
 | 707 FFI escape | 9 | true: LuaJIT source |
@@ -62,7 +67,7 @@ findings:
 1. **The file walker treated a firmware tree as if it were all Lua.** `.patch`,
    `.pem`, `.js`, `.po`, `.awk`, `Makefile` and `.luadoc` were all scanned, because
    they begin with dashes and a Lua comment does too. 1404 files collected instead
-   of 566, and 674 findings were all noise. Now an extension decides it when we
+   of 562, and 674 findings were all noise. Now an extension decides it when we
    know it, a name list rejects build files, and a content marker rejects diff and
    PEM headers.
 2. **705 fired on constant `require`.** The rule was inverted: it reported a
@@ -163,9 +168,9 @@ jq -r '[.findings[] | select(.code=="747")] | length' /tmp/secrets-after.json
 # 0
 ```
 
-0 findings over 566 files. **That is not a precision figure: with nothing
+0 findings over 562 files. **That is not a precision figure: with nothing
 reported there is no denominator, and a rule that finds nothing is as wrong as
-one that finds everything.** The 566-file corpus is upstream LuCI and LuaJIT,
+one that finds everything.** The 562-file corpus is upstream LuCI (two revisions) and LuaJIT,
 which ships no hardcoded credential for this rule to find, so the true
 positives are covered by fixtures that are asserted one by one: a router script
 shipping `ADMIN_PASSWORD = "admin"`, a WiFi generator shipping a PSK, an

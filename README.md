@@ -38,9 +38,13 @@ bin/luasec --validate candidate-payload.lua
 Exit codes: `0` clean, `1` findings at or above the threshold **or a file that
 could not be analyzed**, `2` error, `3` new findings since a `--baseline`.
 
-A file luasec could not parse, or could only analyze approximately, is never
-filtered out by a severity threshold and never passes a run. Silence from
-luasec means "looked at it and found nothing", not "did not look".
+Silence from luasec means "looked at it and found nothing", not "did not look".
+
+Concretely: a file luasec could not read, could not parse, or could only
+analyze approximately is reported as 901 to 904, fails the run whatever
+`--fail-on` says, and survives `--only`. `--ignore 901` is the one way to take
+those findings out of the report, and choosing it means accepting that a run
+may have covered less ground than it was asked to.
 
 `--validate` is the dynamic half: it runs one snippet in a child process with
 `os` and `io` replaced by recorders, and reports whether the snippet actually

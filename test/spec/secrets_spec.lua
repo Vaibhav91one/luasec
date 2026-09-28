@@ -342,3 +342,22 @@ describe("a secret the code never binds to a name", function()
       assert_no_secret(found[1], "AAAA1234")
    end)
 end)
+
+describe("747 on firmware that has no credential in it", function()
+   it("stays silent for a CBI field's own descriptors", function()
+      -- datatype, optional, rmempty, password and depends all take short
+      -- strings, and a CBI field is usually NAMED after the secret. Reporting
+      -- the validator expression is a false positive on real firmware.
+      local report = fixture("cbi_descriptor")
+      assert_equal(codes(report), "",
+         "a CBI descriptor is not a credential: " .. codes(report))
+   end)
+
+   it("stays silent for a set or add method on something that is not a cursor", function()
+      -- A suffix match on `set` fired on encoders, key/value stores and plain
+      -- helper tables. Only the profile-declared writers and uci cursors count.
+      local report = fixture("not_a_config_write")
+      assert_equal(codes(report), "",
+         "an ordinary set method is not a config write: " .. codes(report))
+   end)
+end)

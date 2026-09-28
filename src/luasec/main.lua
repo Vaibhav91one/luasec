@@ -18,6 +18,12 @@ local version = require "luasec.version"
 -- the two apart without reading the report.
 local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR, EXIT_NEW = 0, 1, 2, 3
 
+-- The codes that say a file was not fully analyzed rather than that it is
+-- clean. 901 is a read or parse failure, 902 the lexical fallback, 903 a
+-- dialect mismatch and 904 an analysis that was skipped as too large. All four
+-- are absences of coverage, so all four fail a run whatever the threshold is.
+local DEGRADED_CODES = {["901"] = true, ["902"] = true, ["903"] = true, ["904"] = true}
+
 -- A verdict is an outcome, not a threshold: anything short of "benign" means the
 -- payload did something worth failing a build over, and a failed payload or a
 -- broken sandbox is a different thing again. `escape` is a process-control
@@ -75,7 +81,12 @@ local function apply_rules(findings, opts)
          if pattern_matches(pattern, finding) then keep = true end
       end
 
-      if keep and opts.only then
+      -- --only narrows what the operator wants to READ. It does not remove the
+      -- evidence that a file was never analyzed: `--only 708` on a tree with
+      -- an unreadable directory would otherwise print a clean report and exit
+      -- non-zero, which reads as a contradiction. --ignore is the flag that
+      -- takes a code out of the report, so --ignore 901 still does that.
+      if keep and opts.only and not DEGRADED_CODES[finding.code] then
          keep = false
          for _, pattern in ipairs(opts.only) do
             if pattern_matches(pattern, finding) then keep = true break end
@@ -252,23 +263,27 @@ local function run(argv)
    for _, finding in ipairs(api.analyze(files, opts)) do
       report[#report + 1] = finding
    end
-   report = apply_rules(report, opts)
 
-   -- Ground we did not cover. A file that could not be read and a directory
-   -- that could not be listed are both absences, not clean results, and
-   -- --fail-on exists to quieten low-severity findings rather than to excuse
-   -- them. This is checked before the baseline too: a baseline knows which
-   -- findings are old, not which parts of the tree were skipped.
+   -- Ground we did not cover, counted before any filtering is applied. A file
+   -- that could not be read, a directory that could not be listed and a file
+   -- analyzed only approximately are absences, not clean results.
+   --
+   -- The 9xx codes are this rule's own vocabulary, so the check reads the code
+   -- rather than a phrase in the message. Matching on the message text meant
+   -- 901 parse failures and 904 skipped analyses were never counted, and
+   -- --only 708 deleted the 901 before this code ever saw it.
    local unanalyzed = 0
    for _, finding in ipairs(report) do
-      local message = type(finding.message) == "string" and finding.message or ""
-      if message:find("not analyzed", 1, true)
-         or message:find("cannot read file", 1, true) then
+      if DEGRADED_CODES[finding.code] then
          unanalyzed = unanalyzed + 1
       end
    end
-   -- Counted here, acted on after the report is written: a run that skipped
-   -- part of its input still has to show what it found.
+
+   report = apply_rules(report, opts)
+
+   -- Counted above, acted on after the report is written: a run that skipped
+   -- part of its input still has to show what it found, and the count is taken
+   -- before --only or --ignore can delete the evidence.
    local ground_missing = unanalyzed > 0
 
    local threshold_rank = SEVERITY_RANK[opts.fail_on or "low"] or 0

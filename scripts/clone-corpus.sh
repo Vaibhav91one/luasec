@@ -9,15 +9,32 @@ clone() {
   local name=$1 url=$2 rev=${3:-}
   if [ -d "$root/$name/.git" ]; then
     echo ">> $name already present"
+    return 0
+  fi
+  echo ">> cloning $name${rev:+ at $rev}"
+  if [ -n "$rev" ]; then
+    # A pinned revision, and a shallow clone cannot check one out: fetch the
+    # depth that contains it, or fetch the whole history.
+    git clone --filter=blob:none "$url" "$root/$name" 2>/dev/null \
+      || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 0; }
+    git -C "$root/$name" checkout -q "$rev" 2>/dev/null \
+      || echo "!! could not check out $rev for $name (numbers in docs/precision.md"
+    # say which revision was measured)"
   else
-    echo ">> cloning $name"
-    git clone --depth "${rev:+1}" "$url" "$root/$name" 2>/dev/null \
+    git clone --depth 1 "$url" "$root/$name" 2>/dev/null \
       || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 0; }
   fi
 }
 
 # LuCI: the Lua web layer of OpenWrt, and our main source of real RCE history.
 clone luci https://github.com/openwrt/luci.git
+
+# The same web layer at openwrt-18.06, pinned. It is the largest part of the
+# corpus and the part that is written as root-executing CGI, so a measurement
+# taken only against current LuCI is a measurement against the safer code. The
+# revision is pinned because a measurement is only reproducible against a
+# revision: docs/precision.md quotes the number this one produced.
+clone luci-1806 https://github.com/openwrt/luci.git openwrt-18.06
 
 # OpenWrt package tree, for the smaller scripts under package/.
 clone openwrt-packages https://github.com/openwrt/openwrt.git

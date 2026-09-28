@@ -98,9 +98,26 @@ function parse_context.build(source_bytes, options)
    chstate.code_lines = code_lines
    chstate.line_endings = line_endings
 
-   unwrap_parens.run(chstate)
-   linearize.run(chstate)
-   name_functions.run(chstate)
+   -- The stages after the parser reject too, and their rejections are not
+   -- SyntaxError instances: linearize raises a bare table for a duplicate
+   -- `::label::` or a goto with no visible label, and error() on a table prints
+   -- "(error object is a table value)". Unprotected, that is a Lua traceback and
+   -- no report at all, from one malformed file in a 562-file rootfs, which is
+   -- the same failure as an uncaught parse error: the run dies instead of
+   -- reporting the file it could not read.
+   local staged, stage_error = pcall(function()
+      unwrap_parens.run(chstate)
+      linearize.run(chstate)
+      name_functions.run(chstate)
+   end)
+
+   if not staged then
+      local detail = type(stage_error) == "table"
+         and (stage_error.msg or stage_error.message)
+         or tostring(stage_error)
+      return nil, {tag = "SyntaxError", msg = tostring(detail), line = 1,
+         offset = 1, end_offset = 1}
+   end
 
    local remaining = count_nodes(ast, max_nodes + 1)
    chstate.resolved_locals = remaining > 0
