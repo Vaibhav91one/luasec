@@ -40,9 +40,18 @@ local default_sinks = {
    {pattern = "package.loadlib", code = "706", kind = "dyncode", arg = {1}},
    {pattern = "package.loadlib.*", code = "706", kind = "dyncode", arg = {1}},
    {pattern = "ffi.load", code = "706", kind = "dyncode", arg = {1}},
-   {pattern = "ffi.cdef", code = "707", kind = "ffi", arg = {1}},
-   {pattern = "ffi.C.*", code = "707", kind = "ffi", arg = {}},
-   {pattern = "require", code = "705", kind = "dyncode", arg = {1}},
+}
+
+-- API shapes worth reporting on their own, independent of taint and of any
+-- more specific sink entry. Using the FFI at all is a finding, whether or not
+-- its argument is attacker controlled.
+local default_shapes = {
+   {pattern = "ffi.cdef", code = "707", name = "ffi.cdef"},
+   {pattern = "ffi.C.*", code = "707", name = "ffi.C"},
+   {pattern = "ffi.load", code = "706", name = "ffi.load"},
+   {pattern = "package.loadlib", code = "706", name = "package.loadlib"},
+   {pattern = "package.loadlib.*", code = "706", name = "package.loadlib"},
+   {pattern = "require", code = "705", name = "require"},
 }
 
 -- Calls whose result carries the taint of their arguments.
@@ -63,9 +72,51 @@ local sanitizers = {
    path = {},
 }
 
+-- What a module is called once required. `local C = require("ffi").C` is the
+-- shape every LuaJIT binding uses, and without this the callee path stops at
+-- "C". A profile extends the table.
+local module_names = {
+   ffi = "ffi", posix = "posix", nixio = "nixio", cjson = "cjson",
+   json = "json", jsonc = "jsonc", luci = "luci", uci = "uci",
+   ngx = "ngx", ltn12 = "ltn12", luaposix = "posix",
+}
+
+-- Base counts, so a profile set can be rebuilt per analysis without leaking
+-- declarations from a previous file into the next. Computed below, after the
+-- tables it counts exist.
+local base_counts = {sources = #default_sources, sinks = #default_sinks,
+   propagators = #default_propagators, shapes = #default_shapes, sanitizers = {}}
+
 function platform_api.reset()
-   default_sources.sources = nil
-   platform_sources.sources = nil
+   for i = #default_sinks, base_counts.sinks + 1, -1 do default_sinks[i] = nil end
+   for i = #default_propagators, base_counts.propagators + 1, -1 do default_propagators[i] = nil end
+   for i = #default_shapes, base_counts.shapes + 1, -1 do default_shapes[i] = nil end
+   for i = #platform_sources, 0, -1 do platform_sources[i] = nil end
+   for kind, set in pairs(sanitizers) do
+      for pattern in pairs(set) do set[pattern] = nil end
+   end
+end
+
+function platform_api.apply_profile(declaration)
+   for _, source in ipairs(declaration.sources or {}) do
+      platform_sources[#platform_sources + 1] = source
+   end
+   for _, sink in ipairs(declaration.sinks or {}) do
+      default_sinks[#default_sinks + 1] = sink
+   end
+   for _, propagator in ipairs(declaration.propagators or {}) do
+      default_propagators[#default_propagators + 1] = propagator
+   end
+   for _, shape in ipairs(declaration.shapes or {}) do
+      default_shapes[#default_shapes + 1] = shape
+   end
+   platform_api.add_modules(declaration.modules)
+   for kind, list in pairs(declaration.sanitizers or {}) do
+      for _, pattern in ipairs(list) do
+         sanitizers[kind] = sanitizers[kind] or {}
+         sanitizers[kind][pattern] = true
+      end
+   end
 end
 
 -- Merge user- or platform-supplied declarations into the live tables.
@@ -94,7 +145,20 @@ end
 function platform_api.sources() return default_sources end
 function platform_api.platform_sources() return platform_sources end
 function platform_api.sinks() return default_sinks end
+function platform_api.shapes() return default_shapes end
+
 function platform_api.propagators() return default_propagators end
+
+--- Name of a module once required, or nil when unknown.
+function platform_api.module_name(name)
+   return module_names[name]
+end
+
+function platform_api.add_modules(map)
+   for name, alias in pairs(map or {}) do
+      module_names[name] = alias
+   end
+end
 
 function platform_api.is_sanitizer(kind, path)
    local set = sanitizers[kind]
@@ -105,34 +169,54 @@ function platform_api.is_sanitizer(kind, path)
    return false
 end
 
--- Find the first matching source declaration for a callee path.
-function platform_api.match_source(path)
-   for _, list in ipairs({default_sources, platform_sources}) do
-      for _, source in ipairs(list) do
-         if util.wild_match(source.pattern, path) then
-            return source
+-- Most specific match wins: fewer wildcards first, then a longer pattern. Without
+-- this, a generic `ffi.C.*` declared in the base set would shadow a specific
+-- `ffi.C.system` coming from a platform profile.
+local function specificity(entry)
+   local wildcards = 0
+   for _ in entry.pattern:gmatch("[%*%?]") do wildcards = wildcards + 1 end
+   return wildcards, -#entry.pattern
+end
+
+local function best_match(list, path)
+   local best
+   for _, entry in ipairs(list) do
+      if util.wild_match(entry.pattern, path) then
+         if not best or specificity(entry) < specificity(best) then
+            best = entry
          end
       end
    end
-   return nil
+   return best
+end
+
+-- Find the first matching source declaration for a callee path.
+function platform_api.match_source(path)
+   return best_match(platform_sources, path) or best_match(default_sources, path)
 end
 
 function platform_api.match_sink(path)
-   for _, sink in ipairs(default_sinks) do
-      if util.wild_match(sink.pattern, path) then
-         return sink
-      end
-   end
-   return nil
+   return best_match(default_sinks, path)
 end
 
 function platform_api.match_propagator(path)
-   for _, propagator in ipairs(default_propagators) do
-      if util.wild_match(propagator.pattern, path) then
-         return propagator
-      end
-   end
-   return nil
+   return best_match(default_propagators, path)
 end
+
+function platform_api.add_shapes(list)
+   for _, shape in ipairs(list or {}) do
+      default_shapes[#default_shapes + 1] = shape
+   end
+end
+
+function platform_api.match_shape(path)
+   return best_match(default_shapes, path)
+end
+
+
+base_counts.sources = #default_sources
+base_counts.sinks = #default_sinks
+base_counts.propagators = #default_propagators
+base_counts.shapes = #default_shapes
 
 return platform_api

@@ -190,6 +190,9 @@ local function run(argv)
       if not jobs or jobs < 1 then return fail("--jobs needs a positive integer") end
    end
 
+   local options_ok, options_error = api.validate_options(opts)
+   if not options_ok then return fail(options_error) end
+
    local files, walk_error = walk.collect(opts.paths)
    if not files then return fail(walk_error) end
 

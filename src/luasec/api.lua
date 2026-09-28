@@ -8,6 +8,8 @@
 local parse_context = require "luasec.engine.parse_context"
 local taint_engine = require "luasec.engine.taint"
 local codes = require "luasec.rules.codes"
+local platform_api = require "luasec.registry.platform_api"
+local profiles = require "luasec.registry.profiles"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 
@@ -39,10 +41,60 @@ function api.rule_catalogue()
    return catalogue
 end
 
+--- Install the platform profiles and rule files named by `opts`.
+-- Returns true, or nil plus a message when a profile or file is unusable.
+local function install_registries(opts)
+   platform_api.reset()
+
+   if opts.std and opts.std ~= "" then
+      local names, add = profiles.split(opts.std)
+      if not add then
+         -- Explicit list: the base Lua standard is still loaded, but no
+         -- platform profile is implied.
+      end
+      for _, name in ipairs(names) do
+         local declaration, err = profiles.load_builtin(name)
+         if not declaration then return nil, err end
+         platform_api.apply_profile(declaration)
+      end
+   end
+
+   for _, path in ipairs(opts.rules or {}) do
+      local declaration, err = profiles.load_file(path)
+      if not declaration then return nil, err end
+      platform_api.apply_profile(declaration)
+   end
+
+   for _, name in ipairs(opts.sources or {}) do
+      platform_api.add_sources({{pattern = name, id = name, name = "declared source",
+         confidence = opts.source_confidence or "high"}})
+   end
+
+   for _, name in ipairs(opts.sanitizers or {}) do
+      platform_api.add_sanitizers("shell", {name})
+   end
+
+   return true
+end
+
+--- Validate the platform profiles and rule files named by `opts`.
+-- Returns true, or nil plus a message. Callers use this to fail before
+-- analyzing anything.
+function api.validate_options(opts)
+   return install_registries(opts or {})
+end
+
 --- Analyze a single Lua source string.
 -- Returns an array of findings, sorted by location.
 function api.check_source(source, opts)
    opts = opts or {}
+   local ok, install_error = install_registries(opts)
+   if not ok then
+      -- A profile or rule file we cannot load is an operator error, not a
+      -- finding about the analyzed code. Fail loudly.
+      error({luasec_config_error = true, message = install_error}, 0)
+   end
+
    local chstate, syntax_error = parse_context.build(source)
 
    if not chstate then

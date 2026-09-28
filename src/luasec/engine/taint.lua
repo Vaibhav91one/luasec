@@ -108,6 +108,28 @@ local function callee_path(node, item, state, depth)
       return callee_path(node[1], item, state, depth + 1)
    end
 
+   -- `require("ffi").C` names the ffi module, not an anonymous value.
+   if node.tag == "Call" then
+      local required = callee_path(node[1], item, state, depth + 1)
+      if required == "require" then
+         local argument = node[2]
+         if argument and argument.tag == "String" then
+            return platform_api.module_name(argument[1]) or argument[1]
+         end
+      end
+      return nil
+   end
+
+   -- Resolve a field access through the base's own definition, so
+   -- `local C = ffi.C; C.system(x)` is recognised as `ffi.C.system(x)`.
+   if node.tag == "Index" and node[2] and node[2].tag == "String" then
+      local base = callee_path(node[1], item, state, depth + 1)
+      if base then
+         return base .. "." .. node[2][1]
+      end
+      return nil
+   end
+
    local direct = id_path(node)
    if direct and not (node.tag == "Id" and node.var) then
       return direct
@@ -115,16 +137,21 @@ local function callee_path(node, item, state, depth)
 
    if node.tag == "Id" and node.var and item then
       local values = item.used_values and item.used_values[node.var]
+      local fallback
       for _, value in ipairs(values or {}) do
          local value_node = value.node
          if value_node and value_node.tag == "Function" and value_node.name then
             return value_node.name
          elseif value_node and value_node.tag == "Index" then
+            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`.
             local via_local = callee_path(value_node, item, state, depth + 1)
-            if via_local then return via_local end
+            if via_local and via_local ~= value_node[1][1] then
+               return via_local
+            end
+            fallback = fallback or via_local
          end
       end
-      return node[1]
+      return fallback or node[1]
    end
 
    return direct
@@ -387,6 +414,35 @@ build_trace = function(node, sources)
    return trace
 end
 
+-- API shapes (FFI use, computed module names) are reported on their own: the
+-- fact that the call happens is the finding, whatever its argument holds.
+local function check_shape(node, item, state, chstate, opts)
+   if opts.report_sink_shapes == false then return end
+   local path = callee_path(node[1], item, state, 0)
+   if not path then return end
+   local shape = platform_api.match_shape(path)
+   if not shape then return end
+
+   -- A computed module name or a dynamic library path is worth a separate
+   -- finding, but only when the argument really is computed.
+   if shape.code == "705" or shape.code == "706" then
+      local args = args_of(node)
+      local arg = args[1]
+      if not arg or const_eval.is_constant(arg) then
+         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {name = path})
+         return
+      end
+      local arg_taint = taint_of_expr(arg, item, state, 0)
+      if set_is_empty(arg_taint) then
+         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate,
+            {name = path, confidence = "low"})
+      end
+      return
+   end
+
+   emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {name = path})
+end
+
 -- Check one call expression against the sink registry.
 --
 -- A sink has two identities: the code for "this argument is dynamic" and the
@@ -403,9 +459,8 @@ local function check_sink(node, item, state, chstate, opts)
    local args = args_of(node)
    local kind = sink.kind or "shell"
 
-   if sink.kind == "ffi" or sink.code == "705" then
-      -- Shape-based: report the call itself, taint is not required.
-      if opts.report_sink_shapes then
+   if sink.kind == "expose" then
+      if opts.report_sink_shapes ~= false then
          emit(state, sink, node, chstate, {name = path})
       end
       return
@@ -541,6 +596,7 @@ local function propagate(chstate, state, opts)
             elseif tag == "Eval" then
                local node = item.node
                if node and (node.tag == "Call" or node.tag == "Invoke") then
+                  check_shape(node, item, state, chstate, opts)
                   check_sink(node, item, state, chstate, opts)
                end
                if node then
