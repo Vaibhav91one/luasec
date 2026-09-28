@@ -89,8 +89,155 @@ local function install_registries(opts)
    return true
 end
 
+-- The options that are lists, and what a list means for each. A list is a table
+-- with a contiguous array part, and saying so is the whole point of checking
+-- them: `ipairs` over a bare string runs zero times and returns nothing, so
+-- `rules = "vendor.lua"` loaded no profile at all and `only = "709"` selected
+-- nothing, both of which report as a clean run of a narrower analysis than the
+-- caller asked for. The name is the flag where the CLI has one and the key where
+-- it does not, so the message names what the reader actually wrote.
+local LIST_OPTIONS = {
+   {name = "--rules", key = "rules", expected = "a list of profile file paths"},
+   {name = "--only", key = "only", expected = "a list of code patterns"},
+   {name = "--ignore", key = "ignore", expected = "a list of code patterns"},
+   {name = "--enable", key = "enable", expected = "a list of code patterns"},
+   {name = "sources", key = "sources", expected = "a list of API paths"},
+   {name = "sanitizers", key = "sanitizers", expected = "a list of sanitizer names"},
+}
+
+-- The numeric bounds. `tonumber` rather than a type check, and deliberately: the
+-- CLI's own parser stores every numeric flag as the string it was typed as and
+-- hands that straight to api, so "1000" is the shape main.lua passes on. The
+-- wording is main.lua's, unchanged, so the same defect reads the same whichever
+-- of the two caught it.
+local NUMBER_OPTIONS = {
+   {name = "--jobs", key = "jobs"},
+   {name = "--max-nodes", key = "max_nodes"},
+   {name = "--validate-timeout", key = "validate_timeout"},
+   {name = "max_function_lines", key = "max_function_lines"},
+}
+
+--- The options table, checked before anything reads it.
+--
+-- This is the library's own gate. The CLI validates its flags in main.lua and
+-- never reaches the analysis with a bad one, so every check here only ever fires
+-- for a caller using the library, which is the caller with nothing between
+-- their typo and a traceback. None of these values were checked there at all:
+-- `profiles.split` called `:match` on a `std` that arrived as a table and
+-- raised `attempt to call a nil value (method 'match')` straight out of
+-- `check_source`, a `rules` entry that was not a string reached `loadfile`, and
+-- a list option given as a bare string made `ipairs` run zero times, so the
+-- option was silently ignored and the run came back narrower than it was asked
+-- for.
+--
+-- One function, reached from `validate_options` and from every entry point that
+-- builds its own options: which function a caller happens to reach for must not
+-- decide whether their configuration is checked.
+local function validate_config(opts)
+   if opts == nil then return true end
+   if type(opts) ~= "table" then
+      return nil, ("options must be a table, got %s"):format(type(opts))
+   end
+
+   -- Split on "+" with a Lua pattern, so this has to be a string before anything
+   -- looks at it. A table is the natural shape when options are built from a
+   -- config file or JSON, and not one the command line can produce.
+   if opts.std ~= nil and type(opts.std) ~= "string" then
+      return nil, ("--std needs a string like '+openwrt+luci', got %s")
+         :format(type(opts.std))
+   end
+
+   for _, option in ipairs(LIST_OPTIONS) do
+      local value = opts[option.key]
+      if value ~= nil then
+         if type(value) ~= "table" then
+            return nil, ("%s needs %s, got %s"):format(option.name, option.expected,
+               type(value))
+         end
+         for _, entry in ipairs(value) do
+            if type(entry) ~= "string" then
+               return nil, ("every %s entry must be a string, got %s")
+                  :format(option.name, type(entry))
+            end
+         end
+      end
+   end
+
+   for _, option in ipairs(NUMBER_OPTIONS) do
+      local raw = opts[option.key]
+      if raw ~= nil then
+         local value = tonumber(raw)
+         -- An integer, because the message says so and a fractional node cap is
+         -- a half-node cap, which is not a thing. The same test main.lua makes.
+         if not value or value < 1 or value % 1 ~= 0 then
+            return nil, ("%s needs a positive integer"):format(option.name)
+         end
+      end
+   end
+
+   -- Carried on every declared source and reported as the confidence of anything
+   -- it reaches, and read as a pattern on the way: 42 here reached the wildcard
+   -- matcher as a nil pattern.
+   if opts.source_confidence ~= nil and type(opts.source_confidence) ~= "string" then
+      return nil, ("source_confidence needs a string, got %s")
+         :format(type(opts.source_confidence))
+   end
+
+   return true
+end
+
+--- The shape a bad configuration is reported in, from every entry point.
+-- The error object, not a message: the entry points return a findings array and
+-- a caller iterates it, so `nil` in its place would turn one clear config error
+-- into "bad argument #1 to 'ipairs'" somewhere further out.
+local function raise_config_error(message)
+   error({luasec_config_error = true, message = message}, 0)
+end
+
+--- `opts` as the analysis will use it, or the config error raised. The entry
+-- points that build their own options go through here, so a caller cannot skip
+-- the check by calling `check_source` instead of `validate_options`.
+local function checked_options(opts)
+   local ok, message = validate_config(opts)
+   if not ok then raise_config_error(message) end
+   return opts or {}
+end
+
+--- The source string, or the config error. The decoder wants a string and is
+-- called on the very next line, so a nil or a table reached it and raised from
+-- inside luacheck, and a number was reported instead as a 901 "source could not
+-- be parsed" - a finding about the analyzed code, produced by a mistake in the
+-- caller's own arguments.
+local function checked_source(source)
+   if type(source) ~= "string" then
+      raise_config_error(("source must be a string of Lua, got %s"):format(type(source)))
+   end
+   return source
+end
+
+--- The path list, or the config error. `ipairs` over a string yields nothing at
+-- all, so a single path handed to `analyze` analyzed zero files and returned an
+-- empty report: for a tool whose empty report means "looked at it and found
+-- nothing", that is the most misleading way this call can be got wrong.
+local function checked_paths(paths)
+   if type(paths) ~= "table" then
+      raise_config_error(("paths must be a list of file paths, got %s"):format(type(paths)))
+   end
+   for _, path in ipairs(paths) do
+      if type(path) ~= "string" then
+         raise_config_error(("every path must be a string, got %s"):format(type(path)))
+      end
+   end
+   return paths
+end
+
 --- Load extra rule declarations from files, as an operator does with --rules.
 function api.rules_load(paths)
+   -- The same check `validate_options` makes of --rules, on the same value, so
+   -- there is one rule and not two: `rules_load("vendor.lua")` ran ipairs over a
+   -- string, which yields nothing, and returned true having loaded nothing.
+   local ok, message = validate_config({rules = paths})
+   if not ok then return ok, message end
    for _, path in ipairs(paths or {}) do
       local declaration, err = profiles.load_file(path)
       if not declaration then return nil, err end
@@ -121,7 +268,9 @@ local function validate_filter_patterns(opts)
 end
 
 function api.validate_options(opts)
-   local ok, err = install_registries(opts or {})
+   local ok, err = validate_config(opts)
+   if not ok then return ok, err end
+   ok, err = install_registries(opts or {})
    if not ok then return ok, err end
    return validate_filter_patterns(opts or {})
 end
@@ -148,7 +297,7 @@ local function analyze_source(source, opts)
    if not ok then
       -- A profile or rule file we cannot load is an operator error, not a
       -- finding about the analyzed code. Fail loudly.
-      error({luasec_config_error = true, message = install_error}, 0)
+      raise_config_error(install_error)
    end
 
    local chstate, syntax_error = parse_context.build(source, {max_nodes = opts.max_nodes})
@@ -391,9 +540,11 @@ end
 --- Analyze a single Lua source string.
 -- Returns an array of findings, sorted by location.
 function api.check_source(source, opts)
-   local result = analyze_source(source, opts or {})
-   cover_and_expose(result, opts or {})
-   return finalize(result, opts or {})
+   opts = checked_options(opts)
+   source = checked_source(source)
+   local result = analyze_source(source, opts)
+   cover_and_expose(result, opts)
+   return finalize(result, opts)
 end
 
 -- Mirrors the CLI's --ignore/--only/--enable so an in-source `enable` can
@@ -487,7 +638,8 @@ end
 -- are followed across `require` boundaries inside the set, and a source in one
 -- file reaching a sink in another is reported once, at the sink.
 function api.analyze(paths, opts)
-   opts = opts or {}
+   opts = checked_options(opts)
+   paths = checked_paths(paths)
    local findings = {}
    local files = {}
    local results = {}
