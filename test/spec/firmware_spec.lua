@@ -407,12 +407,227 @@ end
    end)
 end)
 
+describe("724: a sink exposed as an RPC handler", function()
+   it("reports a function with a sink assigned into a ubus method table", function()
+      local report = fixture("ubus_method.lua", {std = "+openwrt"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 2, "both methods of the ubus object are exposed entry points")
+      local exposed = {}
+      for _, finding in ipairs(found) do exposed[#exposed + 1] = finding.exposed_as end
+      table.sort(exposed)
+      assert_equal(table.concat(exposed, " "), "doApply ping",
+         "the finding names the method the handler is registered under")
+   end)
+
+   it("names the handler and the sink it contains", function()
+      local report = fixture("ubus_method.lua", {std = "+openwrt"})
+      local by_exposed = {}
+      for _, finding in ipairs(with_code(report, "724")) do
+         by_exposed[finding.exposed_as] = finding
+      end
+      assert_equal(by_exposed["doApply"].name, "doApply",
+         "the finding is about the function, which is how the source names it")
+      assert_equal(by_exposed["doApply"].sink, "os.execute",
+         "and about the execution sink the handler reaches")
+      assert_equal(by_exposed["ping"].sink, "io.popen")
+      assert_equal(by_exposed["doApply"].severity, "high", "724 is a high finding")
+   end)
+
+   it("does not report a helper with a sink that nothing registers", function()
+      local report = fixture("unregistered_helper.lua", {std = "+openwrt"})
+      assert_equal(#with_code(report, "724"), 0,
+         "a table of helpers is a library: nobody can call it over the network")
+   end)
+
+   it("reports a LuCI dispatcher action that reaches an execution sink", function()
+      local report = fixture("luci_dispatch_action.lua", {std = "luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 2, "two of the four dispatch targets reach a sink")
+      local exposed = {}
+      for _, finding in ipairs(found) do exposed[#exposed + 1] = finding.exposed_as end
+      table.sort(exposed)
+      assert_equal(table.concat(exposed, " "), "action_reload action_run",
+         "the finding names the action the dispatcher was pointed at")
+   end)
+
+   it("does not report a dispatcher target that has no execution sink", function()
+      local report = fixture("luci_dispatch_action.lua", {std = "luci"})
+      for _, finding in ipairs(with_code(report, "724")) do
+         assert_true(finding.exposed_as ~= "action_status",
+            "an action that only reads the clock is not an exposure")
+      end
+   end)
+
+   it("reports a target reached through the dispatcher module, however it is bound", function()
+      local report = api.check_source([[
+local dsp = require "luci.dispatcher"
+
+dsp.entry({"admin", "system", "x", "run"}, dsp.call("action_run"), nil, 1)
+luci.dispatcher.post("action_reload", true)
+
+function action_run(command)
+   os.execute(command)
+end
+
+function action_reload()
+   os.execute("/etc/init.d/x restart")
+end
+]], {std = "luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 2, "both dispatcher targets reach a sink")
+      local exposed = {}
+      for _, finding in ipairs(found) do exposed[#exposed + 1] = finding.exposed_as end
+      table.sort(exposed)
+      assert_equal(table.concat(exposed, " "), "action_reload action_run")
+   end)
+
+   it("does not treat a function that merely shares a dispatcher's name as one", function()
+      local report = api.check_source([[
+local function call(name)
+   return name
+end
+
+local function entry(path, target)
+   return {path = path, target = target}
+end
+
+function action_run(command)
+   os.execute(command)
+end
+
+entry({"admin", "system"}, call("action_run"))
+]], {std = "luci"})
+      assert_equal(#with_code(report, "724"), 0,
+         "a file that never declares a controller has no dispatcher in scope")
+   end)
+
+   it("stands down where the dataflow pass has already proven the flow", function()
+      -- One weakness, one finding. A handler whose sink carries a proven
+      -- untrusted flow is 709, which is critical and carries the source and the
+      -- trace; a 724 beside it would say only that the function is registered,
+      -- which the operator reads in the file. This is the same decision the
+      -- exposed-sink pass makes: 708 stands down for a sink 709 has explained.
+      local report = api.check_source([[
+module("luci.controller.example", package.seeall)
+
+function index()
+   entry({"admin", "system", "x", "run"}, call("action_run"), nil, 1)
+end
+
+function action_run()
+   os.execute(luci.http.formvalue("cmd"))
+end
+]], {std = "luci"})
+      local codes = {}
+      for _, finding in ipairs(report) do codes[#codes + 1] = finding.code end
+      table.sort(codes)
+      assert_equal(table.concat(codes, ","), "709",
+         "the proven flow is the finding an operator acts on")
+   end)
+
+   it("reports a handler field on a module the script hands back", function()
+      local report = fixture("cbi_commit_hook.lua", {std = "luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 2, "both commit hooks reach an execution sink")
+      local exposed = {}
+      for _, finding in ipairs(found) do exposed[#exposed + 1] = finding.exposed_as end
+      table.sort(exposed)
+      assert_equal(table.concat(exposed, " "), "on_after_commit on_after_save",
+         "a CBI hook is a handler: the framework runs it on a submitted form")
+   end)
+
+   it("does not report a method on a returned module that is not a handler", function()
+      local report = fixture("cbi_commit_hook.lua", {std = "luci"})
+      for _, finding in ipairs(with_code(report, "724")) do
+         assert_true(finding.exposed_as ~= "read",
+            "a rendering method is not an entry point")
+      end
+   end)
+
+   it("reports one finding per registration, not one per sink inside it", function()
+      local report = fixture("ubus_two_sinks.lua", {std = "+openwrt"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "one exposed handler is one finding however many sinks it holds")
+      assert_equal(found[1].exposed_as, "apply")
+      assert_equal(found[1].sink, "os.execute", "and it names the first sink the handler reaches")
+   end)
+
+   it("reports a method table handed to a ubus object constructor", function()
+      local report = api.check_source([[
+local ubus = require "ubus"
+
+return ubus.add("luci.example", {
+   doApply = function(self, data)
+      os.execute(data.command)
+   end,
+   doStatus = function(self, data)
+      return {}
+   end,
+})
+]], {std = "+openwrt"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "a method map on a ubus object is a method map, whatever it is called")
+      assert_equal(found[1].exposed_as, "doApply")
+      assert_equal(found[1].sink, "os.execute")
+   end)
+
+   it("counts the FFI escape hatch as an execution sink inside a handler", function()
+      local report = api.check_source([==[
+local ubus = require "ubus"
+
+local object = ubus.add("luci.example")
+
+object.run = function(self, data)
+   return ffi.C.system(data.command)
+end
+
+return object
+]==])
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "a handler that reaches libc is a handler that executes")
+      assert_equal(found[1].sink, "ffi.C.system")
+   end)
+
+   it("names the command a handler runs rather than the FFI declaration beside it", function()
+      local report = api.check_source([==[
+local ubus = require "ubus"
+
+local object = ubus.add("luci.example")
+
+object.run = function(self, data)
+   ffi.cdef[[ int system(const char *command); ]]
+   os.execute(data.command)
+end
+
+return object
+]==])
+      local found = with_code(report, "724")
+      assert_equal(#found, 1)
+      assert_equal(found[1].sink, "os.execute",
+         "ffi.cdef is how the escape is set up; the command is what runs")
+   end)
+
+   it("reports the exposure from the command line, naming the entry point", function()
+      local out, code = harness.cli({"--std", "+openwrt",
+         "test/fixtures/firmware/ubus_method.lua"})
+      assert_equal(code, 1, "a high finding makes the run exit non-zero")
+      assert_match(out, "%[724%] high: function containing an execution sink", out)
+      assert_match(out, "%[exposed as doApply%]",
+         "the report says which method a caller on the network reaches")
+   end)
+end)
+
 describe("firmware rules: cost and hostile input", function()
    -- One block per line count, each exercising every code in this module, so
    -- the scaling measured is the module's and not one of its detectors. "@" is
    -- the block's index.
    local BLOCK = [[
 -- generated block @
+local ubus = require "ubus"
+local object_@ = ubus.add("luci.example_@")
+object_@.apply_@ = function(self, data)
+   os.execute(data.command_@)
+end
 local function handler_@(req, p)
    local v@ = req and p or nil
    uci.set("system", "@system[0]", "opt_@", v@)
@@ -455,11 +670,19 @@ end
          ('io.open("%s/x", "r")\n'):format(("/abcdefghij"):rep(400)),
          -- A concat chain 3000 deep on a firmware path.
          ('local a = "x"\nio.open("/etc/config/"%s, "w")\n'):format((" .. a"):rep(3000)),
-         -- A local definition cycle used as a path.
-         "local a, b\n", "a = b\nb = a\n", 'io.open(a, "w")\n',
-         -- Loops nested 120 deep around one append.
-         "local s = ''\n", ("for i = 1, n do\n"):rep(120), "s = s .. 'x'\n", ("end\n"):rep(120),
-      })
+          -- A local definition cycle used as a path.
+          "local a, b\n", "a = b\nb = a\n", 'io.open(a, "w")\n',
+          -- Loops nested 120 deep around one append.
+          "local s = ''\n", ("for i = 1, n do\n"):rep(120), "s = s .. 'x'\n", ("end\n"):rep(120),
+          -- A ubus method map under a key nobody wrote down, a returned table
+          -- whose handler-named field is buried in nested tables, and a method map
+          -- written onto itself so a registration candidate meets its own output.
+          ('local ubus = require "ubus"\nlocal o = ubus.add("x")\no.%s = function() os.execute("x") end\n')
+            :format(("k"):rep(4000)),
+          'local t = { apply = { commit = { run = function() os.execute("x") end } } }\n',
+          'local m = {}\nm.apply = m\nm.exec = function() os.execute("x") end\n',
+          'return t\n',
+       })
       local report = api.check_source(hostile, {std = "+openwrt"})
       assert_true(#report >= 0, "an expensive file is analyzed, not refused")
       for _, finding in ipairs(report) do

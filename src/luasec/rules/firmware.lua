@@ -6,6 +6,7 @@
 -- Code this module owns: see docs/rules.md, and docs/firmware-stds.md for the
 -- path and mode tables below.
 local platform_api = require "luasec.registry.platform_api"
+local callgraph = require "luasec.engine.callgraph"
 local taint_engine = require "luasec.engine.taint"
 
 local M = {}
@@ -999,10 +1000,522 @@ end
 
 detectors[#detectors + 1] = detect_dynamic_pattern
 
+-- ---------------------------------------------------------------- 724
+--
+-- A function holding an execution sink that is registered as a callable entry
+-- point. On a router `os.execute` is not the finding; `os.execute` that someone
+-- on the network can reach with arguments of their choosing is. 724 names the
+-- exposure mechanism, which is the one part no single file can prove: 708 says
+-- the input lives somewhere we cannot see, and this says who can call it.
+--
+-- The registration is what makes a function a handler. A helper with a sink in a
+-- table of helpers is 708's business; a function written onto an object the
+-- device hands to something else is this rule's. That is the whole difference
+-- between the two codes, and it is why both can stand on one function: 708 is
+-- about the argument, 724 is about the caller.
+
+-- Calls that hand back a ubus object, so a method map written onto the result is
+-- an RPC surface. A vendor binding of their own adds a line; nothing else in
+-- this module knows the name of an RPC API.
+--
+-- These are OpenWrt's bindings as documented rather than as measured: the
+-- firmware corpora available to this project hold no rpcd plugin, so there was
+-- no real spelling here to count before naming any. That is why the table is
+-- short, and why a false positive from it would be this module's own.
+local UBUS_OBJECT_CALLS = {
+   ["ubus.add"] = true,
+   ["ubus.add_object"] = true,
+   ["ubus.object"] = true,
+   ["rpcd.modplug.init"] = true,
+}
+
+-- The field names a receiver of a returned object calls, which is what makes a
+-- field on it a handler rather than a helper.
+--
+-- Two lists, and both are the receiving side's vocabulary rather than ours. The
+-- names are the hooks LuCI's CBI framework calls on a map it was handed
+-- (cbi.lua's `_run_hooks` list), plus the names a plugin interface uses for the
+-- operation that does the work. The prefixes are the two spellings of a handler
+-- nobody has a fixed name for.
+local HANDLER_NAMES = {
+   apply = true,
+   commit = true,
+   write = true,
+   exec = true,
+   run = true,
+   execute = true,
+   on_parse = true,
+   on_save = true,
+   on_before_save = true,
+   on_after_save = true,
+   on_commit = true,
+   on_before_commit = true,
+   on_after_commit = true,
+   on_apply = true,
+   on_before_apply = true,
+   on_after_apply = true,
+}
+
+local HANDLER_PREFIXES = {"handle", "handler"}
+
+local function is_handler_name(key)
+   if HANDLER_NAMES[key] then return true end
+   for _, prefix in ipairs(HANDLER_PREFIXES) do
+      if key:sub(1, #prefix) == prefix then return true end
+   end
+   return false
+end
+
+-- Is this a call that executes? `exec` and `dyncode` are the execution kinds the
+-- registry declares, whichever platform declares them, and 707 is the FFI escape
+-- hatch, which executes whatever the C library beside it is asked to execute. A
+-- platform profile adds its own exec sink and it counts here without this module
+-- knowing the name.
+--
+-- The two are told apart because a handler that both declares a C prototype and
+-- calls it is reported against the call: `ffi.cdef` is how the escape is set up,
+-- `ffi.C.system` is the execution.
+local function execution_sink(path)
+   local sink = platform_api.match_sink(path)
+   if sink and (sink.kind == "exec" or sink.kind == "dyncode") then return "exec", sink end
+   local shape = platform_api.match_shape(path)
+   if shape and shape.code == "707" then return "shape", shape end
+   return nil
+end
+
+-- The first execution sink inside a function, as the dataflow pass's own view of
+-- that function sees it: the lines the function owns, so a sink in a nested
+-- closure belongs to the closure and a sink in a wrapper belongs to the wrapper.
+-- This is the question 708 asks of the same function, asked from the linearized
+-- program rather than from a second walk of the AST, so a file with thousands of
+-- one-line handlers stays linear.
+--
+-- A sink whose flow is already proven is not this rule's: 709 is critical, names
+-- the source and carries the trace, and the operator acts on it. 724 would add
+-- only that the function is registered, which the operator reads in the file. So
+-- a handler whose every sink is proven is silent here, and the walk carries on
+-- past a proven sink to an unproven one rather than stopping at it. This is the
+-- decision the exposed-sink pass already makes about 708.
+--
+-- A file too large for the linearizer to attribute a function to a line has no
+-- lines to ask, and the question is then answered by walking the function's own
+-- body instead. That answer is coarser in two ways and neither costs precision:
+-- a callee bound to anything but a required module resolves to nothing, so such a
+-- call is silent rather than misattributed, and a nested closure's sink counts
+-- for the handler that encloses it, which is true of anything the closure's own
+-- registration would have said.
+local function sink_in_body(ctx, function_node)
+   local found, escape
+   local function visit(node, depth)
+      if found or depth > 200 or type(node) ~= "table" then return end
+      if node.tag == "Call" or node.tag == "Invoke" then
+         local path = call_path(ctx, node)
+         if path then
+            local kind = execution_sink(path)
+            if kind and not engine_reported(ctx, node, "709")
+                  and not engine_reported(ctx, node, "710") then
+               if kind == "exec" then
+                  found = {path = path, node = node}
+                  return
+               end
+               escape = escape or {path = path, node = node}
+            end
+         end
+      end
+      for index = 1, #node do
+         local child = node[index]
+         if type(child) == "table" then
+            if child.tag then
+               visit(child, depth + 1)
+            else
+               for _, sub in ipairs(child) do
+                  if type(sub) == "table" and sub.tag then visit(sub, depth + 1) end
+               end
+            end
+         end
+      end
+   end
+
+   visit(function_node, 0)
+   return found, escape
+end
+
+-- Memoized per context, and the memo is what keeps a function registered twice
+-- from costing two walks.
+local sink_memo_ctx, sink_memo
+local function first_sink(ctx, function_node, state)
+   if sink_memo_ctx == ctx then
+      local memoized = sink_memo[function_node]
+      if memoized ~= nil then return memoized end
+   else
+      sink_memo_ctx, sink_memo = ctx, {}
+   end
+
+   local found, escape
+   local lines = callgraph.index_lines(ctx.chstate)[function_node]
+   if not lines then
+      found, escape = sink_in_body(ctx, function_node)
+   end
+   for _, line in ipairs(lines or {}) do
+      for _, item in ipairs(line.items) do
+         if item.tag == "Eval" then
+            local node = item.node
+            if node and (node.tag == "Call" or node.tag == "Invoke") then
+               local callee = node.tag == "Invoke" and node or node[1]
+               local path = callee and taint_engine.callee_path(callee, item, state) or nil
+               if path then
+                  local kind = execution_sink(path)
+                  -- A sink whose flow is already proven is 709's finding; the
+                  -- walk carries on to an unproven one rather than stopping.
+                  if kind and not engine_reported(ctx, node, "709")
+                        and not engine_reported(ctx, node, "710") then
+                     local hit = {path = path, node = node}
+                     if kind == "exec" then
+                        found = hit
+                        break
+                     end
+                     escape = escape or hit
+                  end
+               end
+            end
+         end
+      end
+      if found then break end
+   end
+
+   found = found or escape
+   sink_memo[function_node] = found
+   return found
+end
+
+-- The function a value hands over, when the value is one. A handler written as
+-- `object.apply = apply` names a function this file already defined, so the
+-- value is followed to that definition - to the local's own definition, or, for a
+-- name the file defines at its top level, through `globals`.
+--
+-- Only the first definition is taken: a value that is one of two functions
+-- depending on a branch is still one registration, and reporting the other one
+-- would report the same exposure twice.
+local function function_of_value(value, globals, depth)
+   depth = depth or 0
+   if depth > 8 or type(value) ~= "table" then return nil end
+   if value.tag == "Function" then return value end
+   if value.tag == "Paren" then return function_of_value(value[1], globals, depth + 1) end
+   if value.tag == "Id" then
+      if value.var then
+         for _, defined in ipairs(value.var.values or {}) do
+            if defined.node and defined.node.tag == "Function" then return defined.node end
+         end
+      else
+         return globals[value[1]]
+      end
+   end
+   return nil
+end
+
+-- The dotted name of a callee, following a local bound to a required module:
+-- `local ubus = require "ubus"` makes `ubus.add` the name it has at the global.
+-- Every platform binding is a local alias for a module, and the rule context
+-- resolves literal field access only, so the alias is followed here or not at
+-- all.
+--
+-- A local with more than a handful of definitions names no module, so the walk
+-- stops after ALIAS_DEFINITIONS of them. That keeps one lookup at a call site a
+-- constant cost whatever the file does.
+local ALIAS_DEFINITIONS = 4
+
+local function callee_name(ctx, node, depth)
+   depth = depth or 0
+   if depth > 4 or type(node) ~= "table" then return nil end
+
+   if node.tag == "Id" then
+      if not node.var then return node[1] end
+      local examined = 0
+      for _, defined in ipairs(node.var.values or {}) do
+         local value = defined.node
+         if type(value) == "table" and value.tag == "Call" then
+            if ctx:path_of(value[1]) == "require" then
+               local module = ctx.literal(value[2])
+               if module then return module end
+            end
+            local base = callee_name(ctx, value[1], depth + 1)
+            if base then return base .. "." .. node[1] end
+         end
+         examined = examined + 1
+         if examined >= ALIAS_DEFINITIONS then break end
+      end
+      return nil
+   end
+
+   if node.tag == "Index" and node[2] and node[2].tag == "String" then
+      local base = callee_name(ctx, node[1], depth + 1)
+      if base then return base .. "." .. node[2][1] end
+   end
+
+   return nil
+end
+
+-- The name a call is called by, from the rule context's own resolution of a
+-- literal path and a local bound to a required module. A method call is named
+-- `object:method`, which is the spelling the source registry uses.
+local function call_path(ctx, node)
+   if node.tag == "Invoke" then
+      local method = node[2] and node[2][1]
+      if type(method) ~= "string" then return nil end
+      local base = callee_name(ctx, node[1])
+      return (base and (base .. ":" .. method)) or method
+   end
+   return callee_name(ctx, node[1])
+end
+
+-- Target and value nodes of an assignment, one pair at a time. Both sides are
+-- lists, of length one or more: `a = b` and `a, b = c, d` have the same shape
+-- here, so a multiple assignment needs no separate reading.
+local function each_assigned_pair(node, visit)
+   local targets, values = node[1], node[2]
+   if type(targets) ~= "table" or type(values) ~= "table" then return end
+   for index = 1, #targets do
+      local target, value = targets[index], values[index]
+      if type(target) == "table" and type(value) == "table" then
+         visit(target, value)
+      end
+   end
+end
+
+-- The dispatcher module, and the calls on it that name the function to run.
+--
+-- `entry`, `node` and `createtree` build the tree a name is attached to and take
+-- no function; `call`, `post` and `post_on` are what a target is built from, and
+-- their named argument is the function the web server will run. `post_on` is the
+-- odd one out: its first argument is the form fields, not the function.
+local DISPATCHER_MODULE = "luci.dispatcher"
+
+local DISPATCHER_TARGETS = {
+   call = 1,
+   post = 1,
+   post_on = 2,
+}
+
+-- A LuCI controller says so with `module("luci.controller.<name>")`, and
+-- `package.seeall` is what puts the dispatcher in scope for the bare `entry` and
+-- `call` the file then uses. That declaration is the evidence a bare name needs:
+-- a program that happens to have a function called `entry` is not a dispatch
+-- tree, and without the declaration nothing here is a registration.
+local CONTROLLER_PREFIX = "luci.controller."
+
+local function declares_controller(ctx, node)
+   if ctx:path_of(node[1]) ~= "module" then return false end
+   local name = ctx.literal(ctx.args_of(node)[1])
+   if type(name) ~= "string" then return false end
+   return name:sub(1, #CONTROLLER_PREFIX) == CONTROLLER_PREFIX
+end
+
+-- The last "." in a name, or nil. A dispatcher name is a dotted path whose last
+-- segment is the call, so the base is everything before the last dot. This is a
+-- plain forward scan for a literal character: no pattern is involved, so no name
+-- can make it backtrack, and the cost is the number of dots in the name.
+local function last_dot(name)
+   local found, from = nil, 1
+   while true do
+      local at = name:find(".", from, true)
+      if not at then return found end
+      found, from = at, at + 1
+   end
+end
+
+-- Which argument of a call names the function to run, when the call is a
+-- dispatcher target, and whether the call is qualified by the dispatcher module.
+-- A qualified call says so itself, whether it is spelled `luci.dispatcher.call` or
+-- through a local bound to `require "luci.dispatcher"`. An unqualified one is only
+-- a dispatcher call in a file that declared itself a controller, which is a
+-- question about the whole file and so is answered after the walk.
+local function dispatch_target(name)
+   if type(name) ~= "string" then return nil end
+   local at = last_dot(name)
+   local key
+   if at then
+      if name:sub(1, at - 1) ~= DISPATCHER_MODULE then return nil end
+      key = name:sub(at + 1)
+   else
+      key = name
+   end
+   local index = DISPATCHER_TARGETS[key]
+   if not index then return nil end
+   return index, at == nil
+end
+
+-- What this script hands back at its own top level: an rpcd plugin's object, a
+-- CBI model's map, a module's table. Only a return at the file's own level
+-- counts, because a return inside a function leaves that function and not the
+-- module.
+--
+-- Returns the names the script returns and the table nodes it returns, the
+-- second filled in from the names afterwards, since `return M` is only a returned
+-- table if some definition of M is one.
+local function returned_by_file(ctx)
+   local names, tables = {}, {}
+   local ast = ctx.chstate and ctx.chstate.ast
+   if type(ast) ~= "table" then return names, tables end
+
+   for index = 1, #ast do
+      local statement = ast[index]
+      if type(statement) == "table" and statement.tag == "Return" then
+         for position = 1, #statement do
+            local node = statement[position]
+            if type(node) == "table" then
+               if node.tag == "Id" then
+                  names[node.var or node[1]] = node
+               elseif node.tag == "Table" then
+                  tables[node] = true
+               end
+            end
+         end
+      end
+   end
+
+   for _, node in pairs(names) do
+      if node.var then
+         for _, defined in ipairs(node.var.values or {}) do
+            if defined.node and defined.node.tag == "Table" then tables[defined.node] = true end
+         end
+      end
+   end
+
+   return names, tables
+end
+
+-- A function with a sink, registered as a callable entry point.
+--
+-- One walk collects the facts every registration shape needs - the ubus objects
+-- the file builds, the global functions a dispatcher can name, whether the file is
+-- a controller - plus the registrations themselves, and the facts are resolved
+-- afterwards. So the order a file happens to use in does not decide the answer,
+-- and the walk stays one.
+local function detect_exposed_handler(ctx)
+   local state = taint_engine.new_state()
+   local controller, objects, globals, methods, actions = false, {}, {}, {}, {}
+   local ubus_tables = {}
+
+   ctx:each_node(function(node)
+      local tag = node.tag
+
+      if tag == "Call" then
+         if declares_controller(ctx, node) then controller = true end
+         local name = callee_name(ctx, node[1])
+
+         -- A method map handed straight to a ubus object is registered by the
+         -- call that takes it, whatever the methods are called.
+         if name and UBUS_OBJECT_CALLS[name] then
+            for _, argument in ipairs(ctx.args_of(node)) do
+               if type(argument) == "table" and argument.tag == "Table" then
+                  ubus_tables[argument] = true
+               end
+            end
+         end
+
+         local index, bare = dispatch_target(name)
+         if index then
+            local argument = ctx.args_of(node)[index]
+            local function_node = (argument and argument.tag == "Function") and argument or nil
+            local named = argument and ctx.literal(argument) or nil
+            if function_node or named then
+               actions[#actions + 1] = {anchor = node, key = named,
+                  inline = function_node, bare = bare}
+            end
+         end
+         return
+      end
+
+      if tag == "Table" then
+         -- A method written into a table literal, which is the same registration
+         -- as a field assignment with the table named.
+         for _, pair in ipairs(node) do
+            if pair.tag == "Pair" then
+               local key = ctx.literal(pair[1])
+               if key and type(pair[2]) == "table" then
+                  methods[#methods + 1] = {anchor = pair, key = key, value = pair[2],
+                     table = node}
+               end
+            end
+         end
+         return
+      end
+
+      if tag ~= "Local" and tag ~= "Set" then return end
+      local assignment = tag == "Set"
+
+      each_assigned_pair(node, function(target, value)
+         if target.tag == "Id" and value.tag == "Call" then
+            local path = callee_name(ctx, value[1])
+            if path and UBUS_OBJECT_CALLS[path] then
+               objects[target.var or target[1]] = true
+            end
+         elseif target.tag == "Id" and value.tag == "Function" then
+            -- A dispatcher resolves the name it is given in the controller's
+            -- environment, so only a function the file defines at that
+            -- environment's top level is a name it can reach.
+            if not target.var then globals[target[1]] = value end
+         elseif assignment and target.tag == "Index" then
+            local key = ctx.literal(target[2])
+            local base = target[1]
+            if key and type(base) == "table" and base.tag == "Id" then
+               methods[#methods + 1] = {anchor = target, key = key, value = value,
+                  object = base.var or base[1]}
+            end
+         end
+      end)
+   end)
+
+   local returned_names, returned_tables = returned_by_file(ctx)
+
+   for _, method in ipairs(methods) do
+      local is_ubus = (method.table and ubus_tables[method.table])
+         or (method.object and objects[method.object])
+      -- A field on an object the device hands out is a method whatever it is
+      -- called. A field on a table this file returns is a method only when the
+      -- receiving side calls it by that name: a module's `format` is a helper,
+      -- and a map's `on_after_commit` is a hook the CBI framework runs.
+      local exposed = is_ubus
+         or ((method.object and returned_names[method.object]) and is_handler_name(method.key))
+         or (method.table and returned_tables[method.table] and is_handler_name(method.key))
+      if exposed then
+         local function_node = function_of_value(method.value, globals)
+         local sink = function_node and first_sink(ctx, function_node, state)
+         if sink then
+            ctx:emit("724", method.anchor, {
+               name = function_node.name or method.key,
+               exposed_as = method.key,
+               sink = sink.path,
+            })
+         end
+      end
+   end
+
+   for _, action in ipairs(actions) do
+      -- A bare `call("x")` is the dispatcher's only in a controller; a qualified
+      -- `luci.dispatcher.call("x")` is one wherever it appears.
+      local function_node
+      if not action.bare or controller then
+         function_node = action.inline or globals[action.key]
+      end
+      local sink = function_node and first_sink(ctx, function_node, state)
+      if sink then
+         ctx:emit("724", action.anchor, {
+            name = function_node.name or action.key,
+            exposed_as = action.key,
+            sink = sink.path,
+         })
+      end
+   end
+end
+
+detectors[#detectors + 1] = detect_exposed_handler
+
 --- The detectors this module contributes, in run order.
 function M.detectors()
    return detectors
 end
 
 return M
+
 
