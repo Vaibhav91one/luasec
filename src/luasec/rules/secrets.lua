@@ -4,7 +4,9 @@
 -- finding. See src/luasec/rules/context.lua for what a context offers.
 --
 --   747  a secret written into the program: a literal bound to a name that
---        denotes one, or a PEM private key block
+--        denotes one and holding a value that looks like one, or a PEM private
+--        key block. A PEM *header* is the marker of a key, not a key. See the
+--        747 notes in docs/rules.md for the two name tiers and the value rules.
 --   748  a loop that opens a socket, reads what answers and sends a credential
 --
 -- The finding never carries the secret. It carries the name it was bound to,
@@ -18,30 +20,69 @@ local detectors = {}
 
 -- ------------------------------------------------------------ vocabulary
 
--- Words that denote a secret. Matched against the *words* a name is made of, so
--- `db_password`, `API_KEY`, `wpaPsk` and `pre_shared_key` all hit while
--- `monkey`, `author` and `compass` do not.
-local secret_words = {
-   password = true, passwd = true, passphrase = true, pwd = true, pass = true,
-   key = true, apikey = true, secret = true, token = true,
-   credential = true, credentials = true, auth = true,
-   psk = true, preshared = true, privkey = true, privatekey = true,
-   licence = true, license = true, seed = true,
+-- Words that make a name *unambiguous* about a secret. Matched against the
+-- *words* a name is made of, so `db_password`, `wpaPsk`, `priv_key_pwd` and
+-- `auth_token` all qualify while `monkey`, `author` and `compass` do not. Under
+-- one of these the name is the evidence, and the value only has to look like
+-- something an operator would not type into a text file.
+local qualifying_words = {
+   password = true, passwd = true, passphrase = true, pwd = true,
+   secret = true, token = true, credential = true, credentials = true,
+   apikey = true, psk = true, privkey = true, preshared = true,
 }
 
--- Words that denote a *value used as a credential* rather than a secret in its
--- own right. A scanner sends these; a login form reads them.
-local credential_words = {
+-- Names whose parts are only evidence together. `api_key` is two ordinary
+-- words, so it is matched on the name with its separators removed; the same
+-- match catches `apiKey`, `APIKEY` and `x-api-key`.
+local qualifying_compounds = { "apikey", "privatekey", "presharedkey" }
+
+-- The weakest names in the list, and the ones this corpus got wrong: `key` is a
+-- table index as likely as a credential, and `auth` is an 802.11
+-- authentication mode as likely as a token. A value under one of these is
+-- reported only when the value itself looks like a secret, and then at `low`
+-- confidence, because the name is not evidence.
+local weak_names = {
+   key = true, keys = true, auth = true, pass = true, seed = true,
+   licence = true, license = true,
+}
+
+-- Every word 748 treats as naming a credential a scanner sends or a login form
+-- reads: the two tiers above plus the words that denote a *value used as a
+-- credential* rather than a secret in its own right. 747 does not use this
+-- union - it reads the two tiers, which say how much a name alone is worth.
+local scanner_words = {
+   password = true, passwd = true, passphrase = true, pwd = true, pass = true,
+   key = true, keys = true, apikey = true, secret = true, token = true,
+   credential = true, credentials = true, auth = true, psk = true,
+   preshared = true, privkey = true, licence = true, license = true, seed = true,
    user = true, username = true, userid = true, user_id = true,
    login = true, account = true, cred = true,
 }
 
--- The weakest names in the list. `key` on its own is as likely to be a table
--- index - a table of limits keyed by the name of the limit - as it is a
--- secret, so a bare word under one of these names is not reported. A digit, a
--- symbol, or a name with a qualifier (`api_key`, `M.key`) is.
-local weak_names = {
-   key = true, keys = true, seed = true,
+-- Words that make a value a piece of vocabulary rather than a secret: a
+-- protocol, a cipher, a mode, or the name of a certificate field. A value whose
+-- every part is one of these is a program choosing an option, not a program
+-- shipping a credential - `EAP-TLS` is `eap` and `tls`, `wpa-psk` is `wpa` and
+-- `psk`, `ccmp` is itself. The parts are compared with the separators removed
+-- and in lower case, so the spelling of the mode does not matter.
+local vocabulary_words = {
+   -- protocol and protocol family
+   wpa = true, wpa2 = true, wpa3 = true, wep = true, wpaeap = true,
+   eap = true, peap = true, ttls = true, tls = true, ssl = true,
+   pap = true, chap = true, mschap = true, mschapv2 = true, eapmschapv2 = true,
+   radius = true, ldap = true, ["local"] = true, none = true, psk = true,
+   -- cipher and digest
+   ccmp = true, tkip = true, aes = true, des = true, wpad = true, gcm = true,
+   cbc = true, rsa = true, dsa = true, ecdsa = true, ed25519 = true,
+   sha1 = true, sha256 = true, sha512 = true, md5 = true, hmac = true,
+   -- mode and option
+   ap = true, sta = true, adhoc = true, mesh = true, wds = true,
+   client = true, server = true, auto = true, manual = true,
+   disabled = true, optional = true, required = true, mandatory = true,
+   open = true, shared = true, wepshared = true,
+   -- the name of a certificate or key field
+   country = true, state = true, locality = true, organization = true,
+   organisation = true, commonname = true, email = true, unit = true,
 }
 
 -- Values that are protocol vocabulary, a mode, or a schema word: the name says
@@ -73,6 +114,31 @@ local placeholders = {
 
 local MIN_SECRET_LENGTH = 4
 local REVEALED_ENDS = 2
+local MAX_MASK_STARS = 8
+
+-- Under a *bare* `key` or `auth` the name is weak evidence, so the value has to
+-- carry the evidence itself, and it needs twelve characters to do it. Every
+-- protocol, mode and encryption token in the firmware corpora is shorter than
+-- that - `EAP-TLS` is seven, `wpa` is three, `ccmp` is four - while every
+-- credential that is really a credential in the same files is longer: a WPA PSK
+-- is 8 to 63 characters by the standard, an API token or a key is longer
+-- still, and the table indices and field names that share these names
+-- (`max_memory_kb`, `timeout_ms`) are caught by the identifier test below
+-- instead of by this floor.
+local MIN_WEAK_VALUE_LENGTH = 12
+
+-- The length under which an all-caps token is short enough to be a mode name.
+-- The longest mode in the corpora is four characters (`WPA2`, `EAP`, `TTLS`).
+local MAX_ENUM_LENGTH = 8
+
+-- A base64 body is written 64 characters to the line, so a line over 64 is
+-- prose. The floor is on the *longest* line rather than on every line, because
+-- the last line of a body is short: it ends wherever the key ends. 40 is a
+-- floor no real key is under - a 512-bit RSA private key is 316 base64
+-- characters, an EC P-256 key 178 - and no line of English is over it.
+local MAX_BASE64_LINE = 64
+local MIN_BASE64_LINE = 40
+local MIN_BASE64_BODY = 40
 
 --- The detectors this module contributes, in run order.
 function M.detectors()
@@ -82,26 +148,43 @@ end
 -- ------------------------------------------------------------ helpers
 
 -- The words a name is made of: case and separators are not part of a name, so
--- `API_KEY`, `apiKey` and `api-key` are the same word list.
+-- `API_KEY`, `apiKey` and `api-key` are the same word list. The lower case has
+-- to come first - a name spelled in capitals, which is how firmware spells
+-- `API_TOKEN`, has no lower-case letters to match at all, and a splitter that
+-- only looks for those sees no name.
 local function words_of(name)
-   local spaced = tostring(name):gsub("(%l)(%u)", "%1 %2")
+   local spaced = tostring(name):lower():gsub("(%l)(%u)", "%1 %2")
    local out = {}
-   for word in spaced:gmatch("[%l%d]+") do
+   for word in spaced:gmatch("[%a%d]+") do
       out[#out + 1] = word:lower()
    end
    return out
 end
 
-local function is_secret_name(name)
-   for _, word in ipairs(words_of(name)) do
-      if secret_words[word] then return true end
+-- How much a name is worth on its own: "strong" when the name says credential
+-- without help, "weak" for the bare names where the value has to carry the
+-- evidence, and nil when the name is not about a secret at all.
+local function name_tier(name)
+   local words = words_of(name)
+   local glued = table.concat(words)
+
+   for _, compound in ipairs(qualifying_compounds) do
+      if glued:find(compound, 1, true) then return "strong" end
    end
-   return false
+   for _, word in ipairs(words) do
+      if qualifying_words[word] then return "strong" end
+   end
+   for _, word in ipairs(words) do
+      if weak_names[word] then return "weak" end
+   end
+   return nil
 end
 
+-- A name that denotes a credential a scanner sends or a login form reads. This
+-- is 748's vocabulary, and it is a superset of 747's two tiers.
 local function is_credential_name(name)
    for _, word in ipairs(words_of(name)) do
-      if secret_words[word] or credential_words[word] then return true end
+      if scanner_words[word] then return true end
    end
    return false
 end
@@ -130,6 +213,34 @@ local function pem_value(value)
       and value:find("PRIVATE KEY") ~= nil
 end
 
+-- A line that only says where a PEM block starts or ends.
+local function pem_line(line)
+   return line:match("^%-+[A-Z]+ [A-Z0-9 ]+%-+$") ~= nil
+end
+
+-- The marker of a PEM, as opposed to the key. `-----BEGIN RSA PRIVATE KEY-----`
+-- is the first line of a PEM file, not a secret in it: a script that assembles
+-- one at run time holds the marker and computes the base64 body, and the marker
+-- is what a preamble table contains. A value is a marker when it opens a block
+-- and every line of it is a BEGIN or an END line - a base64 line among them is
+-- the key, not a marker.
+local function pem_marker(value)
+   if value:find("^%-+BEGIN ") ~= 1 then return false end
+   local lines = 0
+   for line in (value .. "\n"):gmatch("(.-)\n") do
+      if line ~= "" then
+         if not pem_line(line) then return false end
+         lines = lines + 1
+      end
+   end
+   return lines > 0
+end
+
+-- A private key block: a marker followed by the key material it introduces.
+local function pem_key(value)
+   return pem_value(value) and not pem_marker(value)
+end
+
 -- Suffixes that make a value a *reference* to a file rather than the file's
 -- contents: a program that names its key is not the same as one that carries it.
 local key_file_suffixes = {
@@ -144,6 +255,9 @@ local function looks_like_a_path(value)
    for suffix in pairs(key_file_suffixes) do
       if #lowered > #suffix and lowered:sub(-#suffix) == suffix then return true end
    end
+   -- A path that begins at the root needs no dot to be one: `/etc/shadow` is a
+   -- file. No secret begins with a separator, and no base64 body does either.
+   if value:find("^[/~]") or value:find("^%.%.") then return true end
    -- A slash or backslash with a dotted file name after the last one reads as
    -- a path. A base64 secret holds a slash but no file name after it.
    local slash = lowered:find("[/\\]")
@@ -154,23 +268,78 @@ local function looks_like_a_path(value)
    return false
 end
 
--- A bare `key` holding a bare word: a limit name, a column name, a mode. The
--- name is the only evidence, and the value says the same thing the name did.
-local function is_weak_value(label, value)
-   if not weak_names[label] then return false end
+-- A bare name holding a bare word: a limit name, a column name, a mode. Read
+-- only under a weak name, where the name is not evidence and the value has to
+-- be more than the shape of an identifier to carry it. A digit is that much:
+-- `b41d8ef2a97c` is a key, `timeout_ms` is a field.
+local function is_weak_value(value)
    if value:find("%d") then return false end
    return value:match("^[%a_][%w_]*$") ~= nil
 end
 
--- Is this literal a secret rather than a mode, a placeholder or a fragment?
-local function looks_like_secret(value)
-   if type(value) ~= "string" then return false end
-   local length = #value
-   if length < MIN_SECRET_LENGTH then return false end
+-- A value that is vocabulary rather than a secret: every part of it, once the
+-- separators and the case are gone, is a word from the table above. `EAP-TLS`,
+-- `wpa-psk` and `ccmp` all decompose into nothing else.
+local function is_vocabulary(value)
+   local parts = 0
+   for part in value:lower():gmatch("[%a%d]+") do
+      if not vocabulary_words[part] then return false end
+      parts = parts + 1
+   end
+   return parts > 0
+end
 
-   -- Whitespace, and the bracket characters a placeholder is written with.
-   if value:find("[%s<>{}]") then return false end
+-- An enum spelled in capitals: `WEP`, `WPA2`, `EAP-TLS`. A short all-caps token
+-- or a hyphenated pair of them is how a mode is written, while a long unbroken
+-- all-caps run is far more likely to be a real key - base64 without lowercase
+-- happens - so that shape is left to the other tests.
+local function is_all_caps_enum(value)
+   if value:find("%l") then return false end
+   if not value:find("%a") then return false end
+   return #value <= MAX_ENUM_LENGTH or value:find("[^%w]") ~= nil
+end
+
+-- A number is a port, a timeout, a key length or a version, not a secret.
+local function is_a_number(value)
+   return value:match("^%d+$") ~= nil
+end
+
+-- A URL is a place a secret can be fetched from, not the secret.
+local function is_a_url(value)
+   return value:find("://", 1, true) ~= nil
+end
+
+-- The base64 body of a PEM: the lines a key block is written as, when the header
+-- and the body are separate literals. A run of 40 base64 characters is a DER
+-- blob, not prose, and a secret is the only thing in this language that is one.
+local function is_base64_body(value)
+   local characters, longest = 0, 0
+   for line in (value .. "\n"):gmatch("(.-)\n") do
+      if line ~= "" then
+         if #line > MAX_BASE64_LINE then return false end
+         if line:find("[^A-Za-z0-9+/=]") then return false end
+         characters = characters + #line
+         if #line > longest then longest = #line end
+      end
+   end
+   return longest >= MIN_BASE64_LINE and characters >= MIN_BASE64_BODY
+end
+
+-- Is this literal a secret rather than a mode, a placeholder or a fragment?
+local function looks_like_secret(value, floor)
+   if type(value) ~= "string" then return false end
+   floor = floor or MIN_SECRET_LENGTH
+   local length = #value
+   if length < floor then return false end
+
+   -- Whitespace, and the bracket characters a placeholder is written with. The
+   -- one whitespace-bearing shape that is a secret is the base64 body of a key.
+   if value:find("[%s<>{}]") and not is_base64_body(value) then return false end
    if value:find("[%%$]") then return false end
+   if is_a_url(value) then return false end
+   if is_a_number(value) then return false end
+   if is_all_caps_enum(value) then return false end
+   if is_vocabulary(value) then return false end
    if looks_like_a_path(value) then return false end
 
    local lowered = value:lower()
@@ -184,10 +353,17 @@ end
 -- The masked form of a value: the first and last two characters when there are
 -- more than four of them, and stars for the rest. A short value is all stars,
 -- because showing four of four would be showing all of it.
+--
+-- The middle is capped. A 400-character key would otherwise redact to a
+-- 400-character run of nothing, and the `length` field already says how long
+-- the value is: eight stars is enough to say there is a secret between these
+-- two characters.
 local function mask(value)
    local length = #value
    if length <= REVEALED_ENDS * 2 then return ("*"):rep(length) end
-   return value:sub(1, REVEALED_ENDS) .. ("*"):rep(length - REVEALED_ENDS * 2)
+   local hidden = length - REVEALED_ENDS * 2
+   if hidden > MAX_MASK_STARS then hidden = MAX_MASK_STARS end
+   return value:sub(1, REVEALED_ENDS) .. ("*"):rep(hidden)
       .. value:sub(length - REVEALED_ENDS + 1)
 end
 
@@ -266,13 +442,17 @@ end
 -- ------------------------------------------------------------ 747
 
 -- Report one secret. `label` is the name the value was bound to; the value
--- itself never leaves this function.
-local function report_secret(ctx, literal, label, kind)
+-- itself never leaves this function. `tier` is how much the name was worth on
+-- its own, and it is what the confidence says: a value under a name that means
+-- credential is evidence in itself, a value under a bare `key` is only evidence
+-- if it looks like a secret.
+local function report_secret(ctx, literal, label, kind, tier)
    local value = literal[1]
    ctx:emit("747", literal, {
       name = label,
       kind = kind,
       length = #value,
+      confidence = tier == "weak" and "low" or "high",
       -- A PEM block is redacted by its header: the body is the key.
       redacted = kind == "pem" and pem_mask(value) or mask(value),
    })
@@ -288,17 +468,26 @@ detectors[#detectors + 1] = function(ctx)
       local value = string_value(literal)
       if not value then return end
 
+      -- The marker a script writes around a PEM it assembles at run time is
+      -- not a secret: the key material is the base64 body, and a marker has
+      -- none. Read before the name, because `key` is the name a preamble
+      -- table gives a header line.
+      if pem_marker(value) then return end
+
       -- A private key block is a secret whatever it is called, and is read
       -- before the name is: the block says what it is.
-      if pem_value(value) then
+      if pem_key(value) then
          reported[literal] = true
          report_secret(ctx, literal, label, "pem")
          return
       end
-      if not looks_like_secret(value) then return end
-      if is_weak_value(label, value) then return end
+      local tier = name_tier(label)
+      if not tier then return end
+      local floor = tier == "weak" and MIN_WEAK_VALUE_LENGTH or MIN_SECRET_LENGTH
+      if not looks_like_secret(value, floor) then return end
+      if tier == "weak" and is_weak_value(value) then return end
       reported[literal] = true
-      report_secret(ctx, literal, label, kind_of(label))
+      report_secret(ctx, literal, label, kind_of(label), tier)
    end
 
    ctx:each_node(function(node)
@@ -311,11 +500,11 @@ detectors[#detectors + 1] = function(ctx)
          if type(targets) ~= "table" or type(values) ~= "table" then return end
          for index, target in ipairs(targets) do
             local label = target[1]
-            if target.tag == "Id" and type(label) == "string" and is_secret_name(label) then
+            if target.tag == "Id" and type(label) == "string" and name_tier(label) then
                consider(values[index], label)
             elseif target.tag == "Index" and target[2] and target[2].tag == "String" then
                local key = target[2][1]
-               if is_secret_name(key) then
+               if name_tier(key) then
                   local base = target[1]
                   consider(values[index],
                      base.tag == "Id" and type(base[1]) == "string"
@@ -328,7 +517,7 @@ detectors[#detectors + 1] = function(ctx)
          for _, pair_node in ipairs(node) do
             if pair_node.tag == "Pair" and pair_node[1] and pair_node[1].tag == "String" then
                local key = pair_node[1][1]
-               if is_secret_name(key) then consider(pair_node[2], key) end
+               if name_tier(key) then consider(pair_node[2], key) end
             end
          end
 
@@ -341,7 +530,7 @@ detectors[#detectors + 1] = function(ctx)
          local first = node.tag == "Invoke" and 3 or 2
          for position = first, #node do
             local parameter = parameters[position - first + 1]
-            if type(parameter) == "string" and is_secret_name(parameter) then
+            if type(parameter) == "string" and name_tier(parameter) then
                consider(node[position], parameter)
             end
          end
@@ -349,9 +538,9 @@ detectors[#detectors + 1] = function(ctx)
    end)
 
    -- A key block is a secret whatever name it is filed under, so the literals
-   -- are read on their own as well.
+   -- are read on their own as well. A lone header line is not a block.
    ctx:each_string(function(literal, value)
-      if type(value) == "string" and pem_value(value) then
+      if type(value) == "string" and pem_key(value) then
          consider(literal, "PEM private key")
       end
    end)

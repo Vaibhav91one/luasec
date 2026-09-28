@@ -53,6 +53,58 @@ default), `low` (shape only, no proven flow).
 | 749 | high | CWE-506 | persistence installed by the script |
 | 750 | critical | CWE-1203 | matches a known exploit or malware signature |
 
+### 747 notes
+
+747 reports a secret written into the program, and it never puts the secret in
+the finding: the finding carries the name the value was bound to, a `kind`, the
+`length` of the value and a `redacted` form. A PEM block is redacted by its
+header alone, because the header is the only part of a PEM that is not key
+material, and the stars between the first and last two characters are capped at
+eight, because the `length` field already carries the size.
+
+**Two things have to agree before a value is reported: the name, and the value.**
+
+*Name.* A name is **qualifying** when one of its words is a credential in its own
+right - `password`, `passwd`, `pwd`, `passphrase`, `secret`, `token`,
+`credential`, `psk`, `preshared`, `apikey`, `privkey` - or when the name with its
+separators removed contains `apikey`, `privatekey` or `presharedkey`, which is
+how `api_key`, `apiKey` and `x-api-key` qualify. A **bare** `key`, `auth`,
+`pass`, `seed`, `licence` or `license` is weak evidence: in firmware these name
+a table index or an 802.11 authentication mode as often as they name a
+credential. A value under a bare name is reported only when the value itself
+looks like a secret (below), and then at `low` confidence; a value under a
+qualifying name is reported at `high`. Case is not part of a name:
+`API_TOKEN`, `api_token` and `apiToken` are one name.
+
+*Value.* The value has to be recognizably a secret rather than merely a string.
+It is rejected when it is a path (`/etc/shadow`, `certs/ca.pem`, anything ending
+in a key file suffix), a URL, a format string (`%s`, `$`, brackets, whitespace),
+a number, an all-caps enum (`WEP`, `WPA2`, `EAP-TLS`), a placeholder
+(`changeme`, `your-token-goes-here`), or a value every part of which is protocol
+vocabulary - `EAP-TLS` is `eap` and `tls`, `wpa-psk` is `wpa` and `psk`, `ccmp` is
+itself. Length is a floor, not a test: four characters under a qualifying name,
+so that firmware's real defaults (`admin`, `root`, `toor`) are found, and twelve
+under a bare name, because every protocol and mode token in the firmware corpora
+is shorter than that while every credential in them is longer.
+
+**A PEM header is not a key.** `-----BEGIN RSA PRIVATE KEY-----` is the first
+line of a PEM, not a secret in it: a script that assembles a PEM at run time
+holds the marker and computes the body, and a table of `-----BEGIN ...-----` and
+`-----END ...-----` lines is exactly what a preamble looks like. A value whose
+lines are all marker lines is never reported. A value that opens a block and
+carries a base64 body is the key, and is reported whatever name it is filed
+under, at `high`. When a file holds a marker and a body as separate literals,
+the body is the finding.
+
+**What 747 does not report.** A value the program only *compares* against - a
+login check, a credential dictionary it tests input with - is the check, not a
+leak; a credential read out of a configuration file has no literal to report; a
+path to a CA bundle or a private key names a file rather than carrying one. A
+table of default credentials *is* reported when the credential is a named field
+with a shipped value, because that is the canonical CWE-798: the boundary is
+between embedding a credential and checking one, not between two ways of
+embedding it.
+
 ## 8xx - artifact and bytecode
 
 | Code | Severity | CWE | Meaning |

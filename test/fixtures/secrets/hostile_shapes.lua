@@ -7,6 +7,8 @@
 -- 4. A PEM header followed by a long run of letters and no match, which is the
 --    shape a backtracking pattern would chew on.
 -- 5. Many small loops, each connecting and sending.
+-- 6. A bare `key` holding a long run of one character, which is a table index
+--    and not a key, beside an `api_key` that is one.
 local long_name = string.rep("a", 4000) .. "!"
 local password = string.rep("x", 8000)
 
@@ -14,6 +16,7 @@ local M = {}
 M[long_name .. "_password"] = "aaaaaaaaaaaaaaaa"
 M["password"] = string.rep("a", 4000) .. "!"
 M["key"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+M["api_key"] = "6f1d9c4b7a2e8503fd61c9b4a7e2d058"
 
 local header = "-----BEGIN " .. string.rep("A", 4000)
 M["token"] = header
