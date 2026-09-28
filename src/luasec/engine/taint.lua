@@ -15,6 +15,10 @@ local taint = {}
 
 local MAX_ITERATIONS = 20
 
+-- Characters that change the meaning of a shell command when they reach it
+-- unquoted. Reported by 712 so an operator can see the class of the bug.
+local SHELL_METACHARS = "; | & $ ` ( ) < > newline"
+
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
 local emit, check_sink, build_trace, snippet_at, code_confidence
@@ -31,6 +35,62 @@ local function set_add(set, descriptor)
    if set[descriptor.id] then return false end
    set[descriptor.id] = descriptor
    return true
+end
+
+-- A shell quoting helper neutralizes the data for a shell sink, but not for
+-- loadstring. Rather than a second taint set, a sanitized descriptor keeps the
+-- same source but is marked as quoted, so the sink can tell the difference.
+local function quoted_descriptor(descriptor)
+   if descriptor.shell_quoted then return descriptor end
+   return {
+      id = descriptor.id .. "|quoted",
+      name = descriptor.name,
+      line = descriptor.line,
+      confidence = descriptor.confidence,
+      shell_quoted = true,
+   }
+end
+
+local function any_unquoted(descriptors)
+   for _, descriptor in ipairs(descriptors) do
+      if not descriptor.shell_quoted then return true end
+   end
+   return false
+end
+
+local function any_quoted(descriptors)
+   for _, descriptor in ipairs(descriptors) do
+      if descriptor.shell_quoted then return true end
+   end
+   return false
+end
+
+-- Does a function body look like shell quoting? A quote character literal, or
+-- an escape that doubles a quote, is the shape every shell quoting helper has.
+local function looks_like_shell_quote(node, depth)
+   depth = depth or 0
+   if depth > 24 or type(node) ~= "table" then return false end
+   if node.tag == "String" then
+      local text = node[1]
+      if type(text) == "string" and (text:find("'") or text:find('"\\""')) then
+         return true
+      end
+   end
+   for index = 1, #node do
+      local child = node[index]
+      if type(child) == "table" then
+         if child.tag then
+            if looks_like_shell_quote(child, depth + 1) then return true end
+         else
+            for _, sub in ipairs(child) do
+               if type(sub) == "table" and sub.tag and looks_like_shell_quote(sub, depth + 1) then
+                  return true
+               end
+            end
+         end
+      end
+   end
+   return false
 end
 
 local function set_union_into(target, other)
@@ -290,7 +350,34 @@ local function taint_of_call(node, item, state, depth)
       if propagator then
          for _, index in ipairs(propagator.arg or {}) do
             if args[index] then
-               set_union_into(result, taint_of_expr(args[index], item, state, depth + 1))
+               local from = taint_of_expr(args[index], item, state, depth + 1)
+               if platform_api.is_sanitizer("shell", path) then
+                  -- A local quoting helper, recognised by its body.
+                  for _, descriptor in pairs(from) do
+                     set_add(result, quoted_descriptor(descriptor))
+                  end
+               else
+                  set_union_into(result, from)
+               end
+            end
+         end
+      end
+
+      -- A function defined in this file that quotes its argument neutralizes
+      -- taint for shell sinks.
+      local sanitized = platform_api.is_sanitizer("shell", path)
+      if not sanitized and node[1] and node[1].tag == "Id" and node[1].var then
+         for _, value in ipairs((item.used_values or {})[node[1].var] or {}) do
+            if value.node and value.node.tag == "Function" and looks_like_shell_quote(value.node) then
+               sanitized = true
+               break
+            end
+         end
+      end
+      if sanitized and not propagator then
+         for index, arg in ipairs(args) do
+            for _, descriptor in pairs(taint_of_expr(arg, item, state, depth + 1)) do
+               set_add(result, quoted_descriptor(descriptor))
             end
          end
       end
@@ -508,7 +595,25 @@ local function check_sink(node, item, state, chstate, opts)
          sources = sources,
          trace = build_trace(tainted_arg.node, sources),
          snippet = snippet_at(chstate, tainted_arg.node),
+         sanitizer = (not any_unquoted(sources)) and "shell-quoted" or nil,
       })
+
+      -- 712 is the partially quoted case: some of the untrusted data was passed
+      -- through a quoting helper and some was not. That is where an operator
+      -- assumed the command was safe, so it gets its own finding naming the
+      -- characters that break out. A wholly unquoted command is already the
+      -- critical 709, and a wholly quoted one is 709 with the flow noted, so
+      -- neither needs a second finding.
+      if kind == "exec" and any_unquoted(sources) and any_quoted(sources) then
+         emit(state, {code = "712", pattern = sink.pattern, name = path}, node, chstate, {
+            name = path,
+            confidence = source.confidence or code_confidence("712"),
+            source = source.id,
+            sources = sources,
+            trace = build_trace(tainted_arg.node, sources),
+            metachars = SHELL_METACHARS,
+         })
+      end
    end
 
    if #tainted_args > 0 then return end

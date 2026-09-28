@@ -152,3 +152,90 @@ end
          ("4000 statements took %.1fs, which is not proportional to input"):format(elapsed))
    end)
 end)
+
+describe("shell sanitizers and metacharacters", function()
+   local function code_list(report)
+      local out = {}
+      for _, finding in ipairs(report) do out[#out + 1] = finding.code end
+      table.sort(out)
+      return table.concat(out, ",")
+   end
+
+   it("reports one 709 and no 712 when the tainted part is shell-quoted", function()
+      local report = api.check_source([[
+local function go(host)
+   os.execute("ping " .. luci.util.shellquote(http.formvalue("host")))
+end
+]], {std = "luci"})
+      assert_equal(code_list(report), "709",
+         "quoting removes the injection but not the data flow")
+      assert_equal(report[1].sanitizer, "shell-quoted",
+         "the finding should say the data crossed a quoting helper")
+   end)
+
+   it("reports one 709 for a wholly unquoted command, not a duplicate 712", function()
+      local report = api.check_source([[
+local function go(host)
+   os.execute("ping -c1 " .. http.formvalue("host"))
+end
+]])
+      assert_equal(code_list(report), "709",
+         "an unquoted request parameter is already the critical finding")
+   end)
+
+   it("reports 712 and names the metacharacters when quoting was attempted but missed", function()
+      local report = api.check_source([[
+local function go(prefix, rest)
+   os.execute(luci.util.shellquote(http.formvalue("prefix")) .. " " .. http.formvalue("rest"))
+end
+]], {std = "luci"})
+      assert_equal(code_list(report), "709,712",
+         "quoting one request parameter and not the other is the mistake worth naming")
+      local metachar = nil
+      for _, finding in ipairs(report) do
+         if finding.code == "712" then metachar = finding end
+      end
+      assert_true(metachar ~= nil, "expected a 712")
+      assert_true(type(metachar.metachars) == "string" and #metachar.metachars > 0,
+         "the 712 must name the characters that break out")
+      assert_match(metachar.metachars, ";", "a semicolon is the classic breakout")
+   end)
+
+   it("never reports 712 for a dynamic code sink", function()
+      local report = api.check_source([[
+local function go(body)
+   loadstring("return " .. http.formvalue("body"))
+end
+]])
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "712", "shell metacharacters are meaningless for loadstring")
+      end
+   end)
+
+   it("recognizes a shell quoting helper defined in the same file", function()
+      local report = api.check_source([[
+local function shq(value)
+   return "'" .. tostring(value):gsub("'", "'\\\\''") .. "'"
+end
+local function go(host)
+   os.execute("ping " .. shq(http.formvalue("host")))
+end
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(not table.concat(found, ","):find("712", 1, true),
+         "a local quoting helper neutralizes the shell sink: " .. table.concat(found, ","))
+   end)
+
+   it("does not let a shell quoting helper silence a dynamic code sink", function()
+      local report = api.check_source([[
+local function go(body)
+   loadstring(luci.util.shellquote(http.formvalue("body")))
+end
+]], {std = "luci"})
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("710", 1, true),
+         "quoting a string for a shell does nothing for loadstring: " .. table.concat(found, ","))
+   end)
+end)
