@@ -12,6 +12,7 @@ local platform_api = require "luasec.registry.platform_api"
 local profiles = require "luasec.registry.profiles"
 local rule_context = require "luasec.rules.context"
 local rule_registry = require "luasec.rules.registry"
+local inline_directives = require "luasec.engine.inline_directives"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 
@@ -145,7 +146,54 @@ function api.check_source(source, opts)
       findings[#findings + 1] = finding
    end
 
-   return sort_findings(findings)
+   sort_findings(findings)
+
+   -- In-source directives are applied last, so `-- luasec: enable` can undo a
+   -- config-level suppression.
+   local directives, problems = inline_directives.parse(chstate)
+   for _, problem in ipairs(problems) do
+      findings[#findings + 1] = {
+         code = "021", line = problem.line, column = 1, end_column = 1,
+         severity = "low", confidence = "certain", name = "inline directive",
+         message = problem.message,
+      }
+   end
+
+   if #directives == 0 and #problems == 0 then
+      return findings
+   end
+
+   local kept = {}
+   for _, finding in ipairs(findings) do
+      local applicable = {}
+      for _, directive in ipairs(directives) do
+         if directive.line <= finding.line then
+            applicable[#applicable + 1] = directive
+         end
+      end
+      if inline_directives.allows(applicable, finding, suppressed_by_options(opts, finding)) then
+         kept[#kept + 1] = finding
+      end
+   end
+
+   return kept
+end
+
+-- Mirrors the CLI's --ignore/--only/--enable so an in-source `enable` can
+-- override them, which is the whole point of allowing directives at all.
+function suppressed_by_options(opts, finding)
+   local suppressed = false
+   for _, pattern in ipairs(opts.ignore or {}) do
+      if inline_directives.code_and_name_match(pattern, finding) then suppressed = true end
+   end
+   if opts.only then
+      local matched = false
+      for _, pattern in ipairs(opts.only) do
+         if inline_directives.code_and_name_match(pattern, finding) then matched = true end
+      end
+      if not matched then suppressed = true end
+   end
+   return suppressed
 end
 
 --- Analyze files. `paths` is an array of file paths.
@@ -186,6 +234,23 @@ function api.analyze(paths, opts)
    end
 
    return sort_findings(findings)
+end
+
+-- Mirrors the CLI's --ignore/--only/--enable so an in-source `enable` can
+-- override them, which is the whole point of allowing directives at all.
+function suppressed_by_options(opts, finding)
+   local suppressed = false
+   for _, pattern in ipairs(opts.ignore or {}) do
+      if inline_directives.code_and_name_match(pattern, finding) then suppressed = true end
+   end
+   if opts.only then
+      local matched = false
+      for _, pattern in ipairs(opts.only) do
+         if inline_directives.code_and_name_match(pattern, finding) then matched = true end
+      end
+      if not matched then suppressed = true end
+   end
+   return suppressed
 end
 
 --- Decide whether a Lua payload actually achieves execution.

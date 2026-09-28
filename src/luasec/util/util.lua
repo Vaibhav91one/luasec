@@ -93,6 +93,25 @@ function util.is_hex_blob(s)
    return s:match("^[0-9a-fA-F]+$") ~= nil
 end
 
+-- Binary search for the line a byte offset falls on, given a table of line start
+-- offsets (line_offsets[1] is the offset of the first character of line 1).
+function util.line_of_offset(chstate, offset)
+   local offsets = chstate.line_offsets or {}
+   local low, high = 1, #offsets
+   while low <= high do
+      local middle = math.floor((low + high) / 2)
+      if offsets[middle] <= offset then
+         if middle == high or offsets[middle + 1] > offset then
+            return middle, offset - offsets[middle] + 1
+         end
+         low = middle + 1
+      else
+         high = middle - 1
+      end
+   end
+   return 1, 1
+end
+
 function util.trim(s)
    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
