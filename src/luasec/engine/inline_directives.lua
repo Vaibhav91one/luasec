@@ -121,31 +121,43 @@ function directives.allows(directives_before, finding, is_suppressed)
    -- push and a pop stayed in force to the end of the file: the operator asked
    -- for one region and got the whole file, with nothing to say so.
    --
-   -- Net depth: pushes open a region and pops close one, so counting only
-   -- pushes leaves every region open for the rest of the file, which is the bug
-   -- this replaced. A pop with no push is a no-op rather than a negative depth.
-   -- A `[push]` on a suppression opens a region, so it counts here exactly as a
-   -- bare `push` line does. `skip_line` leaves one directive out, which is how
-   -- the depth a suppression was written at is measured without its own
-   -- contribution: it governs the region above it rather than nesting in it.
-   local function open_at(limit, skip_line)
+   -- Net depth, because pushes open and pops close: counting only pushes leaves
+   -- every region open for the rest of the file, which is the bug this replaced.
+   -- A pop with no push is a no-op rather than a negative depth, and a `[push]`
+   -- on a suppression opens a region exactly as a bare `push` line does.
+   --
+   -- Computed ONCE per finding into a prefix array, rather than by rescanning
+   -- the directive list for every directive. Asking the list the same question
+   -- once per question is O(directives) per finding per directive: a file with
+   -- 2,000 suppression lines and 1,600 findings took 171 s where the build before
+   -- the scoping fix took 0.9 s, and --max-nodes does not bound it because a rule
+   -- that raises is caught rather than skipped. The whole thing is one pass.
+   --
+   -- `depth_before[i]` is the region depth at directive i counting everything
+   -- before it, so a `[push]` directive can be compared against its own base
+   -- without its contribution - it governs the region above it rather than
+   -- nesting inside it.
+   local count = #directives_before
+   local depth_before, depth_after
+
+   if count > 0 then
+      depth_before, depth_after = {}, {}
       local depth = 0
-      for _, directive in ipairs(directives_before) do
-         if directive.line <= limit and directive.line ~= skip_line then
-            if (directive.marker and directive.action == "push")
-               or (directive.push == true and directive.action ~= "pop") then
-               depth = depth + 1
-            elseif directive.marker and directive.action == "pop" then
-               depth = math.max(0, depth - 1)
-            end
+      for index, directive in ipairs(directives_before) do
+         depth_before[index] = depth
+         if (directive.marker and directive.action == "push")
+            or (directive.push == true and directive.action ~= "pop") then
+            depth = depth + 1
+         elseif directive.marker and directive.action == "pop" then
+            depth = math.max(0, depth - 1)
          end
+         depth_after[index] = depth
       end
-      return depth
    end
 
-   local open_at_finding = open_at(finding.line)
+   local open_at_finding = count > 0 and depth_after[count] or 0
 
-   for _, directive in ipairs(directives_before) do
+   for index, directive in ipairs(directives_before) do
       if directive.action == "ignore" then
          -- A suppression written outside every region is file-wide, which is
          -- what a plain `-- luasec: ignore` has always meant. One written inside
@@ -165,7 +177,7 @@ function directives.allows(directives_before, finding, is_suppressed)
          --   carrying [push]               -> the region it opens itself, so the
          --                                    threshold is one deeper than the
          --                                    depth it was written at
-         local base = open_at(directive.line, directive.line)
+         local base = depth_before[index]
          local applies
          if directive.push then
             applies = open_at_finding >= base + 1
@@ -235,13 +247,18 @@ local function matches_safely(subject, pattern, line)
    local ok, result = pcall(string.match, subject, pattern)
    if ok then return result ~= nil end
 
+   -- The first failure is the answer. Retrying anchored and taking that as the
+   -- verdict was how three malformed patterns produced no 012 at all: `^70($`
+   -- and `^70%$` are both legal Lua, so the retry succeeded and reported "no
+   -- match" where the honest answer is "I could not read this".
+   --
+   -- The anchored form is still tried, because a pattern that only makes sense
+   -- anchored is a legitimate way to write one; it just does not get to overrule
+   -- the first failure.
+   if line then UNREADABLE[line] = pattern end
+
    ok, result = pcall(string.match, subject, "^" .. pattern .. "$")
    if ok then return result ~= nil end
-
-   -- This is the only reliable moment to learn a pattern is malformed: the
-   -- matcher compiles as it walks, so `70(` matches "70" and returns before it
-   -- reaches the unfinished capture. Any probe run beforehand calls it valid.
-   if line then UNREADABLE[line] = pattern end
    return false
 end
 

@@ -31,7 +31,18 @@ jobs:
       - name: Adversarial specs
         run: make adversarial
 
+      # The precision step was wired to nothing that could run it: corpus/ is
+      # gitignored and no step created it, so the gate took its skip path and
+      # printed "ci-verify: PASS" — the measurement that exists to catch a rule
+      # regression was skipped in the one job where a rule regression lands.
+      # PRECISION_REQUIRE_CORPUS=1 turns that skip into a failure, so this step
+      # either measures or is red; it cannot pass without having looked.
+      - name: Clone the firmware corpora
+        run: make corpus
+
       - name: Measured precision over the corpora
+        env:
+          PRECISION_REQUIRE_CORPUS: "1"
         run: make precision
 
       - name: TDD proof

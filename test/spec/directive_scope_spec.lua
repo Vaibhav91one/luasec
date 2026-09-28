@@ -315,3 +315,34 @@ describe("a suppression that is a valid pattern", function()
          "a name pattern that does not match silences nothing")
    end)
 end)
+
+describe("a code pattern Lua will not read", function()
+   it("is reported as 012, once, and still hides nothing", function()
+      -- The code half is evaluated against every finding, so a pattern it
+      -- rejects is discovered and reported. The name half is only reached when
+      -- the code half matches, so a malformed name on a code that matches
+      -- nothing is never tried: the case above covers it, and that is the whole
+      -- of what can be promised. A pattern Lua accepts and simply fails to match
+      -- cannot be detected at all - it is indistinguishable from a valid pattern
+      -- that matched nothing - and it is fail-safe, so a suppression written
+      -- that way silences nothing rather than everything.
+      local forms = {"[708", "70(", "70)", "70%", "7[0", "70[0-9", "%1"}
+
+      for _, form in ipairs(forms) do
+         local report = api.check_source(
+            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n")
+
+         assert_true(has(report, "701"),
+            "a pattern that cannot be read hides nothing: " .. form
+            .. " left " .. codes(report))
+
+         local count = 0
+         for _, finding in ipairs(report) do
+            if finding.code == "012" then count = count + 1 end
+         end
+         assert_equal(count, 1,
+            "exactly one 012 for an unreadable pattern, not none and not two: "
+            .. form .. " gave " .. codes(report))
+      end
+   end)
+end)

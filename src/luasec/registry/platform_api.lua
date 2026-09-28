@@ -144,7 +144,15 @@ end
 
 -- Merge user- or platform-supplied declarations into the live tables.
 function platform_api.add_sources(list)
-   platform_sources[#platform_sources + 1] = list
+   -- Each entry, not the list. Appending the list put a nested table where the
+   -- matcher expects a declaration, so `entry.pattern` was nil and a declared
+   -- source raised "attempt to get length of a nil value" out of the public
+   -- entry point rather than being matched. The other two add_* functions below
+   -- already did this; this one did not, and there was no test for it because
+   -- nothing in the suite declares a source through the options table.
+   for _, entry in ipairs(list or {}) do
+      platform_sources[#platform_sources + 1] = entry
+   end
 end
 
 function platform_api.add_sinks(list)

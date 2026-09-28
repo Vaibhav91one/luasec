@@ -524,10 +524,9 @@ local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 -- Values assigned to table fields we can see, keyed "base.field" where base is
 -- the name of the table. Built once per file, before any rule asks about a
 -- cursor, because a call can appear before the assignment that defines it.
+-- Per table field, two facts about everything ever assigned to it: whether a
+-- handle was assigned, and whether anything else was. See the pre-pass below.
 local FIELD_VALUES = {}
-
--- How many assignments to one field are worth remembering. See the loop below.
-local MAX_FIELD_VALUES = 8
 
 local function field_key(node, field)
    if type(node) ~= "table" or node.tag ~= "Id" then return nil end
@@ -538,14 +537,8 @@ local function field_key(node, field)
    return name .. "." .. field
 end
 
--- Every value assigned to `base.field`, or nil when the file does not say.
---
--- All of them, not the last: a field assigned in two places is a field whose
--- value depends on which way the program went, and deciding it by source order
--- made a later `t.uci = true` inside a branch erase an earlier
--- `t.uci = uci.cursor()` for the whole file. One of the two is a handle, so the
--- field is read as one.
-local function field_values(base, field)
+-- The summary for `base.field`, or nil when this file says nothing about it.
+local function field_record(base, field)
    local key = field_key(base, field)
    if not key then return nil end
    return FIELD_VALUES[key]
@@ -629,16 +622,14 @@ local function is_cursor(node, depth)
       -- is a cursor when it is named like one, wholly.
       local field = string_value(node[2])
       if field == "uci" or field == "_uci" or field == "muci" or field == "cursor" then
-         local assigned = field_values(node[1], field)
+         local record = field_record(node[1], field)
          -- Nothing assigned here that this file can see: `self.uci` is set by a
          -- constructor in another file, and the name is all there is.
-         if assigned == nil then return true end
-         for _, value in ipairs(assigned) do
-            if is_cursor(value, depth + 1) then return true end
-         end
-         -- Something was assigned here and none of it is a handle:
-         -- `t.uci = true` is not a config cursor.
-         return false
+         if record == nil then return true end
+         -- Assigned here: a handle was, or nothing was. `t.uci = true` is not a
+         -- config cursor, and a field assigned a handle and then a boolean on
+         -- another path is a handle, because which way the program went decides.
+         return record.handle
       end
       return is_cursor(node[1], depth + 1)
    end
@@ -737,17 +728,28 @@ detectors[#detectors + 1] = function(ctx)
                      local value = values[index]
                      if type(value) == "table" then
                         local assigned = FIELD_VALUES[key] or {}
-                        -- Capped, because the answer is asked once per use of the
-                        -- field and the uses are once per line. Remembering all of
-                        -- them made this quadratic: a file of 32,000 assignments
-                        -- and 32,000 uses took 109 s where the previous build took
-                        -- 5 s, and --max-nodes does not bound it because a rule
-                        -- that raises is caught rather than skipped. Eight is
-                        -- plenty to say whether a field is ever a handle.
-                        if #assigned < MAX_FIELD_VALUES then
-                           assigned[#assigned + 1] = value
+                        -- Summarised to two facts, not kept as a list. The list
+                        -- was quadratic: the answer is asked once per use of the
+                        -- field and the uses are once per line, so 32,000
+                        -- assignments with 32,000 uses took 109 s where the
+                        -- earlier build took 5 s.
+                        --
+                        -- Capping the list fixed the time and cost a finding, which
+                        -- is the one direction this tool may not fail in: a cursor
+                        -- assigned as the ninth value to a field was invisible,
+                        -- and a hardcoded credential written through it went
+                        -- unreported. A cap is positional. These two booleans
+                        -- answer the actual question - was a handle ever assigned
+                        -- here, and did anything else get assigned here - in O(1)
+                        -- per assignment and O(1) per use, and cannot lose the
+                        -- ninth cursor.
+                        local record = FIELD_VALUES[key] or {handle = false, other = false}
+                        if value.tag == "Call" or value.tag == "Invoke" then
+                           record.handle = true
+                        else
+                           record.other = true
                         end
-                        FIELD_VALUES[key] = assigned
+                        FIELD_VALUES[key] = record
                      end
                   end
                end

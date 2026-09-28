@@ -208,3 +208,29 @@ describe("configuration errors", function()
       assert_match(report[1].message, "cannot read file")
    end)
 end)
+
+describe("a source declared through the options table", function()
+   it("is matched, and does not raise", function()
+      -- `add_sources` appended the LIST as one element where the matcher expects
+      -- a declaration, so `entry.pattern` was nil and this raised out of
+      -- check_source. Nothing caught it because nothing in the suite declared a
+      -- source this way, so the whole declaration path was untested.
+      local api = require "luasec.api"
+      local ok, report = pcall(api.check_source, [[
+local function run(host)
+   os.execute(vendor.get(host))
+end
+
+return run
+]], {sources = {"vendor.get"}})
+
+      assert_true(ok, "declaring a source does not raise: " .. tostring(report))
+
+      local found_709 = false
+      for _, finding in ipairs(report) do
+         if finding.code == "709" then found_709 = true end
+      end
+      assert_true(found_709,
+         "the declared source is treated as a source, so the flow is reported")
+   end)
+end)
