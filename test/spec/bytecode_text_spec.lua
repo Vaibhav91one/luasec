@@ -14,8 +14,8 @@ end
 describe("bytecode triage: text files are unaffected", function()
    it("analyzes a source file with a sink exactly as it did before", function()
       local report = api.check_source("local function s(h)\n  return os.execute(h)\nend\n")
-      assert_true(codes(report):find("701", 1, true) ~= nil,
-         "expected the ordinary 701, got " .. codes(report))
+      assert_true(codes(report):find("708", 1, true) ~= nil,
+         "expected the ordinary source finding 708, got " .. codes(report))
       assert_true(codes(report):find("80", 1, true) == nil,
          "a source file must not produce a bytecode finding")
    end)

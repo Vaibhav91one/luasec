@@ -110,7 +110,8 @@ local function go(host)
    os.execute("ping " .. host)
 end
 ]])
-      assert_equal(codes(report), "701", "an unprovable argument is a 701, not a silent pass")
+      assert_equal(codes(report), "708",
+         "an untraceable argument in an exported function is an exposure, not silence")
    end)
 end)
 
@@ -237,5 +238,99 @@ end
       for _, finding in ipairs(report) do found[#found + 1] = finding.code end
       assert_true(table.concat(found, ","):find("710", 1, true),
          "quoting a string for a shell does nothing for loadstring: " .. table.concat(found, ","))
+   end)
+end)
+
+describe("taint across function boundaries", function()
+   it("reports a request parameter that reaches os.execute through a wrapper", function()
+      local report = api.check_source([[
+local function run(cmd)
+   os.execute(cmd)
+end
+local function go()
+   run("ping " .. http.formvalue("host"))
+end
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_equal(table.concat(found, ","), "709",
+         "the sink is in run(), the source is in go(), and that is the bug")
+   end)
+
+   it("names the source line in the trace of a cross-function finding", function()
+      local report = api.check_source([[
+local function run(cmd)
+   os.execute(cmd)
+end
+local function go()
+   run("ping " .. http.formvalue("host"))
+end
+]])
+      local finding = report[1]
+      assert_true(finding.trace ~= nil, "a cross-function finding must carry a trace")
+      local source_line
+      for _, step in ipairs(finding.trace) do
+         if step.kind == "source" then source_line = step.line end
+      end
+      assert_equal(source_line, 5, "the source is on the line that reads the request parameter")
+   end)
+
+   it("follows a two-level chain of wrappers", function()
+      local report = api.check_source([[
+local function inner(cmd)
+   os.execute(cmd)
+end
+local function outer(cmd)
+   inner(cmd)
+end
+outer(http.formvalue("host"))
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_equal(table.concat(found, ","), "709")
+   end)
+
+   it("stays silent when the wrapper is only ever called with a constant", function()
+      local report = api.check_source([[
+local function run(cmd)
+   os.execute(cmd)
+end
+run("ping -c1 127.0.0.1")
+]])
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "709",
+            "a wrapper called only with a constant carries no untrusted data")
+      end
+   end)
+
+   it("terminates on mutually recursive wrappers", function()
+      local started = os.clock()
+      local report = api.check_source([[
+local function a(cmd)
+   if cmd then b(cmd) else os.execute(cmd) end
+end
+local function b(cmd)
+   a(cmd)
+end
+a(http.formvalue("host"))
+]])
+      local elapsed = os.clock() - started
+      assert_true(elapsed < 3, ("mutual recursion took %.1fs"):format(elapsed))
+      assert_true(#report > 0, "the injection is still found")
+   end)
+
+   it("reports a sink reached only through a wrapper as 708, not 709", function()
+      local report = api.check_source([[
+local function run(cmd)
+   os.execute(cmd)
+end
+return run
+]])
+      local by_code = {}
+      for _, finding in ipairs(report) do by_code[finding.code] = finding end
+      assert_true(by_code["708"] ~= nil, "an exposed wrapper with no visible source is 708")
+      assert_true(by_code["709"] == nil, "without a source the claim is exposure, not injection")
+      assert_equal(by_code["708"].severity, "high",
+         "708 carries the severity of the sink it wraps, because it replaces 701 there")
    end)
 end)

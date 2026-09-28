@@ -27,7 +27,8 @@ local function go()
    os.execute("ping " .. uci.get("system", "hostname"))
 end
 ]])
-      assert_equal(codes(report), "701", "without the profile only the shape is reported")
+      assert_equal(codes(report), "708",
+         "without the profile there is no source, so only the exposure is reported")
    end)
 
    it("composes profiles", function()

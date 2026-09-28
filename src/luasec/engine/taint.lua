@@ -135,6 +135,7 @@ local function new_state()
       findings = {},
       reported = {},                                  -- dedupe: one finding per site
       approx = false,                                 -- reduced-precision mode
+      param_taint = setmetatable({}, {__mode = "k"}),   -- formal parameter -> taint set
       var_taint = setmetatable({}, {__mode = "k"}),   -- approx mode: var -> taint set
    }
 end
@@ -289,6 +290,13 @@ local function taint_of_var(node, item, state)
    if state.approx and var then
       set_union_into(result, state.var_taint[var] or new_set())
       return result
+   end
+
+   if var and state.param_taint[var] then
+      -- Taint bound to a formal parameter by the interprocedural pass. A
+      -- parameter has no reaching definition of its own, so this is the only
+      -- way an argument's taint reaches the body.
+      set_union_into(result, state.param_taint[var])
    end
 
    if var and item and item.used_values then
@@ -733,10 +741,13 @@ local function propagate(chstate, state, opts)
    end
 end
 
-function taint.run(chstate, opts)
+function taint.run(chstate, opts, existing_state)
    opts = opts or {}
-   local state = new_state()
+   local state = existing_state or new_state()
    state.approx = chstate.resolved_locals == false
+   if existing_state then
+      state.approx = false
+   end
 
    if state.approx then
       -- One forward pass. No loops, no closures, no reaching definitions: enough
@@ -773,6 +784,38 @@ function taint.run(chstate, opts)
 
    propagate(chstate, state, opts)
    return state.findings
+end
+
+-- Formal parameters of a function node.
+taint.formals_of = function(function_node)
+   local args = function_node[1] or {}
+   local vars, varargs = {}, false
+   for _, arg in ipairs(args) do
+      if arg.tag == "Dots" then
+         varargs = true
+      elseif arg.var then
+         vars[#vars + 1] = arg.var
+      end
+   end
+   return vars, varargs
+end
+
+-- Arguments of a call expression, as nodes.
+taint.args_of = args_of
+taint.is_constant = const_eval.is_constant
+
+-- The line whose items are a function's body, or nil.
+taint.line_of_function = function(chstate, function_node)
+   for _, line in ipairs(chstate.lines) do
+      if line.node == function_node then return line end
+   end
+   return nil
+end
+
+-- Value objects bound to a formal parameter at the function's entry item.
+taint.argument_values = function(item, var)
+   if not (item and item.used_values) then return {} end
+   return item.used_values[var] or {}
 end
 
 -- Exposed for the interprocedural pass, which reuses the same propagation.

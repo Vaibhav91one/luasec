@@ -13,6 +13,7 @@ local profiles = require "luasec.registry.profiles"
 local rule_context = require "luasec.rules.context"
 local rule_registry = require "luasec.rules.registry"
 local inline_directives = require "luasec.engine.inline_directives"
+local interprocedural = require "luasec.engine.interprocedural"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 
@@ -118,6 +119,83 @@ function api.check_source(source, opts)
    end
 
    local findings = taint_engine.run(chstate, opts)
+
+   -- Taint across function boundaries, unless the file is too large for it.
+   if chstate.resolved_locals ~= false and not opts.no_interprocedural then
+      local state = taint_engine.new_state()
+      taint_engine.run(chstate, opts, state)
+      local seen = {}
+      for _, finding in ipairs(findings) do
+         seen[table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")] = true
+      end
+      interprocedural.run(chstate, state, opts)
+      for _, finding in ipairs(state.findings) do
+         local key = table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")
+         if not seen[key] then
+            seen[key] = true
+            findings[#findings + 1] = finding
+         end
+      end
+   end
+
+   -- Locations already explained by a stronger finding: a proven flow or an
+   -- exposed sink. The shape-only finding at such a location says less, so it is
+   -- dropped rather than reported twice.
+   local covered = {}
+   for _, finding in ipairs(findings) do
+      if finding.code == "709" or finding.code == "710" or finding.code == "743" then
+         covered[finding.line .. ":" .. finding.column] = true
+      end
+   end
+
+   -- 708: an exported function whose execution sink nothing in this file feeds.
+   -- The sink exists; the input lives somewhere we cannot see.
+   if chstate.resolved_locals ~= false and not opts.no_interprocedural
+         and opts.report_exposed_sinks ~= false then
+      local function sink_key(exposed)
+         if not (exposed.sink_line and exposed.sink_offset) then return nil end
+         local start = exposed.sink_offset - (chstate.line_offsets[exposed.sink_line] or 0) + 1
+         return exposed.sink_line .. ":" .. math.max(1, start)
+      end
+
+      for _, exposed in ipairs(interprocedural.exposed_sinks(chstate, opts)) do
+         local key = sink_key(exposed)
+         if not (key and covered[key]) then
+            if key then
+               covered[key] = true
+            end
+
+            local spec = codes.get("708")
+            -- 708 replaces the shape-only finding at this sink, so it carries
+            -- that sink's severity rather than a lower one of its own.
+            local sink_spec = codes.get(exposed.code)
+            local finding = {
+               code = "708",
+               line = exposed.function_node.line or 1,
+               column = math.max(1, exposed.function_node.offset or 1),
+               end_column = math.max(1, exposed.function_node.offset or 1),
+               severity = (sink_spec and sink_spec.severity) or spec.severity,
+               confidence = "low",
+               cwe = spec.cwe,
+               name = exposed.name,
+               sink = exposed.path,
+               exposed_as = exposed.name,
+            }
+            finding.message = codes.render(spec, finding)
+            findings[#findings + 1] = finding
+         end
+      end
+   end
+
+   local deduped = {}
+   for _, finding in ipairs(findings) do
+      local shape_only = finding.code == "701" or finding.code == "702"
+         or finding.code == "703" or finding.code == "704"
+      if not (shape_only and covered[finding.line .. ":" .. finding.column]) then
+         deduped[#deduped + 1] = finding
+      end
+   end
+   findings = deduped
 
    if chstate.resolved_locals == false then
       findings[#findings + 1] = {
