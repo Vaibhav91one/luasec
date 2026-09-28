@@ -27,9 +27,18 @@ if ! git -C "$scratch" diff -R "$base" "$head" -- 'src/**' 'vendor/**' | git -C 
   exit 0
 fi
 
+# build/ and vendor/luacheck are gitignored, so a fresh worktree has neither and
+# every spec dies on `require "luacheck.parser"`. A proof that fails for that
+# reason "passes" for the wrong reason, which is how this gate was vacuous.
 cd "$scratch"
-if ! "$root/bin/luasec" --version >/dev/null 2>&1; then
-  ln -s "$root/build" build 2>/dev/null || true
+if [ ! -e build ]; then ln -s "$root/build" build 2>/dev/null || true; fi
+if [ ! -e vendor/luacheck ]; then
+  mkdir -p vendor 2>/dev/null || true
+  ln -s "$root/vendor/luacheck" vendor/luacheck 2>/dev/null || true
+fi
+if [ ! -e vendor/luacheck ]; then
+  echo "tdd-proof: SKIP - the scratch worktree has no vendored luacheck to run against"
+  exit 1
 fi
 
 set +e

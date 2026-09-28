@@ -1037,13 +1037,15 @@ local UBUS_OBJECT_CALLS = {
 -- (cbi.lua's `_run_hooks` list), plus the names a plugin interface uses for the
 -- operation that does the work. The prefixes are the two spellings of a handler
 -- nobody has a fixed name for.
+-- Only the `on_*` hooks and the `apply`/`commit`/`write` pairs are evidence a
+-- framework is calling this. `run`, `exec` and `execute` were here too and were
+-- removed after a measurement: `function M.run(cmd) os.execute(cmd) end` in an
+-- ordinary utility module is not an RPC handler, and flagging every library
+-- function called "run" is how a rule becomes noise.
 local HANDLER_NAMES = {
    apply = true,
    commit = true,
    write = true,
-   exec = true,
-   run = true,
-   execute = true,
    on_parse = true,
    on_save = true,
    on_before_save = true,
@@ -1056,10 +1058,12 @@ local HANDLER_NAMES = {
    on_after_apply = true,
 }
 
-local HANDLER_PREFIXES = {"handle", "handler"}
-
-local function is_handler_name(key)
+-- A `handle*` prefix is the same weak signal: a library may well have a
+-- handle_connection. Kept only when the file declares itself a controller, which
+-- the dispatcher path checks, so a prefix alone is not enough.
+local function is_handler_name(key, is_controller)
    if HANDLER_NAMES[key] then return true end
+   if not is_controller then return false end
    for _, prefix in ipairs(HANDLER_PREFIXES) do
       if key:sub(1, #prefix) == prefix then return true end
    end
@@ -1476,8 +1480,10 @@ local function detect_exposed_handler(ctx)
       -- receiving side calls it by that name: a module's `format` is a helper,
       -- and a map's `on_after_commit` is a hook the CBI framework runs.
       local exposed = is_ubus
-         or ((method.object and returned_names[method.object]) and is_handler_name(method.key))
-         or (method.table and returned_tables[method.table] and is_handler_name(method.key))
+         or ((method.object and returned_names[method.object])
+             and is_handler_name(method.key, controller))
+         or (method.table and returned_tables[method.table]
+             and is_handler_name(method.key, controller))
       if exposed then
          local function_node = function_of_value(method.value, globals)
          local sink = function_node and first_sink(ctx, function_node, state)

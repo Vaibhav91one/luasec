@@ -604,3 +604,75 @@ describe("whole-program mode: the module shapes firmware uses", function()
       assert_equal(finding.line, 7, "os.execute is on line 7 of preloaded.lua")
    end)
 end)
+
+describe("whole-program mode through the public API", function()
+   -- Writes into a directory named for the test, so one spec's files cannot be
+   -- resolved by another's.
+   local function write(dir, name, source)
+      os.execute("mkdir -p /tmp/luasec-wp/" .. dir)
+      local path = "/tmp/luasec-wp/" .. dir .. "/" .. name
+      local handle = assert(io.open(path, "wb"))
+      handle:write(source)
+      handle:close()
+      return path
+   end
+
+   it("joins a source in one file to a sink in another when asked", function()
+      write("handler", "util.lua", [[
+local M = {}
+function M.run(cmd)
+   os.execute(cmd)
+end
+return M
+]])
+      local handler = write("handler", "handler.lua", [[
+local util = require "util"
+local function go(host)
+   util.run("ping -c1 " .. http.formvalue("host"))
+end
+return go
+]])
+      -- Both files: the whole-program pass may only resolve a require to a
+      -- module it was given.
+      local report = api.analyze({handler, "/tmp/luasec-wp/handler/util.lua"},
+         {std = "luci", whole_program = true})
+      assert_true(#report > 0, "the scan must have produced something to judge")
+      local found = {}
+      for _, finding in ipairs(report) do
+         if finding.code == "709" then found[#found + 1] = finding end
+      end
+      assert_true(#found >= 1, "the cross-file flow is one finding at the sink: "
+         .. #report .. " findings total")
+   end)
+
+   it("reports nothing across files without the option", function()
+      write("solo", "util.lua", [[
+local M = {}
+function M.run(cmd)
+   os.execute(cmd)
+end
+return M
+]])
+      local handler = write("solo", "handler.lua", [[
+local util = require "util"
+local function go(host)
+   util.run("ping -c1 " .. http.formvalue("host"))
+end
+return go
+]])
+      local report = api.analyze({handler, "/tmp/luasec-wp/solo/util.lua"}, {std = "luci"})
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "709",
+            "without --whole-program the two files are separate")
+      end
+   end)
+
+   it("terminates on a module cycle", function()
+      write("cycle", "a.lua", "local b = require \"b\"\nreturn {a = function() return b end}\n")
+      local b = write("cycle", "b.lua", "local a = require \"a\"\nreturn {b = function() return a end}\n")
+      local started = os.clock()
+      local ok = pcall(api.analyze, {b}, {whole_program = true})
+      assert_true(ok, "a module cycle must not hang or raise")
+      assert_true(os.clock() - started < 5, "a module cycle must terminate quickly")
+   end)
+end)

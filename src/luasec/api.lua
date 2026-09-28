@@ -14,6 +14,7 @@ local rule_context = require "luasec.rules.context"
 local rule_registry = require "luasec.rules.registry"
 local inline_directives = require "luasec.engine.inline_directives"
 local interprocedural = require "luasec.engine.interprocedural"
+local whole_program = require "luasec.engine.whole_program"
 local rawscan = require "luasec.rules.rawscan"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
@@ -105,10 +106,18 @@ function api.validate_options(opts)
    return install_registries(opts or {})
 end
 
---- Analyze a single Lua source string.
--- Returns an array of findings, sorted by location.
-function api.check_source(source, opts)
-   opts = opts or {}
+--- The per-file passes over one source string, and the state a whole-program run
+-- needs to join this file to the others.
+--
+-- Returns a result table:
+--   findings   what the per-file passes found, before the shape/exposure phase
+--   chstate    the parsed program, or nil when the source did not parse
+--   state      the taint state the interprocedural pass used, or nil when it did
+--              not run, which is also the case api reports as 904
+--   expensive  whether the cross-function passes were skipped
+--   final      true when the findings are already complete (bytecode triage),
+--              so the phases below must not run again
+local function analyze_source(source, opts)
    local ok, install_error = install_registries(opts)
    if not ok then
       -- A profile or rule file we cannot load is an operator error, not a
@@ -149,7 +158,7 @@ function api.check_source(source, opts)
          end
       end
 
-      return sort_findings(results)
+      return {findings = sort_findings(results), final = true}
    end
 
    local findings = taint_engine.run(chstate, opts)
@@ -161,8 +170,9 @@ function api.check_source(source, opts)
    local expensive = #chstate.lines > (opts.max_function_lines or 4000)
 
    -- Taint across function boundaries, unless the file is too large for it.
+   local state
    if chstate.resolved_locals ~= false and not opts.no_interprocedural and not expensive then
-      local state = taint_engine.new_state()
+      state = taint_engine.new_state()
       taint_engine.run(chstate, opts, state)
       local seen = {}
       for _, finding in ipairs(findings) do
@@ -177,6 +187,20 @@ function api.check_source(source, opts)
          end
       end
    end
+
+   return {findings = findings, chstate = chstate, state = state, expensive = expensive}
+end
+
+--- Resolve the shape-only findings against the ones that say more, and report
+-- the sinks nothing in this file feeds.
+--
+-- This runs after any whole-program findings are merged, not before: a proven
+-- cross-file flow at a sink has to suppress both the shape-only 701 there and
+-- the 708 that said the input was somewhere we could not see.
+local function cover_and_expose(result, opts)
+   local chstate = result.chstate
+   if result.final or not chstate then return result end
+   local findings = result.findings
 
    -- Locations already explained by a stronger finding: a proven flow or an
    -- exposed sink. The shape-only finding at such a location says less, so it is
@@ -235,7 +259,18 @@ function api.check_source(source, opts)
          deduped[#deduped + 1] = finding
       end
    end
-   findings = deduped
+   result.findings = deduped
+   return result
+end
+
+--- The per-file findings that do not depend on any other file: 904 for a file
+-- the per-file passes could only approximate, the rule modules, sorting, and the
+-- in-source directives.
+local function finalize(result, opts)
+   local findings = result.findings
+   local chstate = result.chstate
+   if result.final or not chstate then return findings end
+   local expensive = result.expensive
 
    if expensive then
       findings[#findings + 1] = {
@@ -310,6 +345,14 @@ function api.check_source(source, opts)
    return kept
 end
 
+--- Analyze a single Lua source string.
+-- Returns an array of findings, sorted by location.
+function api.check_source(source, opts)
+   local result = analyze_source(source, opts or {})
+   cover_and_expose(result, opts or {})
+   return finalize(result, opts or {})
+end
+
 -- Mirrors the CLI's --ignore/--only/--enable so an in-source `enable` can
 -- override them, which is the whole point of allowing directives at all.
 function suppressed_by_options(opts, finding)
@@ -327,11 +370,84 @@ function suppressed_by_options(opts, finding)
    return suppressed
 end
 
+--- Join the analyzed files to each other when `opts.whole_program` is set.
+--
+-- The pass returns its findings already carrying the file they belong to, so
+-- each is merged into the result for that file and then goes through the same
+-- shape/exposure phase as the per-file ones: a proven cross-file flow has to
+-- suppress the shape-only 701 at its sink and the 708 that said the input was
+-- somewhere we could not see.
+--
+-- The per-file state is passed through rather than rebuilt, so the cross-file
+-- pass adds one propagate of each file it actually reaches and no more.
+local function merge_whole_program(results, opts)
+   local contexts, by_path = {}, {}
+   for _, result in ipairs(results) do
+      if result.chstate then
+         contexts[#contexts + 1] = {path = result.path, chstate = result.chstate,
+            state = result.state}
+         by_path[result.path] = result
+      end
+   end
+   if #contexts < 2 then return nil end
+
+   local extra, diagnostics = whole_program.analyze(contexts, opts)
+   if not diagnostics then return nil end
+
+   local seen = {}
+   for _, result in ipairs(results) do
+      local keys = {}
+      for _, finding in ipairs(result.findings) do
+         keys[table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")] = true
+      end
+      seen[result] = keys
+   end
+
+   for _, finding in ipairs(extra) do
+      local result = by_path[finding.file]
+      if result then
+         local key = table.concat({finding.code, tostring(finding.line),
+            tostring(finding.column)}, "|")
+         if not seen[result][key] then
+            seen[result][key] = true
+            result.findings[#result.findings + 1] = finding
+         end
+      end
+   end
+
+   -- A whole-program run that stopped at a bound has to say so in the report, in
+   -- the same code a truncated per-file analysis uses: 904 is this tool's
+   -- "the analysis was cut short, the results are not what a full run would
+   -- give". A new code would need a registry entry, a doc row and fixtures,
+   -- and the semantics of 904 are the ones wanted here.
+   for _, bound in ipairs(diagnostics.bounds_hit or {}) do
+      local result = (bound.file and by_path[bound.file]) or results[1]
+      if result then
+         result.findings[#result.findings + 1] = {
+            code = "904", line = 1, column = 1, end_column = 1,
+            severity = codes.get("904").severity, confidence = "certain",
+            cwe = "CWE-0", name = "whole-program " .. tostring(bound.bound),
+            mode = "whole-program bound",
+            message = "whole-program analysis stopped at its " .. tostring(bound.bound)
+               .. " bound in " .. tostring(bound.file)
+               .. "; the cross-file results for this scan are incomplete",
+         }
+      end
+   end
+
+   return diagnostics
+end
+
 --- Analyze files. `paths` is an array of file paths.
+--
+-- With `opts.whole_program`, the files are also analyzed as one program: calls
+-- are followed across `require` boundaries inside the set, and a source in one
+-- file reaching a sink in another is reported once, at the sink.
 function api.analyze(paths, opts)
    opts = opts or {}
    local findings = {}
    local files = {}
+   local results = {}
 
    for _, path in ipairs(paths) do
       local handle, open_err = io.open(path, "rb")
@@ -352,14 +468,38 @@ function api.analyze(paths, opts)
    for _, file in ipairs(files) do
       -- A precompiled chunk is triaged, not parsed: there is no source for the
       -- taint engine to work on, and feeding it bytes only produces a 901.
-      local per_file
+      local result
       if detect.is_bytecode(file.source) then
-         per_file = bytecode_triage.triage(file.source, opts)
+         result = {path = file.path, findings = bytecode_triage.triage(file.source, opts),
+            final = true}
       else
-         per_file = api.check_source(file.source, opts)
+         result = analyze_source(file.source, opts)
+         result.path = file.path
       end
-      for _, finding in ipairs(per_file) do
-         finding.file = file.path
+      -- Without the option a file's parsed program is finished with here and is
+      -- released before the next one is read. Holding every file's check state
+      -- until the end of the run is what lets the whole-program pass see them,
+      -- and on a large tree it is the whole scan's ASTs in memory at once -- so
+      -- it is paid only when the option asks for it.
+      if not opts.whole_program then
+         cover_and_expose(result, opts)
+         result.findings = finalize(result, opts)
+         result.chstate, result.state = nil, nil
+      end
+      results[#results + 1] = result
+   end
+
+   if opts.whole_program then
+      merge_whole_program(results, opts)
+   end
+
+   for _, result in ipairs(results) do
+      if result.chstate then
+         cover_and_expose(result, opts)
+         result.findings = finalize(result, opts)
+      end
+      for _, finding in ipairs(result.findings) do
+         finding.file = result.path
          findings[#findings + 1] = finding
       end
    end
