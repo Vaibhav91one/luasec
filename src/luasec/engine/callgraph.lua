@@ -49,7 +49,12 @@ local function args_of(node)
    if node.tag == "Call" then
       for index = 2, #node do args[#args + 1] = node[index] end
    elseif node.tag == "Invoke" then
-      for index = 3, #node do args[#index - 2] = node[index] end
+      -- `#index - 2` reads as the length of `index` minus two, because # binds
+      -- tighter than -. On a number that raises, and it raised on every method
+      -- call with at least one argument whose receiver resolved to a function
+      -- through a local: one line of ordinary Lua, and the whole scan died with
+      -- a traceback and no report at all.
+      for index = 3, #node do args[index - 2] = node[index] end
    end
    return args
 end

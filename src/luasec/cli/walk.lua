@@ -123,25 +123,31 @@ local function popen_with_path(command, path)
    return io.popen(command_text, "r"), tmp
 end
 
--- Directories in `path` we are not allowed to read.
+-- Directories we cannot read, and symlinks that do not resolve. Both are ground
+-- the walk did not cover, and both are silent otherwise: `find` lists what it
+-- can, exits 0, and the tree looks complete.
 --
 -- Neither find's exit status nor its stderr catches an unreadable EMPTY
 -- directory on every platform, and an empty directory is exactly the case that
 -- matters: it is the tree that looks complete and is not. BSD find has no
--- -readable, so each candidate is asked about with test -r.
+-- -readable, so each candidate is asked about with test -r / test -e.
 --
--- Two traps, both of which produce a silently empty answer here: -prune
--- matches the top directory first and cuts the entire walk, and `-exec cmd {}
--- +` passes every match as trailing arguments, so a `sh -c` script has to loop
--- over "$@" rather than read "$1".
-local function unreadable_dirs(path)
+-- Three traps, all of which produce a silently empty answer here:
+--   - -prune matches the top directory first and cuts the entire walk
+--   - `-exec cmd {} +` passes every match as trailing arguments, so an sh -c
+--     script has to loop over "$@" rather than read "$1"
+--   - `test -e` on a link that resolves to a directory is true, so the link
+--     check is asked only of links find did not descend into
+local function coverage_problems(path)
    local pipe, tmp = popen_with_path(
       'find "$p" -type d -exec sh -c \'for x in "$@"; do '
-      .. 'test -r "$x" || printf "%s\\n" "$x"; done\' _ {} + 2>/dev/null', path)
+      .. 'test -r "$x" || printf "d %s\\n" "$x"; done\' _ {} + 2>/dev/null; '
+      .. 'find "$p" -type l -exec sh -c \'for x in "$@"; do '
+      .. 'test -e "$x" || printf "l %s\\n" "$x"; done\' _ {} + 2>/dev/null', path)
    if not pipe then return {} end
    local out = {}
-   for name in tostring(pipe:read("*a") or ""):gmatch("[^\n]+") do
-      out[#out + 1] = name
+   for line in tostring(pipe:read("*a") or ""):gmatch("[^\n]+") do
+      out[#out + 1] = line
    end
    pipe:close()
    os.remove(tmp)
@@ -157,8 +163,17 @@ local function list_dir(path)
    -- this tree" and "this tree has no Lua in it" print the same thing otherwise,
    -- and the first must never be reported as the second.
    local errfile = os.tmpname()
+   -- -L follows symlinks. Without it, find's -type f matches the link rather
+   -- than what it points at, so a symlinked file and a symlinked directory were
+   -- both skipped: a file reachable inside the scanned tree that luasec never
+   -- read, reported as a clean tree with exit 0. One entry an attacker can put
+   -- in a firmware image is enough to hide a file that way.
+   --
+   -- A symlink loop or a dangling link makes find exit non-zero, and that
+   -- lands in the problems list below: the tree could not be walked in full, so
+   -- it is reported as a coverage gap rather than passed over in silence.
    local pipe, tmp = popen_with_path(
-      'find "$p" -type f -print0 2>' .. string.format("%q", errfile), path)
+      'find -L "$p" -type f -print0 2>' .. string.format("%q", errfile), path)
    if not pipe then
       os.remove(errfile)
       return nil, ("could not list directory: %s"):format(path)
@@ -183,13 +198,21 @@ local function list_dir(path)
    -- two more fix-and-rerun cycles to find out whether they got them all.
    local problems = {}
 
-   for _, unreadable in ipairs(unreadable_dirs(path)) do
-      -- Reported against the directory that was skipped, which is the thing an
-      -- operator has to go and fix, rather than against the scan root.
-      problems[#problems + 1] = {
-         message = ("could not read directory %s"):format(unreadable),
-         path = unreadable,
-      }
+   for _, line in ipairs(coverage_problems(path)) do
+      local kind, entry = line:match("^(%a) (.+)$")
+      if kind == "d" then
+         -- Reported against the directory that was skipped, which is the thing
+         -- an operator has to go and fix, rather than the scan root.
+         problems[#problems + 1] = {
+            message = ("could not read directory %s"):format(entry),
+            path = entry,
+         }
+      elseif kind == "l" then
+         problems[#problems + 1] = {
+            message = ("could not resolve symlink %s"):format(entry),
+            path = entry,
+         }
+      end
    end
 
    if not ok and reason and reason ~= "" and #problems == 0 then

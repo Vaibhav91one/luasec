@@ -521,6 +521,29 @@ local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 -- the same object written two ways, and `luci.cursor` appears in more of the
 -- corpus than the bare spelling. Matching the factory's last identifier is what
 -- makes those two spellings agree.
+-- Values assigned to table fields we can see, keyed "base.field" where base is
+-- the name of the table. Built once per file, before any rule asks about a
+-- cursor, because a call can appear before the assignment that defines it.
+local FIELD_VALUES = {}
+
+local function field_key(node, field)
+   if type(node) ~= "table" or node.tag ~= "Id" then return nil end
+   local name = node[1]
+   -- `field` is a String node's value, but this is also reached from paths
+   -- where it is a node, and concatenating a table raises.
+   if type(name) ~= "string" or type(field) ~= "string" then return nil end
+   return name .. "." .. field
+end
+
+-- The value last assigned to `base.field`, or nil when the file does not say.
+local function field_value(base, field)
+   local key = field_key(base, field)
+   if not key then return nil end
+   local value = FIELD_VALUES[key]
+   if value == false then return false end
+   return value
+end
+
 -- The `uci` module, however it is reached: a local named for it, a global, or
 -- a `require("uci")` the AST still shows us.
 -- A receiver reached through a field or a global, so `self.uci:set(...)` and a
@@ -532,8 +555,17 @@ local function is_uci_module(node, depth)
    if node.tag == "Invoke" or node.tag == "Call" then
       if called_name(node) == "require" then
          local first = node.tag == "Invoke" and node[3] or node[2]
+         -- `luci.model.uci` is the canonical LuCI path and `uci` the bare one;
+         -- a module path is uci's when uci is a whole segment of it, or the
+         -- whole of it. Substring matching would take `luci.sys` and `cusick`
+         -- for a cursor.
          local module = string_value(first)
-         return module ~= nil and string.find(module, "^u?ci") ~= nil
+         if module == nil then return false end
+         if module == "uci" or module == "muci" then return true end
+         for segment in module:gmatch("[^%.]+") do
+            if segment == "uci" or segment == "muci" then return true end
+         end
+         return false
       end
       return is_uci_module(node[1], (depth or 0) + 1)
    end
@@ -584,21 +616,38 @@ local function is_cursor(node, depth)
    -- can see. The field name carries the signal; the value is only followed so
    -- an alias of an alias still resolves.
    if node.tag == "Index" then
+      -- Anchored at both ends on purpose. `^u?ci` alone matched cipher, cidr,
+      -- citation, cities and circuit, which are ordinary identifiers in
+      -- firmware code, and reported each one's :set as a config write. A field
+      -- is a cursor when it is named like one, wholly.
       local field = string_value(node[2])
-      if field ~= nil and string.match(field, "^u?ci") then return true end
+      if field == "uci" or field == "_uci" or field == "muci" or field == "cursor" then
+         local assigned = field_value(node[1], field)
+         -- Nothing assigned here we can see: `self.uci` is set by a constructor
+         -- in another file, and the name is all there is. Something assigned and
+         -- plainly not a cursor: `t.uci = true` is not a config handle.
+         if assigned == nil then return true end
+         if assigned == false then return false end
+         if is_cursor(assigned, depth + 1) then return true end
+         return assigned.tag == "Call" or assigned.tag == "Invoke"
+      end
       return is_cursor(node[1], depth + 1)
    end
 
    if node.tag == "Id" then
+      -- A binding we can see is decided by what it is bound to. A local called
+      -- `mycursor` holding a plain table is a plain table: reading its name
+      -- instead of its definition reported every helper table whose author
+      -- happened to end the name with cursor.
       if node.var then
          for _, value in ipairs(node.var.values or {}) do
             if value.node and is_cursor(value.node, depth + 1) then return true end
          end
+         return false
       end
       -- A global has no reaching definitions, so its name is all there is.
       local name = type(node[1]) == "string" and node[1] or ""
-      return string.match(name, "^_*u?ci$") ~= nil
-         or string.match(name, "cursor$") ~= nil
+      return name == "uci" or name == "_uci" or name == "muci" or name == "cursor"
    end
 
    return false
@@ -657,6 +706,29 @@ end
 
 detectors[#detectors + 1] = function(ctx)
    local reported = {}
+
+   -- First pass: what is assigned to each table field. A call can appear
+   -- before the assignment that defines it, so this is collected before any
+   -- rule asks whether something is a config cursor.
+   for key in pairs(FIELD_VALUES) do FIELD_VALUES[key] = nil end
+   ctx:each_node(function(node)
+      if node.tag == "Set" or node.tag == "OpSet" or node.tag == "Local" then
+         local targets, values = node[1], node[2]
+         if type(targets) == "table" and type(values) == "table" then
+            for index, target in ipairs(targets) do
+               if type(target) == "table" and target.tag == "Index" then
+                  local key = field_key(target[1], string_value(target[2]))
+                  if key then
+                     local value = values[index]
+                     FIELD_VALUES[key] = (value == nil) and false
+                        or ((value.tag == "Call" or value.tag == "Invoke")
+                            and value or false)
+                  end
+               end
+            end
+         end
+      end
+   end)
 
    -- One literal, one finding: a value bound twice, or bound and compared, is
    -- the same secret and is reported where it was embedded.
@@ -743,6 +815,27 @@ detectors[#detectors + 1] = function(ctx)
                local parameter = parameters[position - first + 1]
                if type(parameter) == "string" and name_tier(parameter) then
                   consider(node[position], parameter)
+               end
+            end
+         end
+
+         -- A CBI option can also be built with its value inline:
+         -- `s:option("Password", "desc", {cfgvalue = "..."})`. The field name
+         -- is not a credential name, so the Table branch above ignores it, and
+         -- the label is the one this call carries.
+         local inline_label = cbi_field_label(node)
+         if inline_label then
+            local inline_first = node.tag == "Invoke" and 3 or 2
+            for position = inline_first, #node do
+               local argument = node[position]
+               if type(argument) == "table" and argument.tag == "Table" then
+                  for _, pair_node in ipairs(argument) do
+                     if pair_node.tag == "Pair" and type(pair_node[1]) == "table"
+                        and pair_node[1].tag == "String"
+                        and CBI_VALUE_FIELDS[pair_node[1][1]] then
+                        consider(pair_node[2], inline_label)
+                     end
+                  end
                end
             end
          end

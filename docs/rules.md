@@ -8,6 +8,12 @@ Severity: `critical`, `high`, `medium`, `low`.
 Confidence: `certain` (the data flow is unambiguous), `high`, `medium` (heuristic
 default), `low` (shape only, no proven flow).
 
+## 0xx - suppression
+
+| Code | Severity | CWE | Meaning |
+| --- | --- | --- | --- |
+| 012 | low | CWE-0 | a `-- luasec:` suppression directive could not be read |
+
 ## 7xx - execution and dynamic code
 
 | Code | Severity | CWE | Meaning |

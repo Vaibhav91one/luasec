@@ -319,7 +319,7 @@ local function finalize(result, opts)
    local directives, problems = inline_directives.parse(chstate)
    for _, problem in ipairs(problems) do
       findings[#findings + 1] = {
-         code = "021", line = problem.line, column = 1, end_column = 1,
+         code = "012", line = problem.line, column = 1, end_column = 1,
          severity = "low", confidence = "certain", name = "inline directive",
          message = problem.message,
       }

@@ -12,6 +12,13 @@ local KNOWN = {ignore = true, enable = true, only = true, push = true, pop = tru
 --- Parse every `luasec:` directive in a file.
 -- Returns a list of {line, action, patterns, push} and a list of problems
 -- {line, message}.
+-- Can Lua read this as a pattern at all? `string.match` raises on a malformed
+-- one, and a directive in a file we did not write is never a pattern we checked.
+local function is_valid_pattern(pattern)
+   local ok = pcall(string.match, "", pattern)
+   return ok
+end
+
 function directives.parse(chstate)
    local found, problems = {}, {}
 
@@ -39,6 +46,22 @@ function directives.parse(chstate)
                problems[#problems + 1] = {line = line,
                   message = ("luasec directive '%s' needs at least one code pattern"):format(action)}
             else
+               -- Every pattern is checked while the directive is read, so a
+               -- suppression the operator cannot express is reported here rather
+               -- than crashing the matcher later. It is still recorded: a
+               -- suppression we could not read is not a suppression we applied.
+               local unreadable = nil
+               for _, pattern in ipairs(patterns) do
+                  if not is_valid_pattern(pattern) then
+                     unreadable = pattern
+                     break
+                  end
+               end
+               if unreadable then
+                  problems[#problems + 1] = {line = line,
+                     message = ("luasec directive '%s' has an unreadable code pattern '%s'")
+                        :format(action, unreadable)}
+               end
                found[#found + 1] = {line = line, action = action, patterns = patterns,
                   push = rest:match("%[push%]") ~= nil}
             end
@@ -77,6 +100,17 @@ function directives.matches_any(patterns, finding)
    return false
 end
 
+-- Does `subject` match `pattern`? A malformed pattern is not a match and not an
+-- error: the caller reports the unreadable directive, which is a finding about
+-- the file rather than a crash in the analyzer.
+local function matches_safely(subject, pattern)
+   local ok, result = pcall(string.match, subject, pattern)
+   if ok then return result ~= nil end
+
+   ok, result = pcall(string.match, subject, "^" .. pattern .. "$")
+   return ok and result ~= nil
+end
+
 -- A pattern is a code, optionally with a name after a colon, and may use a
 -- character class: "7", "[1234]", "70[0-9]".
 function directives.code_and_name_match(pattern, finding)
@@ -86,8 +120,13 @@ function directives.code_and_name_match(pattern, finding)
       name_pattern = nil
    end
 
-   if code_pattern ~= "" and not finding.code:match("^" .. code_pattern .. "$")
-         and not finding.code:match(code_pattern) then
+   -- The pattern is the operator's own text, and a file we did not write is not
+   -- a pattern we validated. `-- luasec: ignore [708` is a typo, and passing it
+   -- to string.match raised "malformed pattern" - which killed the whole scan
+   -- and discarded every other file's findings. A directive we cannot read is a
+   -- directive we cannot honour, so it matches nothing and is reported as
+   -- unreadable (021) rather than taken as an error here.
+   if code_pattern ~= "" and not matches_safely(finding.code, code_pattern) then
       return false
    end
 

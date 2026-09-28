@@ -172,6 +172,21 @@ register {code = "804", severity = "medium", cwe = "CWE-0",
 register {code = "805", severity = "low", cwe = "CWE-0",
    message = "file is not parseable Lua despite its name ({name})"}
 
+-- ---------------------------------------------------------------- 0xx suppression
+
+-- A `-- luasec:` directive the analyzer could not read: an action it does not
+-- know, or a code pattern Lua cannot read as a pattern. It is in the 0xx range
+-- with the other suppression problems, and it is a coverage gap rather than a
+-- note: findings may have been kept or dropped other than the operator asked,
+-- so a run with one of these does not pass.
+--
+-- This code was emitted for an unknown action from the start and never
+-- registered, so a SARIF result could name a ruleId the tool did not declare,
+-- and it sat on 021, which is luacheck's: a finding that means one thing in the
+-- JSON and another in luacheck's own output. It is 012 now.
+register {code = "012", severity = "low", cwe = "CWE-0",
+   message = "a luasec suppression directive could not be read ({name})"}
+
 -- ---------------------------------------------------------------- 9xx meta
 
 register {code = "901", severity = "low", cwe = "CWE-0",

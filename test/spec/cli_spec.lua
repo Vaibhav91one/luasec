@@ -369,3 +369,62 @@ describe("--only", function()
       assert_true(code ~= 0, out)
    end)
 end)
+
+describe("--only and --ignore take a code pattern", function()
+   it("matches a prefix, not only a whole code", function()
+      local dir = scratch_dir("only_prefix")
+      local f = assert(io.open(dir .. "/h.lua", "w"))
+      f:write('local function ping(h)\n   os.execute("ping " .. http.formvalue(h))\nend\nreturn ping\n')
+      f:close()
+
+      -- The code is the subject and the operator's pattern is the pattern. The
+      -- other way round, string.match("70", "709") is nil, so every
+      -- multi-character pattern matched nothing and --only 70 reported an empty
+      -- tree with exit 0.
+      for _, pattern in ipairs({"709", "70", "7", "70[0-9]"}) do
+         local out, code = harness.cli({ "--std", "+luci", "--only", pattern, dir })
+         assert_equal(code, 1, "pattern " .. pattern .. " should match the 709:\n" .. out)
+         assert_match(out, "709", "pattern " .. pattern .. ":\n" .. out)
+      end
+
+      os.execute("rm -rf " .. string.format("%q", dir))
+   end)
+
+   it("does not crash on a malformed pattern", function()
+      local dir = scratch_dir("only_bad")
+      local f = assert(io.open(dir .. "/h.lua", "w"))
+      f:write("os.execute(cmd)\n")
+      f:close()
+      local out, code = harness.cli({ "--only", "[708", dir })
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_true(code ~= nil, "the run completed:\n" .. out)
+      assert_no_match(out, "stack traceback", "a malformed pattern is not a crash")
+   end)
+end)
+
+describe("a symlink in the scanned tree", function()
+   it("is followed, and a broken one is reported", function()
+      -- find's -type f matches a symlink rather than its target, so a
+      -- symlinked file and a symlinked directory were both skipped: a file
+      -- reachable inside the tree that luasec never read, reported clean.
+      local dir = scratch_dir("symlinks")
+      os.execute("mkdir -p " .. string.format("%q", dir .. "/outside"))
+      local hidden = assert(io.open(dir .. "/outside/hidden.lua", "w"))
+      hidden:write("os.execute(cmd)\n")
+      hidden:close()
+      os.execute("ln -s " .. string.format("%q", dir .. "/outside/hidden.lua")
+         .. " " .. string.format("%q", dir .. "/via_link.lua"))
+      os.execute("ln -s " .. string.format("%q", dir .. "/nowhere")
+         .. " " .. string.format("%q", dir .. "/dangling.lua"))
+
+      local out, code = harness.cli({ dir })
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      assert_match(out, "hidden%.lua",
+         "the file behind a symlink is analyzed:\n" .. out)
+      assert_match(out, "701", "and its finding is reported:\n" .. out)
+      assert_match(out, "could not resolve symlink",
+         "a link that resolves to nothing is ground we did not cover:\n" .. out)
+      assert_true(code ~= 0, out)
+   end)
+end)

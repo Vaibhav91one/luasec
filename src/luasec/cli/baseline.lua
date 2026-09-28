@@ -57,10 +57,7 @@ end
 -- finding that did not change is not an answer.
 --
 -- Returns the list and whether any new finding is at or above the threshold.
--- The codes that mean a file was not fully analyzed. Kept in step with the
--- table in main.lua, which is what decides whether such a run passes.
-local DEGRADED = {["801"] = true, ["803"] = true, ["805"] = true,
-                  ["901"] = true, ["902"] = true, ["904"] = true}
+local degraded = require "luasec.rules.degraded"
 
 function baseline.compare(current, known, threshold_rank)
    local result = {}
@@ -75,7 +72,7 @@ function baseline.compare(current, known, threshold_rank)
       -- code: it is the run telling you it did not read something. Suppressing
       -- it as known printed an empty report and exited non-zero, which reads as
       -- a contradiction rather than as the warning it is.
-      if DEGRADED[finding.code] then
+      if degraded.is_degraded(finding.code) then
          finding.status = "new"
          result[#result + 1] = finding
       elseif known[fingerprint] == nil then

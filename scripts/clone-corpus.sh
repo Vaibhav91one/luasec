@@ -17,24 +17,30 @@ clone() {
         echo ">> $name already present at the pinned revision"
         return 0
       fi
-      echo ">> $name is at $have, not the pinned $rev; re-checking out"
+      echo ">> $name is at $have, not the pinned $rev; fetching and checking out"
     else
       echo ">> $name already present"
       return 0
     fi
   fi
   echo ">> cloning $name${rev:+ at $rev}"
+  mkdir -p "$(dirname "$root/$name")"
   if [ -n "$rev" ]; then
-    # A pinned revision, and a shallow clone cannot check one out: fetch the
-    # depth that contains it, or fetch the whole history.
-    git clone --filter=blob:none "$url" "$root/$name" 2>/dev/null \
-      || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 0; }
+    # An existing tree at the wrong revision: clone cannot write into a
+    # non-empty directory, so fetch and check out instead of re-cloning.
+    if [ -d "$root/$name/.git" ]; then
+      git -C "$root/$name" fetch --quiet origin \
+        || { echo "!! could not fetch $name"; return 1; }
+    else
+      git clone --filter=blob:none "$url" "$root/$name" 2>/dev/null \
+        || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 1; }
+    fi
     git -C "$root/$name" checkout -q "$rev" 2>/dev/null \
       || echo "!! could not check out $rev for $name (numbers in docs/precision.md"
     # say which revision was measured)"
   else
     git clone --depth 1 "$url" "$root/$name" 2>/dev/null \
-      || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 0; }
+      || git clone "$url" "$root/$name" || { echo "!! failed: $name"; return 1; }
   fi
 }
 

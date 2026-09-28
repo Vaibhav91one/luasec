@@ -4,6 +4,7 @@ local walk = require "luasec.cli.walk"
 local api = require "luasec.api"
 local baseline = require "luasec.cli.baseline"
 local codes = require "luasec.rules.codes"
+local degraded = require "luasec.rules.degraded"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
 local sarif = require "luasec.report.sarif"
@@ -18,19 +19,10 @@ local version = require "luasec.version"
 -- the two apart without reading the report.
 local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR, EXIT_NEW = 0, 1, 2, 3
 
--- The codes that say a file was not fully analyzed rather than that it is
--- clean. 901 is a read or parse failure, 902 the lexical fallback, 904 an
--- analysis skipped as too large, and 801/803/805 are the bytecode paths, where
--- the source is not available to analyze at all. All of them are absences of
--- coverage, so all of them fail a run whatever the threshold is.
---
--- 903 is NOT in here. It reports an API the configured standard does not have
--- - a bitwise operator under `--std luajit`, say - which is an advisory about
--- the profile, not a gap in what was read. Putting it here made every tree that
--- uses `<<` fail forever, with no way out: `--ignore 903` removed the lines but
--- the count is taken before filtering, so the run still exited 1.
-local DEGRADED_CODES = {["801"] = true, ["803"] = true, ["805"] = true,
-                        ["901"] = true, ["902"] = true, ["904"] = true}
+-- Whether a file was fully analyzed is one question with one answer, asked in
+-- three places: the exit code, the severity threshold, and the baseline. All
+-- three read degraded.is_degraded, so they cannot disagree. See that module for
+-- which codes qualify and, more importantly, which does not.
 
 -- A verdict is an outcome, not a threshold: anything short of "benign" means the
 -- payload did something worth failing a build over, and a failed payload or a
@@ -51,12 +43,13 @@ local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the va
 -- A threshold must never turn "we did not analyze this" into "clean", because an
 -- operator running --severity-threshold high over a firmware tree would get a
 -- green build for every file that failed to parse.
-local INCOHERENT = {
-   ["901"] = true,  -- could not parse
-   ["904"] = true,  -- analyzed approximately
-   ["021"] = true,  -- a suppression the operator asked for could not be read
-   ["902"] = true,  -- dialect the parser cannot read
-}
+--
+-- Same list as the exit code and the baseline use, from the same table: the
+-- bytecode codes were once missing here, so `--severity-threshold critical` over
+-- a .luac file printed nothing and exited 1 - the contradiction the --only path
+-- was fixed for, surviving on the threshold path.
+local INCOHERENT = {}
+for _, degraded_code in ipairs(degraded.codes()) do INCOHERENT[degraded_code] = true end
 
 local SEVERITY_RANK = {low = 1, medium = 2, high = 3, critical = 4}
 local CONFIDENCE_RANK = {low = 1, medium = 2, high = 3, certain = 4}
@@ -68,10 +61,26 @@ end
 
 -- Pattern rules shared with luacheck: a pattern is a code, optionally with a
 -- name after a colon, and may use character classes like "7", "[1234]".
+--
+-- The code is the SUBJECT and the operator's pattern is the PATTERN. The other
+-- way round, the argument order reads plausibly enough to survive review: the
+-- result is that every multi-character pattern matches nothing, because
+-- string.match("70", "709") is nil. So `--only 70`, `--only 7` and the
+-- documented `--only 70[0-9]` all reported an empty tree and exited 0.
+--
+-- A malformed pattern is pcall'd for the same reason as everywhere else: the
+-- pattern is text from the command line or from a file, and neither is
+-- something we validated.
+local function matches(subject, pattern)
+   local ok, result = pcall(string.match, subject or "", pattern)
+   return ok and result ~= nil
+end
+
 local function pattern_matches(pattern, finding)
    local code_pattern, name_pattern = pattern:match("^([^:]*):?(.*)$")
-   local codes_ok = code_pattern == "" or code_pattern:match(finding.code) ~= nil
-   local name_ok = name_pattern == "" or (finding.name and finding.name:match(name_pattern) ~= nil)
+   local codes_ok = code_pattern == "" or matches(finding.code, code_pattern)
+   local name_ok = name_pattern == ""
+      or (finding.name ~= nil and matches(finding.name, name_pattern))
    return codes_ok and name_ok
 end
 
@@ -94,7 +103,7 @@ local function apply_rules(findings, opts)
       -- an unreadable directory would otherwise print a clean report and exit
       -- non-zero, which reads as a contradiction. --ignore is the flag that
       -- takes a code out of the report, so --ignore 901 still does that.
-      if keep and opts.only and not DEGRADED_CODES[finding.code] then
+      if keep and opts.only and not degraded.is_degraded(finding.code) then
          keep = false
          for _, pattern in ipairs(opts.only) do
             if pattern_matches(pattern, finding) then keep = true break end
@@ -282,7 +291,7 @@ local function run(argv)
    -- --only 708 deleted the 901 before this code ever saw it.
    local unanalyzed = 0
    for _, finding in ipairs(report) do
-      if DEGRADED_CODES[finding.code] then
+      if degraded.is_degraded(finding.code) then
          unanalyzed = unanalyzed + 1
       end
    end

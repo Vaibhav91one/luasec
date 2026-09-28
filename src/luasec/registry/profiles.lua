@@ -109,7 +109,22 @@ function profiles.load_file(path)
    if not ok then
       return nil, ("profile %s errored: %s"):format(path, tostring(declaration))
    end
-   return validate(path, declaration)
+
+   -- validate() reports a malformed profile with assert(), so it has to be
+   -- inside a pcall like the chunk is. Outside it, a profile that loads and is
+   -- then rejected - one that returns a number, one with a sink entry that has
+   -- no pattern - raised out of the CLI as a Lua traceback and exited 1, which
+   -- this tool defines as "findings". A CI reading that as findings shows a
+   -- config error as a report; a missing file correctly exits 2, and a
+   -- malformed one must not exit 1.
+   local valid, problem = pcall(validate, path, declaration)
+   if not valid then
+      -- assert() prefixes its message with the source location. The operator
+      -- wrote the profile, not the validator, so the location is noise.
+      local message = tostring(problem):gsub("^[^:]*:%d+: ", "")
+      return nil, ("profile %s is not valid: %s"):format(path, message)
+   end
+   return problem
 end
 
 --- Split a --std value into profile names. A leading "+" or an empty first part
