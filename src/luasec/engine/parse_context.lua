@@ -1,11 +1,15 @@
 -- Builds a luacheck check state for one source file: decode, parse, then the
--- linearize + resolve_locals stages that give us a CFG and flow-sensitive
--- reaching definitions. We deliberately do not run luacheck's lint stages; we
--- only want its front end and dataflow.
+-- linearize + name_functions stages that give us a control flow graph, and
+-- resolve_locals, which gives flow-sensitive reaching definitions.
 --
--- Returns:
---   ok, chstate          on success
---   nil, syntax_error    when the source does not parse
+-- We deliberately do not run luacheck's lint stages; we only want its front end
+-- and its dataflow.
+--
+-- Cost note: resolve_locals walks a linearized line once per variable defined in
+-- it, so its cost grows quadratically with the number of statements in a single
+-- scope. A generated file with 16,000 sequential locals takes 23 seconds there.
+-- Above `max_nodes` we therefore skip it and say so, rather than hang: the
+-- analysis degrades to a single forward pass and reports 904.
 local decoder = require "luacheck.decoder"
 local parser = require "luacheck.parser"
 local check_state = require "luacheck.check_state"
@@ -16,7 +20,37 @@ local resolve_locals = require "luacheck.stages.resolve_locals"
 
 local parse_context = {}
 
-function parse_context.build(source_bytes)
+-- Count expression nodes, giving up once the budget is spent so a pathological
+-- input cannot make the counter itself expensive.
+local function count_nodes(node, budget)
+   if budget <= 0 or type(node) ~= "table" then return budget end
+   budget = budget - 1
+   for index = 1, #node do
+      local child = node[index]
+      if type(child) == "table" then
+         if child.tag then
+            budget = count_nodes(child, budget)
+         else
+            for _, sub in ipairs(child) do
+               if type(sub) == "table" and sub.tag then
+                  budget = count_nodes(sub, budget)
+               end
+            end
+         end
+      end
+      if budget <= 0 then return 0 end
+   end
+   return budget
+end
+
+--- Build a check state.
+-- Returns chstate, or nil plus a syntax error.
+-- Options:
+--   max_nodes   skip flow-sensitive dataflow above this node count (default 20000)
+function parse_context.build(source_bytes, options)
+   options = options or {}
+   local max_nodes = options.max_nodes or 20000
+
    local chstate = check_state.new(source_bytes)
    chstate.source = decoder.decode(source_bytes)
    chstate.line_offsets = {}
@@ -41,20 +75,31 @@ function parse_context.build(source_bytes)
    unwrap_parens.run(chstate)
    linearize.run(chstate)
    name_functions.run(chstate)
-   resolve_locals.run(chstate)
+
+   local remaining = count_nodes(ast, max_nodes + 1)
+   chstate.resolved_locals = remaining > 0
+   chstate.node_count = max_nodes + 1 - remaining
+
+   if chstate.resolved_locals then
+      resolve_locals.run(chstate)
+   end
 
    return chstate
 end
 
--- Line/column for a source offset, matching how luacheck reports positions.
+--- Line and column for a source offset, matching how luacheck reports positions.
 function parse_context.offset_to_position(chstate, line, offset)
    local start = chstate.line_offsets[line] or 0
-   local line_len = chstate.line_lengths[line]
+   local line_length = chstate.line_lengths[line]
    local column = offset - start + 1
-   if line_len then
-      column = math.max(1, math.min(line_len, column))
+   if line_len_available(line_length) and line_length then
+      column = math.max(1, math.min(line_length, column))
    end
    return column, line
+end
+
+function line_len_available(value)
+   return value ~= nil
 end
 
 return parse_context

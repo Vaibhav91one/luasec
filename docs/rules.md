@@ -98,3 +98,4 @@ statement about its data, not about its code.
 | 901 | low | - | source could not be parsed, lexical scan only |
 | 902 | low | - | source uses a Lua construct the parser does not support |
 | 903 | low | - | API seen that is not available in the configured Lua standard |
+| 904 | medium | - | flow-sensitive analysis skipped for a large file; results are approximate |

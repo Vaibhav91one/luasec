@@ -16,6 +16,7 @@ local FLAGS_WITH_VALUE = {
    ["--jobs"] = "jobs",
    ["--max-iterations"] = "max_iterations",
    ["--min-length"] = "min_length",
+   ["--max-nodes"] = "max_nodes",
    ["--validate-timeout"] = "validate_timeout",
 }
 
@@ -127,6 +128,7 @@ analysis:
   --no-dynamic-sinks         only report sinks fed by known untrusted data
   --no-raw-scan              skip the lexical scan used when parsing fails
   --validate                 run the payload validator instead of static analysis
+  --max-nodes <n>            node budget before analysis degrades (default 20000)
   --stdin                    with --validate, read the payload from standard input
   --validate-timeout <ms>    wall clock for one validated payload (default 2000)
   --jobs <n>                 parallel workers

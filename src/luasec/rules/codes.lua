@@ -181,4 +181,8 @@ register {code = "902", severity = "low", cwe = "CWE-0",
 register {code = "903", severity = "low", cwe = "CWE-0",
    message = "API seen that is not available in the configured Lua standard ({name})"}
 
+register {code = "904", severity = "medium", cwe = "CWE-0", confidence = "certain",
+   message = "flow-sensitive analysis skipped for a large file ({name}); results are approximate",
+   fields = {"node_count", "mode"}}
+
 return codes

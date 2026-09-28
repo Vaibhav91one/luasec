@@ -113,3 +113,42 @@ end
       assert_equal(codes(report), "701", "an unprovable argument is a 701, not a silent pass")
    end)
 end)
+
+describe("large files", function()
+   it("analyzes a file within the node budget with flow-sensitive dataflow", function()
+      local report = api.check_source([[
+local function go(host)
+   local target = http.formvalue("host")
+   os.execute("ping " .. target)
+end
+]])
+      assert_equal(codes(report), "709")
+   end)
+
+   it("still finds the injection in a file too large for flow-sensitive analysis", function()
+      local parts = {"local function go(host)"}
+      for index = 1, 20000 do
+         parts[#parts + 1] = ("   local filler%d = tostring(%d)"):format(index, index)
+      end
+      parts[#parts + 1] = '   os.execute("ping " .. http.formvalue("host"))'
+      parts[#parts + 1] = "end"
+
+      local report = api.check_source(table.concat(parts, "\n"), {max_nodes = 500})
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      table.sort(found)
+      assert_equal(table.concat(found, ","), "709,904",
+         "a large file is still checked, and says its analysis is approximate")
+   end)
+
+   it("completes on a large file in time proportional to its size", function()
+      local parts = {}
+      for index = 1, 4000 do parts[#parts + 1] = ("local v%d = tostring(%d)"):format(index, index) end
+      local source = table.concat(parts, "\n")
+      local started = os.clock()
+      api.check_source(source, {max_nodes = 500})
+      local elapsed = os.clock() - started
+      assert_true(elapsed < 5,
+         ("4000 statements took %.1fs, which is not proportional to input"):format(elapsed))
+   end)
+end)

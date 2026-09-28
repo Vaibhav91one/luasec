@@ -97,7 +97,7 @@ function api.check_source(source, opts)
       error({luasec_config_error = true, message = install_error}, 0)
    end
 
-   local chstate, syntax_error = parse_context.build(source)
+   local chstate, syntax_error = parse_context.build(source, {max_nodes = opts.max_nodes})
 
    if not chstate then
       local finding = {
@@ -117,6 +117,16 @@ function api.check_source(source, opts)
    end
 
    local findings = taint_engine.run(chstate, opts)
+
+   if chstate.resolved_locals == false then
+      findings[#findings + 1] = {
+         code = "904", line = 1, column = 1, end_column = 1,
+         severity = codes.get("904").severity, confidence = "certain",
+         cwe = "CWE-0", name = "large file",
+         node_count = chstate.node_count, mode = "approximate",
+         message = codes.render(codes.get("904"), {name = "large file"}),
+      }
+   end
 
    -- Rule modules see the same parsed program, after the dataflow pass.
    local ctx = rule_context.new(chstate, chstate.source, opts)

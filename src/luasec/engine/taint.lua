@@ -74,6 +74,8 @@ local function new_state()
       global_tables = {},                              -- global name -> Table node
       findings = {},
       reported = {},                                  -- dedupe: one finding per site
+      approx = false,                                 -- reduced-precision mode
+      var_taint = setmetatable({}, {__mode = "k"}),   -- approx mode: var -> taint set
    }
 end
 
@@ -218,9 +220,16 @@ end
 local taint_of_expr
 
 -- Taint of a variable at a given item: union over the reaching definitions.
+-- When flow-sensitive dataflow was skipped, fall back to the last assignment
+-- seen in file order, which is what a single forward pass can know.
 local function taint_of_var(node, item, state)
    local result = new_set()
    local var = node.var
+
+   if state.approx and var then
+      set_union_into(result, state.var_taint[var] or new_set())
+      return result
+   end
 
    if var and item and item.used_values then
       for _, value in ipairs(item.used_values[var] or {}) do
@@ -622,6 +631,41 @@ end
 function taint.run(chstate, opts)
    opts = opts or {}
    local state = new_state()
+   state.approx = chstate.resolved_locals == false
+
+   if state.approx then
+      -- One forward pass. No loops, no closures, no reaching definitions: enough
+      -- to follow a value from its assignment to a later use, and honest about
+      -- being approximate, which the caller reports as 904.
+      for _, line in ipairs(chstate.lines) do
+         for _, item in ipairs(line.items) do
+            if item.tag == "Local" or item.tag == "Set" or item.tag == "OpSet" then
+               for index, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[index]
+                  if written and lhs_node.var then
+                     local set = new_set()
+                     set_union_into(set, taint_of_expr(written, item, state, 0))
+                     state.var_taint[lhs_node.var] = set
+                  end
+               end
+               for _, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[1]
+                  if lhs_node.tag == "Index" then
+                     record_table_write(lhs_node, written, item, state, 0)
+                  end
+               end
+            elseif item.tag == "Eval" then
+               local node = item.node
+               if node and (node.tag == "Call" or node.tag == "Invoke") then
+                  check_shape(node, item, state, chstate, opts)
+                  check_sink(node, item, state, chstate, opts)
+               end
+            end
+         end
+      end
+      return state.findings
+   end
+
    propagate(chstate, state, opts)
    return state.findings
 end
