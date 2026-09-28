@@ -134,3 +134,48 @@ describe("a directive the analyzer cannot read", function()
       assert_equal(kept, 1, "the finding the directive would have hidden is kept")
    end)
 end)
+
+describe("every malformed code pattern", function()
+   it("completes the scan and never hides a finding", function()
+      local api = require "luasec.api"
+      -- The property that matters, whichever way Lua reads the pattern: a
+      -- suppression that cannot be read must not hide what it named. Handing
+      -- the operator's text to string.match unguarded raised "malformed
+      -- pattern" and killed the whole scan, so a file whose only content was a
+      -- typo cost every other file its findings.
+      local forms = {"[708", "70(", "70)", "70%", "7[0", "70[0-9", "%", "%1",
+                     "701:[bad", "701:(", "701:)", "701:%"}
+      for _, form in ipairs(forms) do
+         local source = "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n"
+         local report = api.check_source(source, {std = "luajit"})
+
+         local kept = false
+         for _, finding in ipairs(report) do
+            if finding.code == "701" then kept = true end
+         end
+         assert_true(kept,
+            "a broken suppression never hides the finding: " .. form)
+      end
+   end)
+
+   it("reports the forms Lua rejects outright as 012", function()
+      local api = require "luasec.api"
+      local report = api.check_source("-- luasec: ignore [708\nos.execute(cmd)\n",
+         {std = "luajit"})
+      local unreadable = false
+      for _, finding in ipairs(report) do
+         if finding.code == "012" then unreadable = true end
+      end
+      assert_true(unreadable, "an unreadable directive is reported, not guessed at")
+   end)
+
+   it("still applies a pattern it can read", function()
+      local api = require "luasec.api"
+      for _, form in ipairs({"701", "70[0-9]", "701:os.execute"}) do
+         local report = api.check_source(
+            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
+         assert_equal(#report, 0,
+            "a valid suppression still suppresses: " .. form)
+      end
+   end)
+end)

@@ -40,6 +40,36 @@ local function validate(name, declaration)
    for kind, list in pairs(declaration.sanitizers or {}) do
       assert(type(list) == "table", "profile " .. name .. ".sanitizers." .. kind .. " must be a list")
    end
+
+   -- The fields that decide what a declaration DOES, not just that it is there.
+   -- A sink with `code = 701` (a number) or `arg = "1"` (a string) passed
+   -- validation and then did nothing: the run came back clean with exit 0 on a
+   -- file doing exactly what the profile said to flag. --rules is documented as
+   -- how a vendor describes their own API, so a declaration that loads and does
+   -- nothing is the worst way for it to fail - a JSON habit, `"1"` for `{1}`,
+   -- silently removes a declared sink.
+   for _, key in ipairs({"sources", "sinks", "propagators", "shapes"}) do
+      for _, entry in ipairs(declaration[key] or {}) do
+         if entry.code ~= nil then
+            assert(type(entry.code) == "string",
+               "every " .. name .. "." .. key .. " entry needs code as a string, got "
+                  .. type(entry.code))
+         end
+         if entry.arg ~= nil then
+            assert(type(entry.arg) == "table",
+               "every " .. name .. "." .. key .. " entry needs arg as a list of positions")
+            for _, position in ipairs(entry.arg) do
+               assert(type(position) == "number",
+                  "every " .. name .. "." .. key .. " arg entry must be a number")
+            end
+         end
+         if entry.confidence ~= nil then
+            assert(type(entry.confidence) == "string",
+               "every " .. name .. "." .. key .. " entry needs confidence as a string")
+         end
+      end
+   end
+
    return declaration
 end
 

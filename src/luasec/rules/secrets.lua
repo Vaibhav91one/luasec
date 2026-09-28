@@ -535,13 +535,17 @@ local function field_key(node, field)
    return name .. "." .. field
 end
 
--- The value last assigned to `base.field`, or nil when the file does not say.
-local function field_value(base, field)
+-- Every value assigned to `base.field`, or nil when the file does not say.
+--
+-- All of them, not the last: a field assigned in two places is a field whose
+-- value depends on which way the program went, and deciding it by source order
+-- made a later `t.uci = true` inside a branch erase an earlier
+-- `t.uci = uci.cursor()` for the whole file. One of the two is a handle, so the
+-- field is read as one.
+local function field_values(base, field)
    local key = field_key(base, field)
    if not key then return nil end
-   local value = FIELD_VALUES[key]
-   if value == false then return false end
-   return value
+   return FIELD_VALUES[key]
 end
 
 -- The `uci` module, however it is reached: a local named for it, a global, or
@@ -622,14 +626,16 @@ local function is_cursor(node, depth)
       -- is a cursor when it is named like one, wholly.
       local field = string_value(node[2])
       if field == "uci" or field == "_uci" or field == "muci" or field == "cursor" then
-         local assigned = field_value(node[1], field)
-         -- Nothing assigned here we can see: `self.uci` is set by a constructor
-         -- in another file, and the name is all there is. Something assigned and
-         -- plainly not a cursor: `t.uci = true` is not a config handle.
+         local assigned = field_values(node[1], field)
+         -- Nothing assigned here that this file can see: `self.uci` is set by a
+         -- constructor in another file, and the name is all there is.
          if assigned == nil then return true end
-         if assigned == false then return false end
-         if is_cursor(assigned, depth + 1) then return true end
-         return assigned.tag == "Call" or assigned.tag == "Invoke"
+         for _, value in ipairs(assigned) do
+            if is_cursor(value, depth + 1) then return true end
+         end
+         -- Something was assigned here and none of it is a handle:
+         -- `t.uci = true` is not a config cursor.
+         return false
       end
       return is_cursor(node[1], depth + 1)
    end
@@ -719,10 +725,18 @@ detectors[#detectors + 1] = function(ctx)
                if type(target) == "table" and target.tag == "Index" then
                   local key = field_key(target[1], string_value(target[2]))
                   if key then
+                     -- `local t = {} ; t.a, t.b = 1` has two targets and one
+                     -- value, so values[2] is nil. `(value == nil) and false or
+                     -- value.tag` evaluates the right operand anyway, indexed nil,
+                     -- and raised inside the rule: every secrets finding in the
+                     -- file was replaced by "a rule failed to run". It fires on
+                     -- four files in the corpus, on an idiom that is everywhere.
                      local value = values[index]
-                     FIELD_VALUES[key] = (value == nil) and false
-                        or ((value.tag == "Call" or value.tag == "Invoke")
-                            and value or false)
+                     if type(value) == "table" then
+                        local assigned = FIELD_VALUES[key] or {}
+                        assigned[#assigned + 1] = value
+                        FIELD_VALUES[key] = assigned
+                     end
                   end
                end
             end

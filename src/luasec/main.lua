@@ -254,9 +254,20 @@ local function run(argv)
       return EXIT_ERROR
    end
 
-   if opts.jobs then
-      local jobs = tonumber(opts.jobs)
-      if not jobs or jobs < 1 then return fail("--jobs needs a positive integer") end
+   -- Every option whose value is a number is checked here, in one place.
+   -- `--max-nodes $UNSET_VAR` reached the analysis as the string "abc" and
+   -- `max_nodes + 1` raised out of the CLI as a traceback with exit 1, which
+   -- this tool defines as "findings": a CI with a typo in a variable gets a
+   -- security result instead of a config error.
+   for _, option in ipairs({"jobs", "max_nodes"}) do
+      local raw = opts[option]
+      if raw ~= nil then
+         local value = tonumber(raw)
+         if not value or value < 1 then
+            return fail(("--%s needs a positive integer"):format(
+               option:gsub("_", "-")))
+         end
+      end
    end
 
    local options_ok, options_error = api.validate_options(opts)

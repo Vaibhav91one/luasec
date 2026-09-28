@@ -12,7 +12,7 @@
 --   901, 902       the file could not be read, or was read only by the lexical
 --                  scan after the parser rejected it
 --   904            the analysis was skipped as too large to run faithfully
---   021            a `-- luasec:` suppression could not be read, so findings may
+--   012            a `-- luasec:` suppression could not be read, so findings may
 --                  have been kept or dropped other than the operator asked
 --
 -- 903 is deliberately NOT here. It reports an API the configured standard does

@@ -325,6 +325,14 @@ local function finalize(result, opts)
       }
    end
 
+   -- Patterns that only reveal themselves as malformed when they are used.
+   -- Lua compiles a pattern as it walks, so a pre-check cannot see `70(`, `70)`
+   -- or `70%`; these are the ones we learned about by trying.
+   for _, unreadable in ipairs(inline_directives.unreadable()) do
+      problems[#problems + 1] = {line = unreadable.line,
+         message = ("luasec directive has an unreadable code pattern '%s'"):format(
+            unreadable.pattern)}
+   end
    if #directives == 0 and #problems == 0 then
       return findings
    end

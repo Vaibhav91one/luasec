@@ -428,3 +428,20 @@ describe("a symlink in the scanned tree", function()
       assert_true(code ~= 0, out)
    end)
 end)
+
+describe("a numeric option that is not a number", function()
+   it("is a config error, not a security result", function()
+      -- `--max-nodes $UNSET_VAR` arrived as the string "abc" and `max_nodes + 1`
+      -- raised out of the CLI with exit 1, which this tool defines as
+      -- "findings": a CI with a typo in a variable gets a security result.
+      for _, option in ipairs({"--max-nodes", "--jobs"}) do
+         for _, value in ipairs({"abc", "0", "-5", ""}) do
+            local out, code = harness.cli({ option, value,
+               "test/fixtures/clean/report.lua" })
+            assert_equal(code, 2,
+               option .. " " .. value .. " should be a config error:\n" .. out)
+            assert_no_match(out, "stack traceback", out)
+         end
+      end
+   end)
+end)

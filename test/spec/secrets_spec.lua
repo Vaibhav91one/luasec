@@ -378,3 +378,36 @@ describe("747 on a config write the analysis has to recognise", function()
          "store.cursor() and a set method are not a config write: " .. codes(report))
    end)
 end)
+
+describe("747 in a file with a multiple assignment", function()
+   it("still runs, and still finds the secret", function()
+      -- A `Set` with more targets than values gives a nil on the right-hand
+      -- side. Reading a field of it raised inside the rule, and the rule
+      -- carries 741 through 749, so a two-line idiom cost the file every
+      -- secrets finding in it. Four files in the corpus trip it.
+      local api = require "luasec.api"
+      local handle = assert(io.open("test/fixtures/multiple_assignment.lua", "r"))
+      local report = api.check_source(handle:read("*a"),
+         {std = "+openwrt+luci+luajit"})
+      handle:close()
+
+      local failed = false
+      for _, finding in ipairs(report) do
+         if finding.code == "901" and (finding.message or ""):find("rule failed") then
+            failed = true
+         end
+      end
+      assert_true(not failed, "a multiple assignment is not a rule failure: " ..
+         codes(report))
+      assert_equal(codes(report), "701",
+         "the file is analyzed in full, so the sink is found")
+   end)
+end)
+
+describe("a field that holds a cursor on one path", function()
+   it("is read as a cursor", function()
+      local report = fixture("branch_cursor")
+      assert_equal(codes(report), "747",
+         "the credential in the set is reported: " .. codes(report))
+   end)
+end)
