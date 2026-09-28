@@ -527,19 +527,16 @@ local function check_shape(node, item, state, chstate, opts)
    local shape = platform_api.match_shape(path)
    if not shape then return end
 
-   -- A computed module name or a dynamic library path is worth a separate
-   -- finding, but only when the argument really is computed.
+   -- 705 and 706 are about a name computed at runtime. A constant module name
+   -- is the normal case and is not a finding.
    if shape.code == "705" or shape.code == "706" then
-      local args = args_of(node)
-      local arg = args[1]
-      if not arg or const_eval.is_constant(arg) then
-         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {name = path})
-         return
-      end
-      local arg_taint = taint_of_expr(arg, item, state, 0)
-      if set_is_empty(arg_taint) then
-         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate,
-            {name = path, confidence = "low"})
+      local arg = args_of(node)[1]
+      if arg and not const_eval.is_constant(arg) then
+         local arg_taint = taint_of_expr(arg, item, state, 0)
+         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {
+            name = path,
+            confidence = set_is_empty(arg_taint) and "low" or "high",
+         })
       end
       return
    end

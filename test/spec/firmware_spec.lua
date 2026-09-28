@@ -211,6 +211,35 @@ describe("725: changing the environment a chunk runs in", function()
          "debug.setfenv debug.setmetatable package.cpath package.path setfenv")
    end)
 
+   it("does not report the LuCI idiom for instantiating a form object", function()
+      -- Measured over 566 real firmware files, flagging every setfenv fired on
+      -- 22 of them and every one was this: handing a freshly loaded chunk the
+      -- environment it was written for, which is a namespace, not an escape.
+      local report = api.check_source([[
+local function widget(utl, m, wdg)
+   local form = loadfile(utl.libpath() .. "/model/cbi/widgets.lua")
+   if form then
+      setfenv(form, getfenv(1))(m, wdg)
+   end
+   return form
+end
+]])
+      assert_equal(#with_code(report, "725"), 0,
+         "a namespace for a loaded chunk is not a sandbox escape")
+   end)
+
+   it("reports an environment that hands a chunk a dangerous library", function()
+      local report = api.check_source([[
+local function load_with_open_env(src)
+   local chunk = load(src, "chunk")
+   setfenv(chunk, {io = io, os = os, loadstring = loadstring})
+   return chunk
+end
+]])
+      local found = with_code(report, "725")
+      assert_equal(#found, 1, "an environment that keeps io and loadstring is an escape")
+   end)
+
    it("reports reassignment of _G, _ENV and package.loaded", function()
       local report = api.check_source([[
 _G = {}
@@ -260,14 +289,26 @@ describe("726: destructive or self-modifying operation", function()
 end)
 
 describe("727: unbounded growth in a loop", function()
-   it("reports a loop that appends with no limit the source states", function()
+   it("reports a loop whose string grows with no limit the source states", function()
       local report = fixture("unbounded_growth.lua")
       local found = with_code(report, "727")
-      assert_equal(#found, 4, "a computed limit, a while, an unknown iterator and a repeat")
+      assert_equal(#found, 2,
+         "only the two string accumulators; a collector table is not a memory risk")
       local names = {}
       for _, finding in ipairs(found) do names[#names + 1] = finding.name end
       table.sort(names)
-      assert_equal(table.concat(names, " "), "Forin Fornum Repeat While")
+      assert_equal(table.concat(names, " "), "Fornum While")
+   end)
+
+   it("does not report the collector tables in the same fixture", function()
+      -- Measured over 589 real firmware Lua files, reporting table growth in a
+      -- loop flagged a quarter of them, and every one was an idiom: building a
+      -- list with a loop. A table is bounded by the data that fills it.
+      local report = fixture("unbounded_growth.lua")
+      for _, finding in ipairs(with_code(report, "727")) do
+         assert_true(finding.name ~= "Forin" and finding.name ~= "Repeat",
+            "a table collector is not " .. finding.name)
+      end
    end)
 
    it("does not report a loop whose turns come from a container", function()

@@ -58,6 +58,22 @@ function profiles.is_lua_standard(name)
    return builtin_standards[name] ~= nil and builtin[name] == nil
 end
 
+--- Is this name a platform profile rather than a Lua standard? Some names are
+-- both (`luajit`), and a profile is the more specific claim.
+function profiles.is_platform(name)
+   return builtin[name] ~= nil
+end
+
+--- Does a `--std` value name one or more Lua standards explicitly?
+-- `lua51`, `+lua51`, `lua51+openwrt` all do; `+openwrt` and an absent value do not.
+function profiles.is_lua_standard_spec(spec)
+   if not spec or spec == "" then return false end
+   for part in spec:gmatch("[^+]+") do
+      if profiles.is_lua_standard(util.trim(part)) then return true end
+   end
+   return false
+end
+
 --- Load one built-in profile by name.
 function profiles.load_builtin(name)
    if profiles.is_lua_standard(name) then

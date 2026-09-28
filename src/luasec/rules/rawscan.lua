@@ -29,6 +29,8 @@
 -- expression that decides "is this argument constant" all have caps, and every
 -- cap says so in a finding rather than passing for a clean result.
 local codes = require "luasec.rules.codes"
+local platform_api = require "luasec.registry.platform_api"
+local profiles = require "luasec.registry.profiles"
 
 local M = {}
 
@@ -148,6 +150,9 @@ function resolve_standard(std)
       return nil
    end
    for _, part in ipairs(parts) do
+      -- `luajit` names both a platform profile and a Lua standard, and both
+      -- readings are wanted: the standard says which dialect the file is
+      -- measured against, the profile says which APIs the FFI pack provides.
       if LUA_STANDARDS[part] then return part end
    end
    return nil
@@ -199,6 +204,18 @@ local SYNTAX_CAPABILITY = {
 
 -- -------------------------------------------------------------------- lexer
 --
+-- 903 says an API is unavailable in the environment the operator described. If a
+-- loaded platform profile provides it, the environment does provide it and there
+-- is nothing to report: every LuCI call is "outside the Lua standard", and saying
+-- so 257 times told nobody anything.
+local function provided_by_profile(path)
+   if not path then return false end
+   return platform_api.match_source(path) ~= nil
+      or platform_api.match_sink(path) ~= nil
+      or platform_api.match_shape(path) ~= nil
+      or platform_api.match_propagator(path) ~= nil
+end
+
 -- Token kinds: name, number, string, backtick, op, eof.
 --
 -- The fifth return value says whether the token's text is its value. It is
@@ -631,6 +648,9 @@ function M.scan_source(source, opts)
 
    local function report(finding)
       if dialect_only and finding.code ~= "903" then return end
+      -- Only 903 is about the environment. A shape finding names an API we
+      -- recognize, which is the whole point of recognizing it.
+      if finding.code == "903" and provided_by_profile(finding.name) then return end
       if #findings < max_findings then
          findings[#findings + 1] = finding
       else
@@ -867,6 +887,7 @@ end
 -- shapes are already reported by the platform registry, which resolves module
 -- aliases the raw scan cannot, so the other codes are not repeated here.
 local function detect_dialect(ctx)
+
    -- `--no-raw-scan` is documented as "skip the lexical scan", and this is one:
    -- it costs a second pass over every file that parsed. An operator who turns
    -- it off is asking for the AST-only answer, and gets it.

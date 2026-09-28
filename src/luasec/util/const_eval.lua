@@ -38,7 +38,12 @@ local function fold(node, depth)
    end
 
    local tag = node.tag
-   if tag == "String" or tag == "Number" or tag == "Nil"
+   if tag == "Number" then
+      -- The parser keeps a number's source text, so a folded literal is a string
+      -- unless it is converted here. Without this, arithmetic never folded and a
+      -- number compared equal to its own text.
+      return true, tonumber(node[1]) or node[1]
+   elseif tag == "String" or tag == "Nil"
          or tag == "True" or tag == "False" then
       return true, node[1]
    elseif tag == "Paren" then
