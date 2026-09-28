@@ -154,8 +154,15 @@ return handler
       local _, quiet = harness.cli({tmp})
       assert_equal(quiet, 0, "a clean run is still 0 without a baseline")
 
-      local _, broken = harness.cli({"--format", "nonsense", tmp})
-      assert_equal(broken, 0, "an unknown format falls back to plain, which is not an error")
+      -- An unknown format used to fall back to plain text, and the test said so:
+      -- it was a decision, not an oversight. It has been reversed, because
+      -- `--format json -o report.json` wrote prose into a file that a CI then
+      -- handed to a JSON parser, and the failure surfaced downstream as a parse
+      -- error in a tool that was never wrong. A typo in a flag is a config
+      -- error, like a typo in a number.
+      local broken_out, broken = harness.cli({"--format", "nonsense", tmp})
+      assert_equal(broken, 2, "an unknown format is a config error:\n" .. broken_out)
+      assert_no_match(broken_out, "stack traceback", broken_out)
 
       local _, missing = harness.cli({tmp .. ".absent"})
       assert_equal(missing, 2, "a file that does not exist is still 2")

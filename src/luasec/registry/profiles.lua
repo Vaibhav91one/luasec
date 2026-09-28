@@ -29,6 +29,9 @@ local function validate(name, declaration)
       if declaration[key] ~= nil then
          assert(type(declaration[key]) == "table", "profile " .. name .. "." .. key .. " must be a list")
          for _, entry in ipairs(declaration[key]) do
+            assert(type(entry) == "table",
+               "every " .. name .. "." .. key .. " entry must be a table, got "
+                  .. type(entry))
             assert(type(entry.pattern) == "string",
                "every " .. name .. "." .. key .. " entry needs a pattern")
          end

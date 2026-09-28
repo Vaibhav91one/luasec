@@ -59,13 +59,20 @@ function directives.parse(chstate)
             problems[#problems + 1] = {line = line,
                message = ("unknown luasec directive '%s'"):format(action or body)}
          elseif action == "push" or action == "pop" then
-            found[#found + 1] = {line = line, action = action, patterns = {}}
+            -- Markers, not suppressions: they only open and close a region.
+            found[#found + 1] = {line = line, action = action, patterns = {},
+               marker = true}
          else
+            -- `[push]` is a scope marker, not a code pattern. It used to be
+            -- tokenized as one as well, so a self-pushing suppression also went
+            -- looking for findings named "push".
+            local scoped_by_itself = rest:match("%[push%]") ~= nil
+            rest = rest:gsub("%[push%]", "")
             local patterns = {}
             for pattern in rest:gmatch("[^,%s]+") do
                patterns[#patterns + 1] = pattern
             end
-            if #patterns == 0 then
+            if #patterns == 0 or rest:match("^%s*:%s*$") then
                problems[#problems + 1] = {line = line,
                   message = ("luasec directive '%s' needs at least one code pattern"):format(action)}
             else
@@ -93,7 +100,7 @@ function directives.parse(chstate)
                         :format(action, unreadable)}
                end
                found[#found + 1] = {line = line, action = action, patterns = patterns,
-                  push = rest:match("%[push%]") ~= nil}
+                  push = scoped_by_itself}
             end
          end
       end
@@ -109,10 +116,41 @@ function directives.allows(directives_before, finding, is_suppressed)
    local suppressed_by = is_suppressed
    local enabled = false
 
+   -- A `push` opens a region and a `pop` closes it. Both markers were recorded
+   -- and then never read, so a pop changed nothing and a suppression between a
+   -- push and a pop stayed in force to the end of the file: the operator asked
+   -- for one region and got the whole file, with nothing to say so.
+   --
+   -- Net depth: pushes open a region and pops close one, so counting only
+   -- pushes leaves every region open for the rest of the file, which is the bug
+   -- this replaced. A pop with no push is a no-op rather than a negative depth.
+   local function open_at(limit)
+      local depth = 0
+      for _, directive in ipairs(directives_before) do
+         if directive.marker and directive.line <= limit then
+            if directive.action == "push" then
+               depth = depth + 1
+            else
+               depth = math.max(0, depth - 1)
+            end
+         end
+      end
+      return depth
+   end
+
+   local open_at_finding = open_at(finding.line)
+
    for _, directive in ipairs(directives_before) do
       if directive.action == "ignore" then
-         if directives.matches_any(directive.patterns, finding, directive.line) then
-            suppressed_by = true
+         -- A suppression written outside every region is file-wide, which is
+         -- what a plain `-- luasec: ignore` has always meant. One written inside
+         -- a region lives and dies with it, and `[push]` on the suppression
+         -- itself opens the region it governs.
+         local scoped = open_at(directive.line) > 0 or directive.push
+         if not scoped or open_at_finding > 0 then
+            if directives.matches_any(directive.patterns, finding, directive.line) then
+               suppressed_by = true
+            end
          end
       elseif directive.action == "enable" then
          if directives.matches_any(directive.patterns, finding, directive.line) then
@@ -153,6 +191,14 @@ function directives.unreadable()
    return out
 end
 
+--- Can Lua read this as a pattern at all? Exposed so the command line can ask
+-- the same question, for the same reason.
+function directives.is_readable_pattern(pattern)
+   return is_valid_pattern(pattern)
+end
+
+--- Cleared between files: the table is keyed by line, and a line number in one
+-- file says nothing about a line number in the next.
 function directives.reset_unreadable()
    for line in pairs(UNREADABLE) do UNREADABLE[line] = nil end
 end
@@ -185,7 +231,12 @@ function directives.code_and_name_match(pattern, finding, directive_line)
    -- to string.match raised "malformed pattern", which killed the whole scan and
    -- discarded every other file's findings. So the match is guarded, a pattern we
    -- cannot read matches nothing, and the pattern is recorded for 012.
-   if code_pattern ~= "" and not matches_safely(finding.code, code_pattern, directive_line) then
+   -- An empty code half names no code and so matches every finding, which is
+   -- not what a suppression means. `-- luasec: ignore :` is read as 012 rather
+   -- than as a blanket suppression, and a plain `-- luasec: ignore` already is.
+   if code_pattern == "" then return false end
+
+   if not matches_safely(finding.code, code_pattern, directive_line) then
       return false
    end
 

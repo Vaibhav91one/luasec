@@ -526,6 +526,9 @@ local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 -- cursor, because a call can appear before the assignment that defines it.
 local FIELD_VALUES = {}
 
+-- How many assignments to one field are worth remembering. See the loop below.
+local MAX_FIELD_VALUES = 8
+
 local function field_key(node, field)
    if type(node) ~= "table" or node.tag ~= "Id" then return nil end
    local name = node[1]
@@ -734,7 +737,16 @@ detectors[#detectors + 1] = function(ctx)
                      local value = values[index]
                      if type(value) == "table" then
                         local assigned = FIELD_VALUES[key] or {}
-                        assigned[#assigned + 1] = value
+                        -- Capped, because the answer is asked once per use of the
+                        -- field and the uses are once per line. Remembering all of
+                        -- them made this quadratic: a file of 32,000 assignments
+                        -- and 32,000 uses took 109 s where the previous build took
+                        -- 5 s, and --max-nodes does not bound it because a rule
+                        -- that raises is caught rather than skipped. Eight is
+                        -- plenty to say whether a field is ever a handle.
+                        if #assigned < MAX_FIELD_VALUES then
+                           assigned[#assigned + 1] = value
+                        end
                         FIELD_VALUES[key] = assigned
                      end
                   end

@@ -254,16 +254,27 @@ local function run(argv)
       return EXIT_ERROR
    end
 
-   -- Every option whose value is a number is checked here, in one place.
+   -- A format we do not have used to fall back to plain text, so
+   -- `--format json -o report.json` wrote prose into a file a CI then handed to
+   -- jq, and the failure surfaced downstream as a parse error in a tool that
+   -- was never wrong. A typo in a flag is a config error, like the numbers.
+   local FORMAT_NAMES = {plain = true, json = true, sarif = true, html = true}
+   if opts.format and not FORMAT_NAMES[opts.format] then
+      return fail(("unknown format '%s': expected plain, json, sarif or html")
+         :format(opts.format))
+   end
+
    -- `--max-nodes $UNSET_VAR` reached the analysis as the string "abc" and
    -- `max_nodes + 1` raised out of the CLI as a traceback with exit 1, which
    -- this tool defines as "findings": a CI with a typo in a variable gets a
    -- security result instead of a config error.
-   for _, option in ipairs({"jobs", "max_nodes"}) do
+   for _, option in ipairs({"jobs", "max_nodes", "validate_timeout"}) do
       local raw = opts[option]
       if raw ~= nil then
          local value = tonumber(raw)
-         if not value or value < 1 then
+         -- An integer, because the message says so and a fractional node cap is
+         -- a half-node cap, which is not a thing.
+         if not value or value < 1 or value % 1 ~= 0 then
             return fail(("--%s needs a positive integer"):format(
                option:gsub("_", "-")))
          end
@@ -339,6 +350,19 @@ local function run(argv)
 
    if ground_missing then
       return EXIT_FINDINGS
+   end
+
+   -- --only exists to select, so an empty selection is either a typo or the
+   -- operator looking at the wrong file. `--only 70(` is the first: Lua reads it
+   -- as a pattern, it matches nothing, and a file with a high-severity RCE came
+   -- back clean. It cannot be made an error, because `--only 709` on a file with
+   -- no 709 is legitimate, so it is said out loud instead. Silence from luasec
+   -- means "looked at it and found nothing", and a warning says which of those
+   -- two this was.
+   if opts.only and #list == 0 then
+      io.stderr:write("luasec: --only selected nothing: "
+         .. table.concat(opts.only, ", ")
+         .. " (no finding matched; is the pattern what you meant?)\n")
    end
 
    if #list == 0 then

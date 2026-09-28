@@ -102,10 +102,36 @@ end
 --- Validate the platform profiles and rule files named by `opts`.
 -- Returns true, or nil plus a message. Callers use this to fail before
 -- analyzing anything.
-function api.validate_options(opts)
-   return install_registries(opts or {})
+local function validate_filter_patterns(opts)
+   for _, flag in ipairs({"only", "ignore", "enable"}) do
+      for _, pattern in ipairs(opts[flag] or {}) do
+         local code_half, name_half = pattern:match("^([^:]*):(.*)$")
+         if not code_half then code_half, name_half = pattern, nil end
+         if not inline_directives.is_readable_pattern(code_half) then
+            return nil, ("--%s pattern %q is not a code pattern"):format(flag, pattern)
+         end
+         if name_half ~= nil and name_half ~= ""
+            and not inline_directives.is_readable_pattern(name_half) then
+            return nil, ("--%s pattern %q has a name half that is not a pattern")
+               :format(flag, pattern)
+         end
+      end
+   end
+   return true
 end
 
+function api.validate_options(opts)
+   local ok, err = install_registries(opts or {})
+   if not ok then return ok, err end
+   return validate_filter_patterns(opts or {})
+end
+
+-- --only, --ignore and --enable take code patterns, and a malformed one is
+-- checked at the point it is USED rather than before. A pattern that never
+-- matches is not an error there, it is a suppression: `--only '[bad'` matched
+-- nothing, so every finding was treated as "not selected" and a file with a
+-- high-severity RCE came back clean with exit 0. The in-source directive path
+-- was fixed for this; the command line was not.
 --- The per-file passes over one source string, and the state a whole-program run
 -- needs to join this file to the others.
 --
@@ -316,7 +342,24 @@ local function finalize(result, opts)
 
    -- In-source directives are applied last, so `-- luasec: enable` can undo a
    -- config-level suppression.
+   -- The table behind the 012 channel is keyed by line, and a line number in
+   -- one file says nothing about a line number in the next. Cleared per file:
+   -- without it, a malformed directive in file A reports an unreadable pattern
+   -- in every file analysed after it in the same process.
+   inline_directives.reset_unreadable()
    local directives, problems = inline_directives.parse(chstate)
+
+   -- Patterns that only reveal themselves as malformed when they are used. Lua
+   -- compiles a pattern as it walks, so a pre-check cannot see `70(`, `70)` or
+   -- `70%`; these are the ones we learned about by trying, and they are added
+   -- before the conversion below. They used to be appended to `problems` after
+   -- it had been turned into findings, which made the whole channel dead code.
+   for _, unreadable in ipairs(inline_directives.unreadable()) do
+      problems[#problems + 1] = {line = unreadable.line,
+         message = ("luasec directive has an unreadable code pattern '%s'"):format(
+            unreadable.pattern)}
+   end
+
    for _, problem in ipairs(problems) do
       findings[#findings + 1] = {
          code = "012", line = problem.line, column = 1, end_column = 1,
@@ -325,14 +368,6 @@ local function finalize(result, opts)
       }
    end
 
-   -- Patterns that only reveal themselves as malformed when they are used.
-   -- Lua compiles a pattern as it walks, so a pre-check cannot see `70(`, `70)`
-   -- or `70%`; these are the ones we learned about by trying.
-   for _, unreadable in ipairs(inline_directives.unreadable()) do
-      problems[#problems + 1] = {line = unreadable.line,
-         message = ("luasec directive has an unreadable code pattern '%s'"):format(
-            unreadable.pattern)}
-   end
    if #directives == 0 and #problems == 0 then
       return findings
    end
