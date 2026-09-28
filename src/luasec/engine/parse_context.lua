@@ -48,9 +48,28 @@ end
 -- Returns chstate, or nil plus a syntax error.
 -- Options:
 --   max_nodes   skip flow-sensitive dataflow above this node count (default 20000)
+-- A UTF-8 byte order mark is three bytes of encoding metadata, not source. Lua
+-- does not allow it at the start of a chunk, so a file that opens with one fails
+-- to parse - and this pipeline reports that as 901, "could not be parsed", for a
+-- file a Lua 5.4 interpreter would load. Firmware files edited on Windows carry
+-- one often enough to matter.
+--
+-- Stripped here, before the lexer, rather than after: the lexer derives the line
+-- offsets every finding is located with, so removing three bytes later would put
+-- every column on line 1 out by three.
+local UTF8_BOM = string.char(239, 187, 191)
+
+local function strip_bom(bytes)
+   if type(bytes) == "string" and bytes:sub(1, 3) == UTF8_BOM then
+      return bytes:sub(4)
+   end
+   return bytes
+end
+
 function parse_context.build(source_bytes, options)
    options = options or {}
    local max_nodes = options.max_nodes or 20000
+   source_bytes = strip_bom(source_bytes)
 
    local chstate = check_state.new(source_bytes)
    chstate.source = decoder.decode(source_bytes)
