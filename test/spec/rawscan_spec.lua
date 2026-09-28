@@ -361,3 +361,29 @@ end
          ("5 MB took %.2fs"):format(large_elapsed))
    end)
 end)
+
+describe("raw scan on a file that does not parse", function()
+   it("still reports a command execution sink in an unparseable file", function()
+      local report = api.check_source("local x = 1\nthis is not lua ===\nos.execute(\"ping \" .. x)\n")
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      table.sort(found)
+      assert_equal(table.concat(found, ","), "701,901",
+         "breaking the parser must not be a way to get a clean report")
+   end)
+
+   it("does not report a sink that only appears inside a string", function()
+      local report = api.check_source("local doc = 'os.execute(\"rm -rf /\")'\nthis is not lua ===\n")
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "701" and finding.code ~= "702",
+            "a sink named inside a string literal is not a sink")
+      end
+   end)
+
+   it("does not report a sink that only appears inside a comment", function()
+      local report = api.check_source("-- os.execute(\"id\")\nthis is not lua ===\n")
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "701", "a sink named in a comment is not a sink")
+      end
+   end)
+end)

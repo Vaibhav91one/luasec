@@ -14,10 +14,17 @@ local rule_context = require "luasec.rules.context"
 local rule_registry = require "luasec.rules.registry"
 local inline_directives = require "luasec.engine.inline_directives"
 local interprocedural = require "luasec.engine.interprocedural"
+local rawscan = require "luasec.rules.rawscan"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 
 local api = {}
+
+-- check_source takes a Lua string; the raw scan wants bytes, and the CLI reads
+-- files as bytes, so keep the original string rather than the decoder object.
+local function source_bytes_string(source)
+   return type(source) == "string" and source or nil
+end
 
 local function sort_findings(findings)
    table.sort(findings, function(a, b)
@@ -125,7 +132,24 @@ function api.check_source(source, opts)
       if syntax_error and syntax_error.msg then
          finding.message = finding.message .. ": " .. tostring(syntax_error.msg)
       end
-      return {finding}
+
+      local results = {finding}
+
+      -- A file that does not parse is exactly where an attacker would hide a
+      -- payload, so the lexical scan still runs on the raw text. Without this,
+      -- breaking the parser was a way to get a clean report.
+      if not opts.no_raw_scan then
+         local ok, raw = pcall(rawscan.scan_source, source_bytes_string(source), opts)
+         if ok and type(raw) == "table" then
+            for _, raw_finding in ipairs(raw) do
+               if raw_finding.code ~= "901" then
+                  results[#results + 1] = raw_finding
+               end
+            end
+         end
+      end
+
+      return sort_findings(results)
    end
 
    local findings = taint_engine.run(chstate, opts)
