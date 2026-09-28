@@ -109,6 +109,6 @@ end
    it("works through the CLI as well", function()
       local out, code = harness.cli({ "test/fixtures/inline/ignored.lua" })
       assert_equal(code, 0, out)
-      assert_match(out, "no findings", out)
+      assert_match(out, "0 findings", out)
    end)
 end)
