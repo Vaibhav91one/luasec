@@ -22,6 +22,23 @@ local default_sources = {
    {pattern = "os.getenv", id = "os.getenv", name = "process environment", confidence = "medium"},
    {pattern = "os.getenv.*", id = "os.getenv", name = "process environment", confidence = "medium"},
    {pattern = "io.input", id = "io.input", name = "interactive input", confidence = "medium"},
+   {pattern = "io.lines", id = "io.lines", name = "file contents", confidence = "medium"},
+   {pattern = "io.open:read", id = "io.open:read", name = "file contents", confidence = "medium"},
+   {pattern = "file:read", id = "file:read", name = "file contents", confidence = "medium"},
+   {pattern = "json.decode", id = "json.decode", name = "decoded document", confidence = "high"},
+   {pattern = "jsonc.parse", id = "jsonc.parse", name = "decoded document", confidence = "high"},
+   {pattern = "cjson.decode", id = "cjson.decode", name = "decoded document", confidence = "high"},
+}
+
+-- Method calls the taint engine must see as sources.
+--
+-- The object is whatever the script called it: `handle`, `fh`, `f`, `self`. Only
+-- the method name is stable, and `handle:read("*a")` returns a file's contents
+-- whoever the handle is. Matched at medium confidence for that reason.
+local default_method_sources = {
+   {pattern = "read", id = "file:read", name = "file contents", confidence = "medium"},
+   {pattern = "readline", id = "file:read", name = "file contents", confidence = "medium"},
+   {pattern = "readall", id = "file:read", name = "file contents", confidence = "medium"},
 }
 
 -- Sources that arrive from embedded platforms; merged in by registry/stds/*.
@@ -78,18 +95,21 @@ local sanitizers = {
 local module_names = {
    ffi = "ffi", posix = "posix", nixio = "nixio", cjson = "cjson",
    json = "json", jsonc = "jsonc", luci = "luci", uci = "uci",
+   ["luci.json"] = "json", ["luci.jsonc"] = "jsonc", ["luci.util"] = "luci.util",
    ngx = "ngx", ltn12 = "ltn12", luaposix = "posix",
 }
 
 -- Base counts, so a profile set can be rebuilt per analysis without leaking
 -- declarations from a previous file into the next. Computed below, after the
 -- tables it counts exist.
-local base_counts = {sources = #default_sources, sinks = #default_sinks,
-   propagators = #default_propagators, shapes = #default_shapes, sanitizers = {}}
+-- Filled in at the bottom, once every table exists: this is the base a profile
+-- set is restored to, so a previous analysis cannot leak into the next.
+local base_counts = {sanitizers = {}}
 
 function platform_api.reset()
    for i = #default_sinks, base_counts.sinks + 1, -1 do default_sinks[i] = nil end
    for i = #default_propagators, base_counts.propagators + 1, -1 do default_propagators[i] = nil end
+   for i = #default_method_sources, base_counts.method_sources + 1, -1 do default_method_sources[i] = nil end
    for i = #default_shapes, base_counts.shapes + 1, -1 do default_shapes[i] = nil end
    for i = #platform_sources, 0, -1 do platform_sources[i] = nil end
    for kind, set in pairs(sanitizers) do
@@ -100,6 +120,9 @@ end
 function platform_api.apply_profile(declaration)
    for _, source in ipairs(declaration.sources or {}) do
       platform_sources[#platform_sources + 1] = source
+   end
+   for _, source in ipairs(declaration.method_sources or {}) do
+      default_method_sources[#default_method_sources + 1] = source
    end
    for _, sink in ipairs(declaration.sinks or {}) do
       default_sinks[#default_sinks + 1] = sink
@@ -195,6 +218,13 @@ function platform_api.match_source(path)
    return best_match(platform_sources, path) or best_match(default_sources, path)
 end
 
+-- Same, for a method call. The engine passes the method name when the object
+-- cannot be named, because `handle:read("*a")` is a file read whoever the handle
+-- is.
+function platform_api.match_method_source(method)
+   return best_match(default_method_sources, method)
+end
+
 function platform_api.match_sink(path)
    return best_match(default_sinks, path)
 end
@@ -218,5 +248,6 @@ base_counts.sources = #default_sources
 base_counts.sinks = #default_sinks
 base_counts.propagators = #default_propagators
 base_counts.shapes = #default_shapes
+base_counts.method_sources = #default_method_sources
 
 return platform_api

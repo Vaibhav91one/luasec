@@ -136,6 +136,8 @@ local function new_state()
       reported = {},                                  -- dedupe: one finding per site
       approx = false,                                 -- reduced-precision mode
       param_taint = setmetatable({}, {__mode = "k"}),   -- formal parameter -> taint set
+      declared_sources = {},                            -- var name -> true
+      declared_confidence = "high",
       var_taint = setmetatable({}, {__mode = "k"}),   -- approx mode: var -> taint set
    }
 end
@@ -205,10 +207,15 @@ local function callee_path(node, item, state, depth)
          local value_node = value.node
          if value_node and value_node.tag == "Function" and value_node.name then
             return value_node.name
-         elseif value_node and value_node.tag == "Index" then
-            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`.
+         elseif value_node and (value_node.tag == "Index" or value_node.tag == "Call") then
+            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`, and
+            -- `local json = require("luci.jsonc")` then `json.parse(...)` is
+            -- `jsonc.parse`. The comparison guards the case where resolving
+            -- through the definition gives back the same name we started with.
             local via_local = callee_path(value_node, item, state, depth + 1)
-            if via_local and via_local ~= value_node[1][1] then
+            local own_name = value_node[1] and value_node[1].tag == "Id"
+               and value_node[1][1] or nil
+            if via_local and via_local ~= own_name then
                return via_local
             end
             fallback = fallback or via_local
@@ -292,6 +299,16 @@ local function taint_of_var(node, item, state)
       return result
    end
 
+   -- A name the operator declared a source of untrusted data.
+   if var and state.declared_sources[var.name] then
+      set_add(result, {
+         id = "declared:" .. var.name,
+         name = "declared source " .. var.name,
+         line = var.node and var.node.line,
+         confidence = state.declared_confidence,
+      })
+   end
+
    if var and state.param_taint[var] then
       -- Taint bound to a formal parameter by the interprocedural pass. A
       -- parameter has no reaching definition of its own, so this is the only
@@ -341,6 +358,29 @@ local function taint_of_call(node, item, state, depth)
    local callee = node.tag == "Invoke" and node[1] or node[1]
    local path = callee_path(callee, item, state, depth)
    local args = args_of(node)
+
+   -- A method call on an object we cannot name still has a method name, and
+   -- `handle:read("*a")` is a file read whoever the handle is. Both spellings
+   -- reach us: a colon call as an Invoke node, and a field call on a value we
+   -- could not resolve as an Index callee. The base path of a method call is
+   -- usually just the variable holding the object, so it says nothing; the
+   -- method name is the part that carries meaning.
+   local method_name
+   if node.tag == "Invoke" then
+      method_name = node[2] and node[2][1]
+   elseif node[1] and node[1].tag == "Index" and node[1][2] and node[1][2].tag == "String" then
+      method_name = node[1][2][1]
+   end
+   if method_name then
+      local by_method = platform_api.match_method_source(method_name)
+      if by_method then
+         set_add(result, {
+            id = by_method.id, name = by_method.name,
+            line = node.line, confidence = by_method.confidence,
+         })
+         return result
+      end
+   end
 
    if path then
       local source = platform_api.match_source(path)
@@ -741,6 +781,11 @@ end
 function taint.run(chstate, opts, existing_state)
    opts = opts or {}
    local state = existing_state or new_state()
+   state.declared_sources = {}
+   state.declared_confidence = opts.source_confidence or "high"
+   for _, name in ipairs(opts.sources or {}) do
+      state.declared_sources[name] = true
+   end
    state.approx = chstate.resolved_locals == false
    if existing_state then
       state.approx = false

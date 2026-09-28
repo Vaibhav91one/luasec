@@ -334,3 +334,61 @@ return run
          "708 carries the severity of the sink it wraps, because it replaces 701 there")
    end)
 end)
+
+describe("sources beyond HTTP", function()
+   it("treats a file read as untrusted data", function()
+      local report = api.check_source([[
+local function go(path)
+   local handle = io.open(path, "r")
+   local body = handle:read("*a")
+   os.execute("echo " .. body)
+end
+]])
+      assert_equal(codes(report), "709", "a file's contents reach a shell")
+   end)
+
+   it("treats decoded JSON as untrusted data", function()
+      local report = api.check_source([[
+local json = require "luci.jsonc"
+local function go(body)
+   local parsed = json.parse(body)
+   os.execute("echo " .. parsed.cmd)
+end
+]], {std = "openwrt+luci"})
+      assert_equal(codes(report), "709", "a decoded field reaches a shell")
+   end)
+
+   it("tracks a variable the operator declared as a source", function()
+      local report = api.check_source([[
+local function go(inbound)
+   os.execute("echo " .. inbound)
+end
+]], {sources = {"inbound"}})
+      assert_equal(codes(report), "709",
+         "an operator can declare a name that carries untrusted data")
+   end)
+
+   it("keeps the declared source at a lower confidence than a request parameter", function()
+      local report = api.check_source([[
+local function go(inbound)
+   os.execute("echo " .. inbound)
+end
+]], {sources = {"inbound"}, source_confidence = "medium"})
+      assert_equal(report[1].confidence, "medium")
+   end)
+
+   it("does not treat a value from a local helper as untrusted by itself", function()
+      local report = api.check_source([[
+local function quote(value)
+   return "'" .. tostring(value) .. "'"
+end
+local function go(inbound)
+   os.execute("echo " .. quote(inbound))
+end
+]])
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "709",
+            "a quoting helper does not make data untrusted: " .. finding.code)
+      end
+   end)
+end)
