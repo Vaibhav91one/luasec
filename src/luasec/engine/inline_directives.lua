@@ -200,22 +200,43 @@ function directives.allows(directives_before, finding, is_suppressed)
             end
          end
       elseif directive.action == "enable" then
-         if directives.matches_any(directive.patterns, finding, directive.line) then
+         if directives.matches_any(directive.patterns, finding, directive.line,
+            directive) then
             enabled = true
          end
       elseif directive.action == "only" then
-         if directives.matches_any(directive.patterns, finding, directive.line) then
+         -- FAIL OPEN. `only` means "report this and nothing else", so a
+         -- pattern that cannot be read leaves the question of what was selected
+         -- unanswered, and the answer must not be "nothing" - that reads as
+         -- "none of your findings match", which is a clean report and exit 0
+         -- for a file with a hardcoded root password in it. A selection we
+         -- cannot read is not a selection; it selects nothing at all, so
+         -- everything is still reported and the 012 says why.
+         -- Asked first, then consulted: the match is what LEARNS that a pattern
+         -- is unreadable, so testing the flag before making the call tested it
+         -- one finding too early and suppressed on the first finding in the
+         -- file. Which is exactly where the credential was.
+         local selected = directives.matches_any(directive.patterns, finding,
+            directive.line, directive)
+
+         if directive.unreadable then
+            -- deliberately nothing: neither selected nor suppressed
+         elseif selected then
             enabled = true
-         else suppressed_by = true end
+         else
+            suppressed_by = true
+         end
       end
    end
 
    return (not suppressed_by) or enabled
 end
 
-function directives.matches_any(patterns, finding, directive_line)
+function directives.matches_any(patterns, finding, directive_line, directive)
    for _, pattern in ipairs(patterns) do
-      if directives.code_and_name_match(pattern, finding, directive_line) then return true end
+      if directives.code_and_name_match(pattern, finding, directive_line, directive) then
+         return true
+      end
    end
    return false
 end
@@ -250,7 +271,7 @@ function directives.reset_unreadable()
    for line in pairs(UNREADABLE) do UNREADABLE[line] = nil end
 end
 
-local function matches_safely(subject, pattern, line)
+local function matches_safely(subject, pattern, line, directive)
    local ok, result = pcall(string.match, subject, pattern)
    if ok then return result ~= nil end
 
@@ -262,7 +283,13 @@ local function matches_safely(subject, pattern, line)
    -- The anchored form is still tried, because a pattern that only makes sense
    -- anchored is a legitimate way to write one; it just does not get to overrule
    -- the first failure.
-   if line then UNREADABLE[line] = pattern end
+   if line then
+      UNREADABLE[line] = pattern
+      -- Also marked on the directive itself, so a caller can tell "this
+      -- pattern did not match" from "this pattern could not be read". The two
+      -- are the same answer to `matches_any` and opposite answers to `only`.
+      if directive then directive.unreadable = true end
+   end
 
    ok, result = pcall(string.match, subject, "^" .. pattern .. "$")
    if ok then return result ~= nil end
@@ -271,7 +298,7 @@ end
 
 -- A pattern is a code, optionally with a name after a colon, and may use a
 -- character class: "7", "[1234]", "70[0-9]".
-function directives.code_and_name_match(pattern, finding, directive_line)
+function directives.code_and_name_match(pattern, finding, directive_line, directive)
    local code_pattern, name_pattern = pattern:match("^([^:]*):(.*)$")
    if not code_pattern then
       code_pattern = pattern
@@ -288,7 +315,7 @@ function directives.code_and_name_match(pattern, finding, directive_line)
    -- than as a blanket suppression, and a plain `-- luasec: ignore` already is.
    if code_pattern == "" then return false end
 
-   if not matches_safely(finding.code, code_pattern, directive_line) then
+   if not matches_safely(finding.code, code_pattern, directive_line, directive) then
       return false
    end
 
@@ -297,7 +324,7 @@ function directives.code_and_name_match(pattern, finding, directive_line)
    -- gone: one file in a tree, zero output, and every other file's findings
    -- discarded.
    if name_pattern and name_pattern ~= "" then
-      if not finding.name or not matches_safely(finding.name, name_pattern, directive_line) then
+      if not finding.name or not matches_safely(finding.name, name_pattern, directive_line, directive) then
          return false
       end
    end

@@ -434,3 +434,37 @@ describe("747 on a cursor stored rather than called", function()
             .. codes(report))
    end)
 end)
+
+describe("747 on a file built to be expensive to analyse", function()
+   it("does not take unbounded time on a field-assignment lattice", function()
+      -- The answer is computed in a pre-pass that runs once per field
+      -- assignment, and the walk behind it is one branch per reaching
+      -- definition per hop. Unbounded in depth and in fan-out, a 369-line file
+      -- did not finish in 300 seconds and an ordinary 40,000-line module took
+      -- 28 where it had taken 1.2. --max-nodes does not help: `var.values` is
+      -- filled by the parser and exists even when resolve_locals was skipped.
+      --
+      -- The bound is the point of this test, so the threshold is loose: it is
+      -- here to catch a hang and an order-of-magnitude regression, not to
+      -- measure.
+      local lines = {"local t = {}", "local x"}
+      for index = 1, 40 do lines[#lines + 1] = "x = " .. index end
+      for alias = 2, 5 do
+         lines[#lines + 1] = "local y" .. alias .. "; y" .. alias .. " = x"
+         for _ = 1, 40 do
+            lines[#lines + 1] = "y" .. alias .. " = y" .. (alias + 1)
+         end
+      end
+      lines[#lines + 1] = 't.uci = y5'
+      lines[#lines + 1] = 't.uci:set("system", "root_password", "R00tPassw0rd-2024")'
+
+      local started = os.clock()
+      local ok = pcall(api.check_source, table.concat(lines, "\n"),
+         {std = "+openwrt+luci"})
+      local elapsed = os.clock() - started
+
+      assert_true(ok, "the lattice is analysed without raising")
+      assert_true(elapsed < 10,
+         "a 200-line lattice took " .. elapsed .. " s; the walk is unbounded")
+   end)
+end)

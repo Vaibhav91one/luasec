@@ -522,7 +522,19 @@ local function finalize(result, opts)
             applicable[#applicable + 1] = directive
          end
       end
-      if inline_directives.allows(applicable, finding, suppressed_by_options(opts, finding)) then
+      -- A 012 is never filtered by an in-source directive. It IS the finding
+      -- that reports a directive we could not read, and `only` takes the
+      -- "not selected" branch for a pattern that cannot match - so the
+      -- directive suppressed the finding that reports the directive, and
+      -- `-- luasec: only [709` turned a file with a hardcoded root password
+      -- into a clean report with exit 0. The invariant this whole mechanism
+      -- exists to keep is that a broken suppression never hides anything, and
+      -- here the broken one hid everything, silently, in the one action that
+      -- selects rather than silences.
+      if finding.code == "012" then
+         kept[#kept + 1] = finding
+      elseif inline_directives.allows(applicable, finding,
+         suppressed_by_options(opts, finding)) then
          kept[#kept + 1] = finding
       end
    end

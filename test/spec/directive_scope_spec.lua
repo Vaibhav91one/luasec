@@ -346,3 +346,41 @@ describe("a code pattern Lua will not read", function()
       end
    end)
 end)
+
+describe("a `only` directive whose pattern cannot be read", function()
+   it("selects nothing rather than everything, and says so", function()
+      -- `only` means "report this and nothing else", so a pattern that cannot
+      -- be read leaves the question of what was selected unanswered - and the
+      -- answer must not be "nothing", because that reads as "none of your
+      -- findings match": a clean report and exit 0 for a file with a hardcoded
+      -- root password in it. The directive suppressed the very 012 that reports
+      -- it. A selection we cannot read now selects nothing, so everything is
+      -- still reported, the 012 is never filtered by any in-source directive,
+      -- and the run fails.
+      local report = api.check_source([[
+-- luasec: only [709
+local uci = require("uci")
+local t = {}
+t.uci = uci.cursor()
+t.uci:set("system", "root_password", "R00tPassw0rd-2024")
+]], {std = "+openwrt+luci"})
+
+      assert_true(has(report, "012"), "the unreadable directive is reported: " .. codes(report))
+      assert_true(has(report, "747"),
+         "and it does not select away the credential: " .. codes(report))
+   end)
+
+   it("still selects when the pattern is one it can read", function()
+      local report = api.check_source([[
+-- luasec: only 747
+local uci = require("uci")
+local t = {}
+t.uci = uci.cursor()
+t.uci:set("system", "root_password", "R00tPassw0rd-2024")
+]], {std = "+openwrt+luci"})
+
+      assert_true(has(report, "747"), "the selection still selects: " .. codes(report))
+      assert_true(not has(report, "012"),
+         "a readable directive is not reported as unreadable: " .. codes(report))
+   end)
+end)

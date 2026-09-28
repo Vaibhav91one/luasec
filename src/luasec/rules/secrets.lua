@@ -550,6 +550,27 @@ end
 -- module-level `cursor` are followed as well as a local binding.
 local MAX_CURSOR_HOPS = 6
 
+-- How many reaching definitions of ONE local are followed.
+--
+-- The hop limit bounds the DEPTH of this walk, not its branching factor: every
+-- Id reached is followed to each of its definitions, so a local reassigned N
+-- times multiplies the work by N at each hop and the whole thing is
+-- O(branches^depth). That was free while this ran once per USE of a field, and
+-- it stopped being free when the answer moved into a pre-pass that runs once
+-- per field ASSIGNMENT: a 369-line file with 60 reassignments chained through
+-- five aliases did not finish in 300 s, and an ordinary 40,000-line module with
+-- one heavily-reassigned local and 20,000 fields took 28 s where it had taken
+-- 1.2 s. --max-nodes does not help, because `var.values` is filled by the parser
+-- and exists even when resolve_locals was skipped.
+--
+-- Bounded here, newest definitions first, because the definition nearest the
+-- use is the one that decides it.
+local MAX_CURSOR_DEFS = 4
+
+-- One answer per node, per file. The same local is reached from many fields and
+-- the answer cannot differ between them.
+local CURSOR_MEMO = {}
+
 local function is_uci_module(node, depth)
    if type(node) ~= "table" or (depth or 0) > MAX_CURSOR_HOPS then return false end
    if node.tag == "Invoke" or node.tag == "Call" then
@@ -587,6 +608,9 @@ local function is_cursor(node, depth)
    if type(node) ~= "table" then return false end
    depth = depth or 0
    if depth > MAX_CURSOR_HOPS then return false end
+
+   local memo = CURSOR_MEMO[node]
+   if memo ~= nil then return memo end
 
    if node.tag == "Call" or node.tag == "Invoke" then
       -- Three ways firmware makes a cursor, and the spelling is not fixed:
@@ -642,9 +666,15 @@ local function is_cursor(node, depth)
       -- instead of its definition reported every helper table whose author
       -- happened to end the name with cursor.
       if node.var then
-         for _, value in ipairs(node.var.values or {}) do
-            if value.node and is_cursor(value.node, depth + 1) then return true end
+         local values = node.var.values or {}
+         for index = #values, math.max(1, #values - MAX_CURSOR_DEFS + 1), -1 do
+            local value = values[index]
+            if value and value.node and is_cursor(value.node, depth + 1) then
+               CURSOR_MEMO[node] = true
+               return true
+            end
          end
+         CURSOR_MEMO[node] = false
          return false
       end
       -- A global has no reaching definitions, so its name is all there is.
@@ -690,6 +720,11 @@ local function cbi_field_label(node)
    return nil
 end
 
+-- How many reaching definitions of one local this follows. The same bound as
+-- is_cursor and for the same reason: `#var.values` is one branch per syntactic
+-- assignment, so an unbounded loop here is a fan-out, not a scan.
+local MAX_LABEL_DEFS = 4
+
 local function cbi_label_of_base(base, depth)
    if type(base) ~= "table" then return nil end
    depth = depth or 0
@@ -697,8 +732,10 @@ local function cbi_label_of_base(base, depth)
       return cbi_field_label(base)
    end
    if base.tag ~= "Id" or not base.var or depth > 4 then return nil end
-   for _, value in ipairs(base.var.values or {}) do
-      if value.node then
+   local values = base.var.values or {}
+   for index = #values, math.max(1, #values - MAX_LABEL_DEFS + 1), -1 do
+      local value = values[index]
+      if value and value.node then
          local label = cbi_label_of_base(value.node, depth + 1)
          if label then return label end
       end
@@ -713,6 +750,7 @@ detectors[#detectors + 1] = function(ctx)
    -- before the assignment that defines it, so this is collected before any
    -- rule asks whether something is a config cursor.
    for key in pairs(FIELD_VALUES) do FIELD_VALUES[key] = nil end
+   for node in pairs(CURSOR_MEMO) do CURSOR_MEMO[node] = nil end
    ctx:each_node(function(node)
       if node.tag == "Set" or node.tag == "OpSet" or node.tag == "Local" then
          local targets, values = node[1], node[2]
@@ -729,12 +767,11 @@ detectors[#detectors + 1] = function(ctx)
                      -- four files in the corpus, on an idiom that is everywhere.
                      local value = values[index]
                      if type(value) == "table" then
-                        local assigned = FIELD_VALUES[key] or {}
-                        -- Summarised to two facts, not kept as a list. The list
-                        -- was quadratic: the answer is asked once per use of the
-                        -- field and the uses are once per line, so 32,000
-                        -- assignments with 32,000 uses took 109 s where the
-                        -- earlier build took 5 s.
+                        -- Summarised to a fact, not kept as a list. The list was
+                        -- quadratic: the answer is asked once per use of the field
+                        -- and the uses are once per line, so 32,000 assignments
+                        -- with 32,000 uses took 109 s where the earlier build took
+                        -- 5 s.
                         --
                         -- Capping the list fixed the time and cost a finding, which
                         -- is the one direction this tool may not fail in: a cursor
@@ -761,8 +798,14 @@ detectors[#detectors + 1] = function(ctx)
                         --
                         -- Nothing caught it: the corpus's 747 count is 0 whatever
                         -- this rule does, and no fixture assigned a non-call
-                        -- cursor to a field. 566 specs and a 146-finding corpus
+                        -- cursor to a field. 568 specs and a 146-finding corpus
                         -- measurement all agreed with the broken rule.
+                        --
+                        -- The walk behind `is_cursor` is bounded in depth AND in
+                        -- fan-out, because a pre-pass call costs one branch per
+                        -- reaching definition per hop: unbounded, a 369-line file
+                        -- did not finish in 300 s and an ordinary 40,000-line
+                        -- module took 28 s where it had taken 1.2 s.
                         local record = FIELD_VALUES[key] or {handle = false, assigned = false}
                         record.assigned = true
                         if is_cursor(value, 0) then record.handle = true end
