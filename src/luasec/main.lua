@@ -2,14 +2,21 @@
 local args_parser = require "luasec.cli.args"
 local walk = require "luasec.cli.walk"
 local api = require "luasec.api"
+local baseline = require "luasec.cli.baseline"
 local codes = require "luasec.rules.codes"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
 local sarif = require "luasec.report.sarif"
+local report_contract = require "luasec.report.findings"
 local validate_report = require "luasec.validate.report"
 local version = require "luasec.version"
 
-local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
+-- 0 clean, 1 findings at or above the threshold, 2 error, and 3 for the one thing
+-- 1 cannot express: under --baseline, a finding that was not in the baseline. A
+-- build script that already treats 1 as "fail" needs to be able to treat 3 as
+-- "fail only if something is new", and a separate code is the only way to tell
+-- the two apart without reading the report.
+local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR, EXIT_NEW = 0, 1, 2, 3
 
 -- A verdict is an outcome, not a threshold: anything short of "benign" means the
 -- payload did something worth failing a build over, and a failed payload or a
@@ -92,15 +99,38 @@ local function worst_severity(findings)
    return worst
 end
 
-local function render(report, format, opts)
+-- Every format is rendered from the contract, not from the engine's raw
+-- findings, so `plain`, `json`, `sarif` and `html` cannot disagree about what a
+-- finding is or in what order it appears. `list` is an already normalized list
+-- when the caller has one, which is how a baseline run can render its own.
+local function render(list, format, opts)
+   list = list or report_contract.normalize(list)
    if format == "json" then
-      return json.encode({version = version.luasec, findings = report})
+      return json.encode(report_contract.document(list))
    elseif format == "sarif" then
-      return sarif.render(report, opts)
+      return sarif.render(list, opts)
    elseif format == "html" then
-      return require("luasec.report.html").render(report, opts)
+      return require("luasec.report.html").render(list, opts)
    end
-   return plain.render(report, opts)
+   return plain.render(list, opts)
+end
+
+-- Write the report where the caller asked for it. Kept in one place because the
+-- baseline path and the ordinary path must obey the same -o and --quiet
+-- contract, or a report that only appears on one of them is worse than neither.
+local function emit(list, format, opts)
+   local output = render(list, format, opts)
+
+   if opts.output then
+      local handle, open_error = io.open(opts.output, "wb")
+      if not handle then return fail("cannot write " .. opts.output .. ": " .. tostring(open_error)) end
+      handle:write(output, "\n")
+      handle:close()
+   elseif not opts.quiet or #list > 0 then
+      io.stdout:write(output, "\n")
+   end
+
+   return nil
 end
 
 -- Read the payload to validate. One file, or standard input, because a verdict
@@ -199,25 +229,33 @@ local function run(argv)
    local report = api.analyze(files, opts)
    report = apply_rules(report, opts)
 
-   local output = render(report, opts.format or "plain", opts)
+   local threshold_rank = SEVERITY_RANK[opts.fail_on or "low"] or 0
 
-   if opts.output then
-      local handle, open_error = io.open(opts.output, "wb")
-      if not handle then return fail("cannot write " .. opts.output .. ": " .. tostring(open_error)) end
-      handle:write(output, "\n")
-      handle:close()
-   else
-      if not opts.quiet or #report > 0 then
-         io.stdout:write(output, "\n")
-      end
+   if opts.baseline then
+      local known, baseline_error = baseline.read(opts.baseline)
+      if not known then return fail(baseline_error) end
+
+      local list, exceeded = baseline.compare(report_contract.normalize(report), known,
+         threshold_rank)
+
+      -- Under a baseline only a new finding is a reason to fail. A known one is
+      -- what the baseline is for, and a fixed one is an improvement. A finding
+      -- below the threshold is reported and does not fail, exactly as it does
+      -- without a baseline.
+      local written = emit(list, opts.format or "plain", opts)
+      if written then return written end
+      return exceeded and EXIT_NEW or EXIT_CLEAN
    end
 
-   if #report == 0 then
+   local list = report_contract.normalize(report)
+   local written = emit(list, opts.format or "plain", opts)
+   if written then return written end
+
+   if #list == 0 then
       return EXIT_CLEAN
    end
 
-   local threshold = opts.fail_on or "low"
-   if (SEVERITY_RANK[worst_severity(report)] or 0) >= (SEVERITY_RANK[threshold] or 0) then
+   if (SEVERITY_RANK[worst_severity(list)] or 0) >= threshold_rank then
       return EXIT_FINDINGS
    end
 

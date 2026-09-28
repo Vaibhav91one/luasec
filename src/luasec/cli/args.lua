@@ -120,8 +120,8 @@ selection:
   --profile <name>           strict, audit (default) or quick
   --severity-threshold <s>   lowest severity to report: low, medium, high, critical
   --min-confidence <c>       lowest confidence to report: certain, high, medium, low
-  --baseline <file>          compare against a previous json report
-  --fail-on <severity>       exit 1 at or above this severity
+   --baseline <file.json>    report only what is new since that json report
+   --fail-on <severity>       exit 1 at or above this severity
 
 analysis:
   --whole-program            resolve calls across files
@@ -140,7 +140,12 @@ other:
   -h, --help                 this message
   --version                  print version and exit
 
-exit codes: 0 clean, 1 findings at or above the threshold, 2 error.
+with --baseline: 0 nothing new, 3 at least one new finding at or above --fail-on.
+A finding already in the baseline is not reported, and one that was in the
+baseline and is no longer found is reported as fixed.
+
+exit codes: 0 clean, 1 findings at or above the threshold, 2 error,
+3 new findings at or above the threshold (--baseline only).
 ]]
 
 function args.usage()
