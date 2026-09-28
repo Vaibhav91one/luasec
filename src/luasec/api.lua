@@ -10,6 +10,8 @@ local taint_engine = require "luasec.engine.taint"
 local codes = require "luasec.rules.codes"
 local platform_api = require "luasec.registry.platform_api"
 local profiles = require "luasec.registry.profiles"
+local rule_context = require "luasec.rules.context"
+local rule_registry = require "luasec.rules.registry"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 
@@ -115,6 +117,24 @@ function api.check_source(source, opts)
    end
 
    local findings = taint_engine.run(chstate, opts)
+
+   -- Rule modules see the same parsed program, after the dataflow pass.
+   local ctx = rule_context.new(chstate, chstate.source, opts)
+   for _, detector in ipairs(rule_registry.detectors()) do
+      local ok, err = pcall(detector, ctx)
+      if not ok then
+         findings[#findings + 1] = {
+            code = "901", line = 1, column = 1, end_column = 1,
+            severity = "low", confidence = "certain",
+            name = "rule module",
+            message = "a rule failed to run: " .. tostring(err),
+         }
+      end
+   end
+   for _, finding in ipairs(ctx.findings) do
+      findings[#findings + 1] = finding
+   end
+
    return sort_findings(findings)
 end
 
