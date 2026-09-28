@@ -25,8 +25,9 @@ help:
 	@echo "  make vendor     fetch pinned luacheck into vendor/luacheck"
 	@echo "  make vendor-verify   fail if vendored luacheck drifted"
 	@echo "  make test       run the spec suite"
-	@echo "  make ci-verify  full gate (vendor + upstream specs + our specs + adversarial)"
+	@echo "  make ci-verify  full gate (vendor + upstream specs + our specs + adversarial + precision)"
 	@echo "  make tdd-proof BASE HEAD   prove new tests fail without the new src"
+	@echo "  make precision re-measure corpus/ and fail on any difference from the frozen numbers"
 	@echo "  make corpus     clone firmware Lua corpora into corpus/ (network)"
 	@echo "  make clean      remove build artifacts"
 
@@ -116,8 +117,49 @@ adversarial: lua vendor
 .PHONY: ci
 ci: vendor-verify test
 
+# Re-take the measurement docs/precision.md describes and hold it against the
+# frozen copy in scripts/precision-golden.lua. The spec is the other half of this
+# gate and can only tell that the document agrees with the frozen file, which is
+# a check that passes just as happily when a rule regression has moved both.
+# This is the half that runs the analyzer, so it is the half that notices.
+#
+# corpus/ is absent on a fresh checkout: `make corpus` clones it and that needs
+# the network, so the skip below is the normal case in CI and it says so in three
+# lines rather than going quiet. Exiting non-zero there would be a gate that is
+# red on every fresh runner, and a gate like that gets deleted rather than
+# fixed; so it exits 0, says SKIPPED, and says that the measurement was not
+# taken. PRECISION_REQUIRE_CORPUS=1 makes that skip fatal for a job that has the
+# corpora and must not proceed without a measurement.
+PRECISION_REPORT ?= build/precision-report.json
+PRECISION_REQUIRE_CORPUS ?= 0
+
+.PHONY: precision
+precision: lua vendor
+	@if [ ! -d corpus ]; then \
+	   echo "precision: SKIPPED - corpus/ is absent, so luasec was NOT run over the firmware corpora"; \
+	   echo "precision: SKIPPED - the measurement was NOT taken. This is not a pass: it is not evidence"; \
+	   echo "precision: SKIPPED - that luasec still finds what docs/precision.md claims. Run: make corpus && make precision"; \
+	   if [ "$(PRECISION_REQUIRE_CORPUS)" = "1" ]; then \
+	     echo "precision: FAIL - PRECISION_REQUIRE_CORPUS=1 and corpus/ is absent"; exit 1; \
+	   fi; \
+	   exit 0; \
+	fi; \
+	echo ">> luasec over corpus/ (this is the measurement)"; \
+	./bin/luasec --std +openwrt+luci+luajit --format json -o $(PRECISION_REPORT) corpus; \
+	status=$$?; \
+	if [ $$status -gt 1 ]; then \
+	   echo "precision: FAIL - luasec exited $$status, which is an error rather than findings,"; \
+	   echo "precision: FAIL - so $(PRECISION_REPORT) is not a measurement and will not be compared"; \
+	   exit 1; \
+	fi; \
+	if [ $$status -eq 1 ]; then \
+	   echo ">> luasec exited 1: findings at or above the threshold, and files it could not"; \
+	   echo ">> parse. Both are expected over this corpus, and the report is written either way."; \
+	fi; \
+	$(LUA_RUN) scripts/precision-check.lua --corpus corpus --report $(PRECISION_REPORT)
+
 .PHONY: ci-verify
-ci-verify: vendor-verify runner-selftest test adversarial
+ci-verify: vendor-verify runner-selftest test adversarial precision
 	@echo "ci-verify: PASS"
 
 # Accept the two positional shas of `make tdd-proof BASE HEAD` as goals. Make
