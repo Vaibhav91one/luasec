@@ -1,0 +1,212 @@
+local harness = require "harness"
+local describe, it = harness.describe, harness.it
+local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, assert_match
+
+local api = require "luasec.api"
+
+-- The codes a report carries, sorted and joined, for exact-match assertions.
+local function codes(report)
+   local out = {}
+   for _, finding in ipairs(report) do out[#out + 1] = finding.code end
+   table.sort(out)
+   return table.concat(out, ",")
+end
+
+-- Every finding carrying one code, in report order.
+local function with_code(report, code)
+   local out = {}
+   for _, finding in ipairs(report) do
+      if finding.code == code then out[#out + 1] = finding end
+   end
+   return out
+end
+
+local function fixture(name)
+   return api.analyze({"test/fixtures/secrets/" .. name .. ".lua"})
+end
+
+-- The secret must not survive anywhere in the finding, in any form.
+local function assert_no_secret(finding, secret)
+   for key, value in pairs(finding) do
+      if type(value) == "string" then
+         assert_true(value:find(secret, 1, true) == nil,
+            "the finding's " .. key .. " quotes the secret: " .. value)
+      end
+   end
+end
+
+describe("hardcoded credentials", function()
+   it("reports a password literal bound to a credential-named local as 747, without quoting the value", function()
+      local report = fixture("hardcoded_password")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1, "expected one 747, got " .. codes(report))
+      assert_equal(found[1].name, "telnet_password", "the finding names the binding, not the value")
+      assert_equal(found[1].severity, "high")
+      assert_equal(found[1].kind, "password")
+      assert_equal(found[1].length, 11, "the length is reported instead of the value")
+      assert_no_secret(found[1], "s3cr3t-pass")
+      assert_true(found[1].redacted:find("%*") ~= nil, "the masked form hides the middle: " .. found[1].redacted)
+   end)
+
+   it("reports a PEM private key literal as 747, showing only its header", function()
+      local report = fixture("private_key")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1, "expected one 747, got " .. codes(report))
+      assert_equal(found[1].kind, "pem")
+      assert_true(found[1].length > 100, "the whole block is measured: " .. found[1].length)
+      assert_equal(found[1].redacted, "-----BEGIN RSA PRIVATE KEY----- (194 bytes)",
+         "the header is not secret, the body is not shown at all")
+      assert_true(found[1].redacted:find("MIIEow", 1, true) == nil, "no key material is quoted")
+   end)
+
+   it("reports a private key block filed under a name that says nothing", function()
+      local report = fixture("inline_pem")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1, "expected one 747, got " .. codes(report))
+      assert_equal(found[1].kind, "pem", "the block says what it is, whatever the name says")
+      assert_equal(found[1].redacted, "-----BEGIN EC PRIVATE KEY----- (185 bytes)",
+         "the header is reported, the body is not")
+      assert_true(found[1].redacted:find("MHcCAQEE", 1, true) == nil, "no key material is quoted")
+   end)
+end)
+
+describe("a constant that is not embedded in the program", function()
+   it("reports no 747 for a login form that compares a password or a token constant", function()
+      local report = fixture("login_check")
+      assert_equal(#with_code(report, "747"), 0,
+         "a value compared once is the check, not a secret shipped with the program: " .. codes(report))
+   end)
+end)
+
+describe("credential-named values that are not secrets", function()
+   it("reports no 747 for a prompt, a placeholder, a mode, an empty string or a path", function()
+      local report = fixture("placeholders")
+      assert_equal(#with_code(report, "747"), 0,
+         "a name that says secret and a value that says nothing was embedded: " .. codes(report))
+   end)
+
+   it("reports no 747 for a table of limits keyed by the name of the limit", function()
+      local report = fixture("limit_table")
+      assert_equal(#with_code(report, "747"), 0,
+         "a bare `key` holding a field name is a table index, not a key: " .. codes(report))
+   end)
+end)
+
+describe("keys written into a program", function()
+   it("reports a pre-shared key and two API keys held in configuration tables as 747 kind key", function()
+      local report = fixture("psk_table")
+      local found = with_code(report, "747")
+      assert_equal(#found, 3, "expected three 747, got " .. codes(report))
+      assert_equal(found[1].name, "psk")
+      assert_equal(found[1].kind, "key", "a psk is a key, not a password")
+      assert_equal(found[1].redacted, "hu******00",
+         "the first two and last two characters, the middle starred")
+      assert_equal(found[2].name, "apikey")
+      assert_equal(found[2].kind, "key")
+      assert_equal(found[3].name, "key", "a bare `key` with digits in it is a key")
+      assert_no_secret(found[1], "hunter2000")
+      assert_no_secret(found[2], "9f2c41ab77de3058")
+      assert_no_secret(found[3], "b41d8ef2a97c")
+   end)
+
+   it("reports a literal handed to a parameter the program itself names for a secret", function()
+      local report = fixture("credential_argument")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1, "expected one 747, got " .. codes(report))
+      assert_equal(found[1].name, "password", "the finding names the parameter, not the value")
+      assert_equal(found[1].line, 10, "the call is on line 10 of the fixture")
+      assert_no_secret(found[1], "toor")
+   end)
+end)
+
+describe("what a report is allowed to show", function()
+   it("keeps the secret out of every report format the CLI can print", function()
+      for _, format in ipairs{"plain", "json", "sarif", "html"} do
+         local out = harness.cli({"--format", format, "test/fixtures/secrets/hardcoded_password.lua"})
+         assert_true(out:find("s3cr3t-pass", 1, true) == nil,
+            "the " .. format .. " report quotes the secret:\n" .. out)
+         assert_match(out, "747", "the " .. format .. " report still reports the finding")
+      end
+   end)
+end)
+
+describe("scanner and brute-force loops", function()
+   it("reports a loop that connects, reads a banner and sends a credential as 748", function()
+      local report = fixture("brute_force")
+      local found = with_code(report, "748")
+      assert_equal(#found, 1, "expected one 748, got " .. codes(report))
+      assert_equal(found[1].name, "send", "the finding names the sink the credential went to")
+      assert_equal(found[1].severity, "critical")
+      assert_equal(found[1].line, 9, "the loop is on line 9 of the fixture")
+      assert_equal(found[1].read, "receive", "the banner read is part of the shape")
+      assert_equal(found[1].connect, "connect")
+   end)
+
+   it("reports no 748 for a client loop that connects and sends an ordinary request", function()
+      local report = fixture("http_client")
+      assert_equal(#with_code(report, "748"), 0,
+         "connecting in a loop is not a scanner; nothing credential-shaped is sent: " .. codes(report))
+   end)
+
+   it("reports a loop that walks a table of credential lines and sends each one as 748", function()
+      local report = fixture("credential_pairs")
+      local found = with_code(report, "748")
+      assert_equal(#found, 1, "expected one 748, got " .. codes(report))
+      assert_equal(found[1].name, "send", "the line is sent without a credential name in the expression")
+      assert_equal(found[1].line, 9, "the loop is on line 9 of the fixture")
+   end)
+
+   it("reports a loop that calls a helper which connects and sends the credential as 748", function()
+      local report = fixture("helper_scanner")
+      local found = with_code(report, "748")
+      assert_equal(#found, 1, "expected one 748, got " .. codes(report))
+      assert_equal(found[1].line, 15, "the loop is on line 15 of the fixture")
+      assert_equal(found[1].name, "send", "the sink is the helper's send, which is where the credential went")
+   end)
+end)
+
+describe("hostile secret shapes", function()
+   it("reads long names, long values and a PEM-like prefix without crashing", function()
+      local report = fixture("hostile_shapes")
+      assert_equal(#with_code(report, "901"), 0,
+         "a rule that cannot handle a shape stays silent rather than raising: " .. codes(report))
+      assert_equal(#with_code(report, "748"), 1, "one scanner loop in the file: " .. codes(report))
+      assert_equal(#with_code(report, "747"), 1, "one embedded key in the file: " .. codes(report))
+   end)
+end)
+
+describe("a large generated file", function()
+   -- Ten lines per block: a credential in a table, a socket loop that sends it,
+   -- and a value that is none of those things. 1000 blocks is 10000 lines.
+   local function generate(blocks)
+      local parts = {}
+      for index = 1, blocks do
+         parts[#parts + 1] = table.concat({
+            "do",
+            string.format("   local creds = {password = 'p%06d', user = 'admin'}", index),
+            "   for _, entry in ipairs(creds) do",
+            "      local client = socket.tcp()",
+            "      if client:connect('10.0.0.1', 23) then",
+            "         local banner = client:receive('*l')",
+            "         client:send(entry.password .. '\\n')",
+            "         client:close()",
+            "      end",
+            "   end",
+            "end",
+            "",
+         }, "\n")
+      end
+      return table.concat(parts, "\n")
+   end
+
+   it("finds every credential and every scanner loop in 10000 generated lines", function()
+      local source = generate(1000)
+      local total_lines = select(2, source:gsub("\n", "")) + 1
+      assert_true(total_lines > 10000, "the generated file is over 10000 lines, got " .. total_lines)
+
+      local report = api.check_source(source)
+      assert_equal(#with_code(report, "901"), 0, "no rule raised on the generated file")
+      assert_equal(#with_code(report, "747"), 1000, "one 747 per generated block")
+      assert_equal(#with_code(report, "748"), 1000, "one 748 per generated block")
+   end)
+end)
