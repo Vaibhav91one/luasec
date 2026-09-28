@@ -411,3 +411,26 @@ describe("a field that holds a cursor on one path", function()
          "the credential in the set is reported: " .. codes(report))
    end)
 end)
+
+describe("747 on a cursor stored rather than called", function()
+   it("reads a handle that is bound, aliased, or read off self", function()
+      -- The summary that makes this rule linear asked whether the assigned value
+      -- was a CALL rather than whether it was a cursor, and those are different
+      -- questions. Six shapes went dark and six others became false positives
+      -- from that one substitution; a hardcoded root password written through a
+      -- stored cursor was not reported, which is the direction this may not fail
+      -- in. Nothing caught it: the corpus measures 747 = 0 either way.
+      local report = fixture("stored_cursor")
+      local found = with_code(report, "747")
+      assert_equal(#found, 2,
+         "two config writes through a stored cursor: " .. codes(report))
+      assert_equal(found[1].name, "root_password", "the config key names the finding")
+   end)
+
+   it("does not read a field named uci as a cursor when it holds something else", function()
+      local report = fixture("not_a_cursor_factory")
+      assert_equal(codes(report), "",
+         "a method table, a plain factory and a metatable are not config handles: "
+            .. codes(report))
+   end)
+end)

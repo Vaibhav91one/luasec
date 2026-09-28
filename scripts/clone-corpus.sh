@@ -7,7 +7,7 @@ mkdir -p "$root"
 
 clone() {
   local name=$1 url=$2 rev=${3:-}
-  if [ -d "$root/$name/.git" ]; then
+  if [ -e "$root/$name/.git" ]; then
     # Re-check the pin on an existing tree: "already present" is not a promise
     # that it is the revision the numbers describe.
     if [ -n "$rev" ]; then
@@ -28,7 +28,7 @@ clone() {
   if [ -n "$rev" ]; then
     # An existing tree at the wrong revision: clone cannot write into a
     # non-empty directory, so fetch and check out instead of re-cloning.
-    if [ -d "$root/$name/.git" ]; then
+    if [ -e "$root/$name/.git" ]; then
       git -C "$root/$name" fetch --quiet origin \
         || { echo "!! could not fetch $name"; return 1; }
     else

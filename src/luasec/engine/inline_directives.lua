@@ -133,6 +133,13 @@ function directives.allows(directives_before, finding, is_suppressed)
    -- the scoping fix took 0.9 s, and --max-nodes does not bound it because a rule
    -- that raises is caught rather than skipped. The whole thing is one pass.
    --
+   -- Depth here is POSITIONAL, by index into the list, where the line-based
+   -- version it replaced compared line numbers. The two differ only for an
+   -- unsorted list, which the lexer cannot produce - it appends one record per
+   -- comment in token order - so this is not reachable through the CLI. But
+   -- `directives.allows` is exported, and a caller could hand it one; on
+   -- unsorted input this version is the more suppressive of the two.
+   --
    -- `depth_before[i]` is the region depth at directive i counting everything
    -- before it, so a `[push]` directive can be compared against its own base
    -- without its contribution - it governs the region above it rather than

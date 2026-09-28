@@ -12,8 +12,9 @@ fixtures. The corpora are cloned by `make corpus` and are gitignored.
 | `corpus/luajit` | 29 | LuaJIT, the dialect firmware vendors use for speed |
 | **total** | **562** | |
 
-`make corpus` clones all three, so the numbers below are reproducible with the
-command above. The 18.06 tree is pinned rather than tracked, because a
+`make corpus` clones four repositories. Three of them contribute the `.lua` files
+counted above; the fourth is the OpenWrt package tree, which contributes none and
+is scanned only because it is the smaller script tree worth watching. The 18.06 tree is pinned rather than tracked, because a
 measurement against a moving branch is not a measurement: the commit is named so
 a reader can tell whether they are looking at the same code.
 

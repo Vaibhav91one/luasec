@@ -524,8 +524,8 @@ local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 -- Values assigned to table fields we can see, keyed "base.field" where base is
 -- the name of the table. Built once per file, before any rule asks about a
 -- cursor, because a call can appear before the assignment that defines it.
--- Per table field, two facts about everything ever assigned to it: whether a
--- handle was assigned, and whether anything else was. See the pre-pass below.
+-- Per table field, what this file ever assigned to it: whether a handle, and
+-- whether anything at all. See the pre-pass below.
 local FIELD_VALUES = {}
 
 local function field_key(node, field)
@@ -629,7 +629,9 @@ local function is_cursor(node, depth)
          -- Assigned here: a handle was, or nothing was. `t.uci = true` is not a
          -- config cursor, and a field assigned a handle and then a boolean on
          -- another path is a handle, because which way the program went decides.
-         return record.handle
+         if record.handle then return true end
+         if record.assigned then return false end
+         return true
       end
       return is_cursor(node[1], depth + 1)
    end
@@ -738,17 +740,32 @@ detectors[#detectors + 1] = function(ctx)
                         -- is the one direction this tool may not fail in: a cursor
                         -- assigned as the ninth value to a field was invisible,
                         -- and a hardcoded credential written through it went
-                        -- unreported. A cap is positional. These two booleans
-                        -- answer the actual question - was a handle ever assigned
-                        -- here, and did anything else get assigned here - in O(1)
-                        -- per assignment and O(1) per use, and cannot lose the
-                        -- ninth cursor.
-                        local record = FIELD_VALUES[key] or {handle = false, other = false}
-                        if value.tag == "Call" or value.tag == "Invoke" then
-                           record.handle = true
-                        else
-                           record.other = true
-                        end
+                        -- unreported. A cap is positional. This boolean answers
+                        -- the actual question - was a handle ever assigned here -
+                        -- in O(1) per assignment and O(1) per use, and cannot
+                        -- lose the ninth cursor.
+                        --
+                        -- Asked with `is_cursor` and not with a test for whether
+                        -- the value is a call. A test for the tag answers a
+                        -- DIFFERENT question, and it was wrong in both
+                        -- directions: six shapes that store a cursor rather than
+                        -- call one went dark at every position
+                        -- (`local c = uci.cursor(); M.uci = c`, an alias chain,
+                        -- `self.cursor`, an uncalled `uci.cursor`, a global
+                        -- `cursor`, `t2.uci`) while `f()`, `t.setup()`,
+                        -- `db:query()` and `setmetatable({}, {})` all became
+                        -- config writes, including another library's
+                        -- `store.cursor`. A hardcoded root password written
+                        -- through a stored cursor went unreported, which is the
+                        -- one direction this may not fail in.
+                        --
+                        -- Nothing caught it: the corpus's 747 count is 0 whatever
+                        -- this rule does, and no fixture assigned a non-call
+                        -- cursor to a field. 566 specs and a 146-finding corpus
+                        -- measurement all agreed with the broken rule.
+                        local record = FIELD_VALUES[key] or {handle = false, assigned = false}
+                        record.assigned = true
+                        if is_cursor(value, 0) then record.handle = true end
                         FIELD_VALUES[key] = record
                      end
                   end
