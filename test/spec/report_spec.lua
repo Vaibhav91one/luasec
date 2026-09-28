@@ -508,3 +508,27 @@ describe("sarif document shape", function()
       end
    end)
 end)
+
+describe("a baseline and ground we did not cover", function()
+   it("keeps a degraded finding, because a baseline records findings, not gaps", function()
+      -- Suppressing a 901 as "already known" printed an empty report and exited
+      -- non-zero, which reads as a contradiction. A 901 is the run saying it did
+      -- not read something; a previous run's report cannot make that known.
+      local dir = os.getenv("TMPDIR") or "/tmp"
+      dir = dir:gsub("/$", "")
+      local scratch = dir .. "/luasec_spec_baseline_degraded_" .. os.time()
+      os.execute("mkdir -p " .. string.format("%q", scratch))
+      local f = assert(io.open(scratch .. "/broken.lua", "w"))
+      f:write('local x = "unterminated\n')
+      f:close()
+      local base = assert(io.open(scratch .. "/base.json", "w"))
+      base:write('{"findings":[],"luasecVersion":"0","reportVersion":1}')
+      base:close()
+
+      local out, code = harness.cli({ "--baseline", scratch .. "/base.json", scratch })
+      os.execute("rm -rf " .. string.format("%q", scratch))
+
+      assert_match(out, "901", "the finding is still in the report:\n" .. out)
+      assert_true(code ~= 0, "and the run still fails:\n" .. out)
+   end)
+end)

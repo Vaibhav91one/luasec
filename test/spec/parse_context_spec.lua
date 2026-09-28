@@ -97,3 +97,29 @@ end
       assert_equal(codes(report), "709", "the file is analyzed in full")
    end)
 end)
+
+describe("a dialect advisory is not an absence of coverage", function()
+   it("does not fail a run that was read in full", function()
+      -- 903 reports an API the configured standard does not have - a bitwise
+      -- operator under `--std luajit`, say. It is a statement about the profile,
+      -- not about what luasec managed to read, so it must not fail a run the
+      -- way 901 and 904 do. Treating it as degraded made every tree that uses
+      -- `<<` a permanently red gate, with no escape hatch: --ignore 903 removed
+      -- the lines but the run still exited 1.
+      local report = api.check_source([[
+local function pack(a, b)
+   return a << 2 | b >> 3, ~a
+end
+
+return pack
+]], {std = "luajit"})
+
+      local seen = false
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "901",
+            "a dialect advisory is not a parse failure")
+         if finding.code == "903" then seen = true end
+      end
+      assert_true(seen, "the bitwise operators are still reported, as 903")
+   end)
+end)

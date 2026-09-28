@@ -361,3 +361,20 @@ describe("747 on firmware that has no credential in it", function()
          "an ordinary set method is not a config write: " .. codes(report))
    end)
 end)
+
+describe("747 on a config write the analysis has to recognise", function()
+   it("reads every spelling of a uci cursor firmware uses", function()
+      -- The module is aliased to muci in most of the corpus, the cursor often
+      -- hangs off a table, and sometimes a helper returns one. Matching the
+      -- literal spelling `uci.cursor` found the one shape that is not used.
+      local report = fixture("cursor_writes")
+      local found = with_code(report, "747")
+      assert_equal(#found, 5, "five config writes, so five 747: " .. codes(report))
+   end)
+
+   it("does not read another library's cursor as a config write", function()
+      local report = fixture("not_a_uci_cursor")
+      assert_equal(codes(report), "",
+         "store.cursor() and a set method are not a config write: " .. codes(report))
+   end)
+end)

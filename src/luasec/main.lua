@@ -19,10 +19,18 @@ local version = require "luasec.version"
 local EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR, EXIT_NEW = 0, 1, 2, 3
 
 -- The codes that say a file was not fully analyzed rather than that it is
--- clean. 901 is a read or parse failure, 902 the lexical fallback, 903 a
--- dialect mismatch and 904 an analysis that was skipped as too large. All four
--- are absences of coverage, so all four fail a run whatever the threshold is.
-local DEGRADED_CODES = {["901"] = true, ["902"] = true, ["903"] = true, ["904"] = true}
+-- clean. 901 is a read or parse failure, 902 the lexical fallback, 904 an
+-- analysis skipped as too large, and 801/803/805 are the bytecode paths, where
+-- the source is not available to analyze at all. All of them are absences of
+-- coverage, so all of them fail a run whatever the threshold is.
+--
+-- 903 is NOT in here. It reports an API the configured standard does not have
+-- - a bitwise operator under `--std luajit`, say - which is an advisory about
+-- the profile, not a gap in what was read. Putting it here made every tree that
+-- uses `<<` fail forever, with no way out: `--ignore 903` removed the lines but
+-- the count is taken before filtering, so the run still exited 1.
+local DEGRADED_CODES = {["801"] = true, ["803"] = true, ["805"] = true,
+                        ["901"] = true, ["902"] = true, ["904"] = true}
 
 -- A verdict is an outcome, not a threshold: anything short of "benign" means the
 -- payload did something worth failing a build over, and a failed payload or a

@@ -496,7 +496,12 @@ end
 
 -- The CBI fields that hold the value the user types. Everything else on a
 -- control is metadata about it.
-local CBI_VALUE_FIELDS = {default = true, value = true, datavalue = true}
+-- cfgvalue is in this list because it is the field the config value is READ
+-- from in the real LuCI API, and datavalue is here because the LuCI Value type
+-- documents it. One of the two is speculative on today's corpus; the other
+-- appears 24 times.
+local CBI_VALUE_FIELDS = {default = true, value = true, datavalue = true,
+                          cfgvalue = true}
 
 -- Config writers, by the name the call actually carries. This is the set the
 -- OpenWrt profile declares, not a guess: a suffix match on `set` fires on
@@ -508,20 +513,94 @@ local CONFIG_WRITER_CALLS = {
 
 local CONFIG_WRITE_METHODS = {set = true, add = true, setlist = true}
 
--- `uci.cursor()` and the cursor it returns, so `cursor:set(k, v)` is read as a
+-- `uci.cursor()` and the cursors it returns, so `cursor:set(k, v)` is read as a
 -- config write and `db:set(k, v)` is not.
-local CURSOR_MAKERS = {["uci.cursor"] = true, ["cursor"] = true}
+--
+-- Matched on the method name plus a cursor-ish factory, not on the receiver's
+-- name: firmware aliases the module, so `muci.cursor()` and `uci.cursor()` are
+-- the same object written two ways, and `luci.cursor` appears in more of the
+-- corpus than the bare spelling. Matching the factory's last identifier is what
+-- makes those two spellings agree.
+-- The `uci` module, however it is reached: a local named for it, a global, or
+-- a `require("uci")` the AST still shows us.
+-- A receiver reached through a field or a global, so `self.uci:set(...)` and a
+-- module-level `cursor` are followed as well as a local binding.
+local MAX_CURSOR_HOPS = 6
+
+local function is_uci_module(node, depth)
+   if type(node) ~= "table" or (depth or 0) > MAX_CURSOR_HOPS then return false end
+   if node.tag == "Invoke" or node.tag == "Call" then
+      if called_name(node) == "require" then
+         local first = node.tag == "Invoke" and node[3] or node[2]
+         local module = string_value(first)
+         return module ~= nil and string.find(module, "^u?ci") ~= nil
+      end
+      return is_uci_module(node[1], (depth or 0) + 1)
+   end
+   if node.tag == "Id" then
+      local name = type(node[1]) == "string" and node[1] or ""
+      if string.find(name, "uci", 1, true) then return true end
+      if node.var then
+         for _, value in ipairs(node.var.values or {}) do
+            if value.node and is_uci_module(value.node, (depth or 0) + 1) then
+               return true
+            end
+         end
+      end
+   end
+   return false
+end
 
 local function is_cursor(node, depth)
    if type(node) ~= "table" then return false end
    depth = depth or 0
+   if depth > MAX_CURSOR_HOPS then return false end
+
    if node.tag == "Call" or node.tag == "Invoke" then
-      return CURSOR_MAKERS[called_name(node)] == true
+      -- Three ways firmware makes a cursor, and the spelling is not fixed:
+      -- `uci.cursor()` and `muci.cursor()` name the module, a bare `cursor()`
+      -- needs no name, and firmware wraps it in its own helper
+      -- (`local c = mkcursor()`), which has no module to name either.
+      --
+      -- A named module that is NOT uci is rejected, so a library's own
+      -- `sqlite.cursor()` is not a config write. Requiring "uci" in the name
+      -- would have been tidier, but `mkcursor` has nothing in it.
+      local name = called_name(node)
+      if name == "" then return false end
+      if string.find(name, "uci", 1, true) then return true end
+      local callee = node[1]
+      if type(callee) == "table" and callee.tag == "Index" then
+         -- A module access, so the module is the base: `require("uci").cursor()`
+         -- is the documented way to get one, and `sqlite.cursor()` is a
+         -- different library's object that happens to share the field name.
+         return is_uci_module(callee[1], depth + 1)
+      end
+      -- `mkcursor()` is a bare call: firmware's own helper, with no module
+      -- behind it to rule out.
+      return string.find(name, "cursor$") ~= nil
    end
-   if node.tag ~= "Id" or not node.var or depth > 4 then return false end
-   for _, value in ipairs(node.var.values or {}) do
-      if value.node and is_cursor(value.node, depth + 1) then return true end
+
+   -- `self.uci` and `m.uci`: the field of a table that was built somewhere we
+   -- can see. The field name carries the signal; the value is only followed so
+   -- an alias of an alias still resolves.
+   if node.tag == "Index" then
+      local field = string_value(node[2])
+      if field ~= nil and string.match(field, "^u?ci") then return true end
+      return is_cursor(node[1], depth + 1)
    end
+
+   if node.tag == "Id" then
+      if node.var then
+         for _, value in ipairs(node.var.values or {}) do
+            if value.node and is_cursor(value.node, depth + 1) then return true end
+         end
+      end
+      -- A global has no reaching definitions, so its name is all there is.
+      local name = type(node[1]) == "string" and node[1] or ""
+      return string.match(name, "^_*u?ci$") ~= nil
+         or string.match(name, "cursor$") ~= nil
+   end
+
    return false
 end
 
@@ -530,7 +609,13 @@ local function config_writer(node)
       return CONFIG_WRITE_METHODS[string_value(node[2]) or ""] == true
          and is_cursor(node[1])
    end
-   return CONFIG_WRITER_CALLS[called_name(node)] == true
+   -- `cur.set(...)` and `uci.set(...)` are the same write; a Call reaches a
+   -- cursor the same way an Invoke does.
+   if CONFIG_WRITER_CALLS[called_name(node)] then return true end
+   local name = called_name(node)
+   local tail = name:match("([%w_]+)$")
+   if tail == nil or not CONFIG_WRITE_METHODS[tail] then return false end
+   return is_cursor(node[1])
 end
 
 -- The CBI builders that take a field label as their first String argument.

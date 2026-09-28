@@ -32,7 +32,12 @@ local BOOLEAN_FLAGS = {
 
 -- Options that take a list. They are accepted both as `--opt value` and
 -- `--opt=value`, and each occurrence is repeatable and comma separated.
-local LIST_OPTIONS = {only = "only", ignore = "ignore", enable = "enable"}
+-- `rules` is in here because api.configure iterates it with ipairs. It was
+-- stored as a single string, so `ipairs("profile.json")` ran zero times and a
+-- --rules file that did not exist, or did not parse, was accepted silently: the
+-- operator's declarations never loaded and the report was quietly narrower.
+local LIST_OPTIONS = {only = "only", ignore = "ignore", enable = "enable",
+   rules = "rules"}
 
 local function add_list(target, name, value)
    target[name] = target[name] or {}
@@ -116,7 +121,10 @@ selection:
   --only <patterns>          report only matching codes
   --ignore <patterns>        suppress matching codes
   --enable <patterns>        force matching codes on
-  --rules <file>             load additional sink/source declarations
+  --rules <file>             load extra sink/source declarations. The file is a
+                            Lua module returning a table, same shape as a
+                            profile; a missing or unparseable one is an error,
+                            never a silently narrower report. Repeatable.
   --severity-threshold <s>   lowest severity to report: low, medium, high, critical
                             (a file that could not be analyzed is always reported)
   --min-confidence <c>       lowest confidence to report: certain, high, medium, low

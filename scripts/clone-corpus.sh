@@ -8,8 +8,20 @@ mkdir -p "$root"
 clone() {
   local name=$1 url=$2 rev=${3:-}
   if [ -d "$root/$name/.git" ]; then
-    echo ">> $name already present"
-    return 0
+    # Re-check the pin on an existing tree: "already present" is not a promise
+    # that it is the revision the numbers describe.
+    if [ -n "$rev" ]; then
+      local have
+      have=$(git -C "$root/$name" rev-parse HEAD 2>/dev/null || echo none)
+      if [ "$have" = "$rev" ]; then
+        echo ">> $name already present at the pinned revision"
+        return 0
+      fi
+      echo ">> $name is at $have, not the pinned $rev; re-checking out"
+    else
+      echo ">> $name already present"
+      return 0
+    fi
   fi
   echo ">> cloning $name${rev:+ at $rev}"
   if [ -n "$rev" ]; then
@@ -34,7 +46,10 @@ clone luci https://github.com/openwrt/luci.git
 # taken only against current LuCI is a measurement against the safer code. The
 # revision is pinned because a measurement is only reproducible against a
 # revision: docs/precision.md quotes the number this one produced.
-clone luci-1806 https://github.com/openwrt/luci.git openwrt-18.06
+# Pinned to a commit, not to the branch: the branch moves, and a measurement
+# against a moving branch is not a measurement. This is the commit
+# docs/precision.md's 460-file count was taken on.
+clone luci-1806 https://github.com/openwrt/luci.git 20b3600d4d64bf60588cf4975c7a62104411870e
 
 # OpenWrt package tree, for the smaller scripts under package/.
 clone openwrt-packages https://github.com/openwrt/openwrt.git

@@ -8,7 +8,7 @@ fixtures. The corpora are cloned by `make corpus` and are gitignored.
 | Corpus | Files collected | What it is |
 | --- | --- | --- |
 | `corpus/luci` | 73 | current LuCI libraries |
-| `corpus/luci-1806` | 460 | LuCI at the pinned `openwrt-18.06` branch: the `.lua` web layer, written as root-executing CGI |
+| `corpus/luci-1806` | 460 | LuCI at commit `20b3600d` on the `openwrt-18.06` branch: the `.lua` web layer, written as root-executing CGI |
 | `corpus/luajit` | 29 | LuaJIT, the dialect firmware vendors use for speed |
 | **total** | **562** | |
 
