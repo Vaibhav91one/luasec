@@ -123,107 +123,404 @@ local function popen_with_path(command, path)
    return io.popen(command_text, "r"), tmp
 end
 
--- Directories we cannot read, and symlinks that do not resolve. Both are ground
--- the walk did not cover, and both are silent otherwise: `find` lists what it
--- can, exits 0, and the tree looks complete.
+-- How much one scan root is allowed to resolve to, and the environment variable
+-- that moves the number.
+--
+-- -L is in the walk because a file behind a symlink that luasec never read is
+-- the one failure this tool cannot have, and the price of -L is that a link to
+-- a directory is walked once for every link that names it, with every copy
+-- analyzed again. Measured on a 20,000-file tree with twenty links to one of its
+-- own subdirectories: the walk collected 30,000 paths, 10,000 of them the same
+-- files a second time, and the run took 3.6 s against 2.3 s for the same tree
+-- without the links. One link named `root -> /` is the same growth without a
+-- ceiling: find had listed past 200,000 paths in 5.9 s and was still going. The
+-- shape of the tree is the attacker's to choose, so the growth cannot be left to
+-- it, and neither can the ceiling: that walk now ends at the limit below.
+--
+-- 50,000 entries, which is a judgement and not a measurement: the largest
+-- firmware rootfs in the wild is a few tens of thousands of files and a small one
+-- a few thousand, so a limit in that range never fires on an image and every
+-- pathology above does. It is a judgement because the cost of being wrong is not
+-- symmetric: a limit that is too high costs a bounded scan, and a limit that is
+-- too low reports a coverage gap and fails the build of a tree that was read in
+-- full. Over the limit the run reports the gap and exits non-zero, on the rule
+-- the rest of this file already follows: ground we did not cover is never
+-- reported as a clean tree.
+--
+-- LUASEC_MAX_WALK_PATHS moves it, so a spec can prove the behaviour at a limit
+-- no real tree reaches instead of creating 50,000 files to trip it.
+local DEFAULT_MAX_WALK_PATHS = 50000
+local MAX_WALK_PATHS_ENV = "LUASEC_MAX_WALK_PATHS"
+
+local function walk_limit()
+   local raw = os.getenv(MAX_WALK_PATHS_ENV)
+   if raw == nil or raw == "" then return DEFAULT_MAX_WALK_PATHS end
+   local value = tonumber(raw)
+   -- A typo in the environment must not switch the bound off, and "0" is how
+   -- people usually spell "no limit". There is no unlimited here: a value that
+   -- is not a positive integer falls back to the number we ship, which is the
+   -- direction that still costs the scan something it has to report.
+   if not value or value < 1 or value % 1 ~= 0 then
+      return DEFAULT_MAX_WALK_PATHS
+   end
+   return value
+end
+
+-- A path costs the budget whether it is a file we read, a directory we walked
+-- or a link we resolved, and a directory a link names is charged twice over: it
+-- is a path the scan resolved to, and it is a whole traversal about to be run.
+-- What comes back is only ever acted on once, so the gap is reported against
+-- the root that spent the budget rather than once per pass.
+local function charge(state, count)
+   state.left = state.left - count
+   if state.left < 0 then state.over = true end
+   return state.over
+end
+
+-- Read a NUL separated stream in chunks.
+--
+-- `read("*a")` is the obvious way and it is the wrong one: the whole stream
+-- lands in memory before anything looks at it, which is the unbounded work the
+-- limit exists to stop, one process later. A chunked read is what lets the
+-- limit cut find off in the middle of a walk.
+--
+-- Two facts about filenames are carried here, because both are attacker-chosen
+-- and both produce a silently wrong answer when dropped: a path may contain a
+-- newline, so records are split on NUL and never on a line, and a path may
+-- straddle a chunk boundary, so the tail of a chunk is carried into the next
+-- read.
+--
+-- One record past the budget is enough to know the budget is gone. The overshoot
+-- is one read rather than one record: whatever the last chunk carried, and not
+-- one path more, because a path that is not read cannot be reported as read.
+local READ_CHUNK = 65536
+
+-- The link pass below writes one path in up to four records and the other two
+-- write one each, so the reader is given as many records per path as the pass it
+-- is reading can use. Running out of records always means running out of budget:
+-- stopping the stream there instead would leave the rest of a legal listing
+-- unread, which is a file missing from a report that says the tree was read. The
+-- headroom is per pass rather than shared, because four times the limit read
+-- before the walk is cut is four times the work the limit exists to bound.
+local LINK_RECORDS_PER_PATH = 4
+local ONE_RECORD_PER_PATH = 1
+
+local function read_nul_stream(pipe, budget)
+   local records, pending, over = {}, "", false
+   while not over do
+      local chunk = pipe:read(READ_CHUNK)
+      if not chunk or chunk == "" then break end
+      -- The leftover tail leads the next chunk, so a path split across two
+      -- reads is still one path. The offset that walked this buffer starts again
+      -- at one on the next one: the buffer it indexed is gone, and carrying the
+      -- offset into the next one skips everything between the two starts, which
+      -- is a file in a report that says the tree was read.
+      local buffer, from = pending .. chunk, 1
+      while true do
+         local nul = buffer:find("\0", from, true)
+         if not nul then break end
+         local record = buffer:sub(from, nul - 1)
+         from = nul + 1
+         if record ~= "" then
+            records[#records + 1] = record
+            if #records > budget then over = true break end
+         end
+      end
+      pending = over and "" or buffer:sub(from)
+   end
+   -- find terminates every path, so a tail here is a stream that ended without
+   -- one. It is kept rather than dropped.
+   if not over and pending ~= "" then records[#records + 1] = pending end
+   return records, over
+end
+
+-- One pass over one directory, as three finds:
+--
+--   find -H "$p" -type f -print0
+--   find -H "$p" -type d -exec ... test -r ...
+--   find -H "$p" -type l -exec ... the link pass ...
+--
+-- -H follows the scan root when the operator points luasec at a link, and
+-- nothing else. Every other link is resolved by expand_root below, which is what
+-- keeps a directory from being walked twice through two links that name it.
+--
+-- Three finds and not one, because each find knows its own type. Working it out
+-- from the spelling is the trap this walk already fell into: -type f matches a
+-- symlink rather than its target, and a link reached with -H is still spelled
+-- like a link, so a test on what find printed would call the root of a linked
+-- directory a link and lose the tree.
+--
+-- Two traps in the shell below, both of which answer silently and wrongly:
+--   - `-exec cmd {} +` passes every match as trailing arguments, so an sh -c
+--     script has to loop over "$@" rather than read "$1"
+--   - `test -e` on a link that resolves to a directory is true, so the link
+--     pass asks what the target is before it asks whether there is one
+local FILE_PASS = 'find -H "$p" -type f -print0 2>/dev/null'
+
+-- Directories we cannot read. This is ground the walk did not cover, and it is
+-- silent otherwise, because find lists what it can, exits 0, and the tree looks
+-- complete.
 --
 -- Neither find's exit status nor its stderr catches an unreadable EMPTY
 -- directory on every platform, and an empty directory is exactly the case that
 -- matters: it is the tree that looks complete and is not. BSD find has no
--- -readable, so each candidate is asked about with test -r / test -e.
+-- -readable, so each candidate is asked about with test -r instead. This pass
+-- writes bare paths, no kind, because it has only one kind to write.
+local UNREADABLE_PASS =
+   'find -H "$p" -type d -exec sh -c \'for x in "$@"; do '
+   .. 'test -r "$x" || printf "%s\\0" "$x"; done\' _ {} + 2>/dev/null'
+
+-- Every link, with what it names and, for a directory, where the kernel says
+-- that directory is. Four records for a directory link -- the kind, the link,
+-- "d", and the physical path -- and three for the rest.
 --
--- Three traps, all of which produce a silently empty answer here:
---   - -prune matches the top directory first and cuts the entire walk
---   - `-exec cmd {} +` passes every match as trailing arguments, so an sh -c
---     script has to loop over "$@" rather than read "$1"
---   - `test -e` on a link that resolves to a directory is true, so the link
---     check is asked only of links find did not descend into
-local function coverage_problems(path)
-   local pipe, tmp = popen_with_path(
-      'find "$p" -type d -exec sh -c \'for x in "$@"; do '
-      .. 'test -r "$x" || printf "d %s\\n" "$x"; done\' _ {} + 2>/dev/null; '
-      .. 'find "$p" -type l -exec sh -c \'for x in "$@"; do '
-      .. 'test -e "$x" || printf "l %s\\n" "$x"; done\' _ {} + 2>/dev/null', path)
-   if not pipe then return {} end
-   local out = {}
-   for line in tostring(pipe:read("*a") or ""):gmatch("[^\n]+") do
-      out[#out + 1] = line
-   end
-   pipe:close()
+-- `cd -P "$x" && printf "%s\0" "$PWD"` rather than readlink, because the question
+-- the traversal asks is not "what does this link say" but "which directory is
+-- this": four spellings of one directory are one directory and only the kernel
+-- collapses them. It also costs no fork per link, and that is not a detail: a
+-- firmware image carries a few hundred applet links, and 200 readlinks measured
+-- 1.2 s of scan time on this machine, which is a second the walk spends before
+-- it has read anything.
+--
+-- `cd -P` rather than `cd` plus `pwd -P`, because it leaves the answer in $PWD
+-- and a shell can NUL-terminate a variable without a subshell. pwd writes a
+-- newline, which in a NUL separated stream is not a terminator: the next
+-- record's kind would be read as part of this path, and the pair would then be
+-- one wrong path and one link nobody sees.
+--
+-- The cwd is put back after every link, because find's paths are relative when
+-- the operator's scan root is, and a loop that left the shell in a directory
+-- some link named would resolve the rest of them against the wrong tree. A cwd
+-- that cannot be restored ends the pass, which the caller reports: a wrong
+-- answer to which directory this is must not be a silent one.
+--
+-- A link to something that is neither a file nor a directory is counted and
+-- nothing else: there is no Lua source in a device node or a socket, and a fifo
+-- must never be opened at all, because reading one blocks until something
+-- writes to it and one entry in an image would hang the scan.
+local LINK_PASS =
+   'find -H "$p" -type l -exec sh -c \''
+   .. 'here=$(pwd -P) || exit 1; '
+   .. 'for x in "$@"; do '
+   .. 'if test -d "$x"; then '
+   .. 'if cd -P "$x" 2>/dev/null; then '
+   .. 'printf "l\\0%s\\0d\\0" "$x"; printf "%s\\0" "$PWD"; cd "$here" || exit 1; '
+   .. 'else printf "u\\0%s\\0" "$x"; fi '
+   .. 'elif test -f "$x"; then printf "l\\0%s\\0f\\0" "$x"; '
+   .. 'elif test -e "$x"; then printf "l\\0%s\\0n\\0" "$x"; '
+   .. 'else printf "l\\0%s\\0x\\0" "$x"; fi '
+   .. 'done\' _ {} + 2>/dev/null'
+
+-- Run one find pass and read what it printed. Returns the records, whether the
+-- pass printed more of them than the budget allows, and find's exit status, which
+-- is only worth acting on when nothing else explains it.
+local function find_pass(dir, command, budget, per_path)
+   local pipe, tmp = popen_with_path(command, dir)
+   if not pipe then return nil, false, nil, nil end
+   local records, over = read_nul_stream(pipe, budget * per_path + 1)
+   -- Closing the pipe under a find that is still writing kills it, and then
+   -- pclose reports a signal rather than an exit status. That is not a listing
+   -- error: the reason it was stopped is the reason the run has to say out loud,
+   -- and the caller already knows it, from `over`.
+   -- The second value pclose gives back is the KIND of exit ("exit" or
+   -- "signal") and the third is the number, so reporting the second alone wrote
+   -- "find exit" into a message whose whole job is to say what happened.
+   local ok, how, code = pipe:close()
    os.remove(tmp)
-   return out
+   return records, over, ok, how .. " " .. tostring(code)
 end
 
-local function list_dir(path)
-   local files = {}
-   -- Two signals, because neither one alone is reliable. find's exit status
-   -- depends on the platform and on whether the unreadable directory happened
-   -- to be empty; its stderr is where "Permission denied" actually lands. Both
-   -- are checked, and either one means this listing is partial: "could not read
-   -- this tree" and "this tree has no Lua in it" print the same thing otherwise,
-   -- and the first must never be reported as the second.
-   local errfile = os.tmpname()
-   -- -L follows symlinks. Without it, find's -type f matches the link rather
-   -- than what it points at, so a symlinked file and a symlinked directory were
-   -- both skipped: a file reachable inside the scanned tree that luasec never
-   -- read, reported as a clean tree with exit 0. One entry an attacker can put
-   -- in a firmware image is enough to hide a file that way.
-   --
-   -- A symlink loop or a dangling link makes find exit non-zero, and that
-   -- lands in the problems list below: the tree could not be walked in full, so
-   -- it is reported as a coverage gap rather than passed over in silence.
-   local pipe, tmp = popen_with_path(
-      'find -L "$p" -type f -print0 2>' .. string.format("%q", errfile), path)
-   if not pipe then
-      os.remove(errfile)
-      return nil, ("could not list directory: %s"):format(path)
-   end
-   -- NUL separated: a filename may contain a newline, and line-separated output
-   -- would report it as two paths, one of which never existed. `lines` cannot
-   -- take a NUL, so the whole stream is read and split here.
-   local output = pipe:read("*a")
-   local ok, reason = pipe:close()
-   os.remove(tmp)
+-- Everything one pass found in one shape: the files to analyze, the links with
+-- what they name, and the directories we could not read. Returns a second value
+-- only when the listing itself failed, which is what the caller reports against
+-- the directory.
+local function scan_dir(dir, state)
+   local scan = {files = {}, links = {}, unreadable = {}}
 
-   -- find's stderr is dropped: the readability probe below is the signal that
-   -- works on every platform, and this path reports against the directory
-   -- rather than repeating find's wording.
-   os.remove(errfile)
+   -- The file pass runs first and is the one the limit can cut: find streams
+   -- it, so reading past the budget closes the pipe under it and the walk
+   -- stops where it is. The two passes below classify what it found, and
+   -- neither can be cut: find collects their arguments and runs the shell once
+   -- at the end of the walk, so a directory with three files and a million
+   -- subdirectories prints almost nothing and walks all of them anyway. That
+   -- was already true of the two coverage probes this replaces, and it is why
+   -- this is checked here rather than after them: over the limit, the unreadable
+   -- directories and the links of this directory are part of the rest the
+   -- finding says was not read, so there is nothing to gain by asking.
+   local files, over, ok, reason =
+      find_pass(dir, FILE_PASS, state.left, ONE_RECORD_PER_PATH)
+   if not files then
+      return scan, ("could not list directory: %s"):format(dir)
+   end
+   scan.files = files
+   state.over = over or state.over
+   charge(state, #files)
+   if state.over then return scan end
+
+   local unreadable, unreadable_over, unreadable_ok =
+      find_pass(dir, UNREADABLE_PASS, state.left, ONE_RECORD_PER_PATH)
+   if unreadable then
+      scan.unreadable = unreadable
+      state.over = unreadable_over or state.over
+      charge(state, #unreadable)
+   end
+   if state.over then return scan end
+
+   local records, links_over, links_ok =
+      find_pass(dir, LINK_PASS, state.left, LINK_RECORDS_PER_PATH)
+   if records then
+      state.over = links_over or state.over
+      local index = 1
+      while index <= #records do
+         local kind, entry = records[index]:sub(1, 1), records[index + 1] or ""
+         if kind == "u" then
+            scan.unreadable[#scan.unreadable + 1] = entry
+            index = index + 2
+         elseif kind == "l" and entry ~= "" then
+            local what = records[index + 2] or "x"
+            local link = {path = entry, kind = what}
+            if what == "d" then
+               link.dir = records[index + 3]
+               -- A stream the limit cut can end between a directory link's kind
+               -- and the directory it names. It is reported as a link that
+               -- resolves to nothing rather than indexed: we did not resolve it,
+               -- which is what that finding says, and dropping it silently is
+               -- the one answer that is not allowed here.
+               if link.dir == nil or link.dir == "" then link.kind = "x" end
+            end
+            scan.links[#scan.links + 1] = link
+            index = index + (what == "d" and 4 or 3)
+         else
+            -- A record this reader has no shape for, which is a stream that
+            -- ended in the middle of one. The budget is what stopped it, and the
+            -- gap for that is already accounted for.
+            index = index + 1
+         end
+      end
+      charge(state, #scan.links)
+   end
 
    -- find lists what it can and exits non-zero for the rest, so a partial
-   -- listing is still a listing. Throwing it away would drop every readable
-   -- file in the tree because of one unreadable directory; keeping it silent
-   -- would claim we read the whole tree. Return both, and return every skipped
-   -- directory rather than the first: naming one of three leaves the operator
-   -- two more fix-and-rerun cycles to find out whether they got them all.
-   local problems = {}
+   -- listing is still a listing: throwing it away would drop every readable
+   -- file because of one directory we could not read, and keeping it silent
+   -- would claim we read the whole tree. The named directory explains the exit
+   -- status, so the fallback below is only for what that does not explain.
+   if not ok and not unreadable_ok and not links_ok and #scan.unreadable == 0
+      and reason and reason ~= "" then
+      return scan, ("could not list %s: find %s"):format(dir, reason)
+   end
+   return scan
+end
 
-   for _, line in ipairs(coverage_problems(path)) do
-      local kind, entry = line:match("^(%a) (.+)$")
-      if kind == "d" then
+-- The physical path of a directory, as the kernel resolves it.
+--
+-- `cd -P "$p" && printf "%s\0" "$PWD"`, and not a string comparison in Lua: this
+-- is what turns `x`, `./x`, `a/../x` and a path that goes through another link
+-- into one string, and a lexical comparison gets that wrong in the one direction
+-- this tool cannot afford -- a link inside the root to somewhere else entirely,
+-- written so that the string still looks like it stays inside.
+--
+-- The answer is read whole and the NUL stripped by hand, so a directory name
+-- that contains a newline survives: reading a line of it would ask a different
+-- question than the one asked, and no newline is trimmed at all, so a name that
+-- ends in one is not renamed.
+local function physical_dir(path)
+   local pipe, tmp = popen_with_path(
+      'test -d "$p" || exit 0; cd -P "$p" && printf "%s\\0" "$PWD"', path)
+   if not pipe then return nil end
+   local answer = tostring(pipe:read("*a") or "")
+   pipe:close()
+   os.remove(tmp)
+   if answer:sub(-1) == "\0" then answer = answer:sub(1, -2) end
+   if answer == "" then return nil end
+   return answer
+end
+
+-- Everything one scan root resolves to: the files under it, plus the ground its
+-- symlinks name that the walk has not already covered.
+--
+-- The links are followed here rather than by find's -L, and that is the whole
+-- of it. -L hands the decision to find, which walks every path a link names, so
+-- a directory two links reach is walked twice, three times, and once per link an
+-- attacker adds. Here a link is resolved to ONE physical path first, and a
+-- directory is walked the first time any link lands on it and never again:
+--
+--   - covered is decided by the physical path, so it does not matter how many
+--     different links spell the same directory, and a link to a path inside the
+--     root names no new ground, because the pass below already listed it
+--   - the walk is a queue rather than a recursion and each directory enters it
+--     at most once, so a link to its own ancestor, a pair of links pointing at
+--     each other, and a fan of links pointing outward all end: the set of walked
+--     directories only grows, and growing it is what costs against the bound
+local function expand_root(root)
+   local limit = walk_limit()
+   local state = {left = limit, limit = limit, over = false}
+   local files, problems = {}, {}
+
+   local anchor = physical_dir(root)
+   if not anchor then
+      return nil, ("could not list directory: %s"):format(root)
+   end
+   -- A trailing slash keeps the prefix test right for a root of "/", where
+   -- anchor .. "/" would be "//" and nothing is under it.
+   local inside_prefix = anchor:gsub("/$", "") .. "/"
+   local walked = {[anchor] = true}
+   local queue, head = {root}, 1
+
+   while queue[head] and not state.over do
+      local dir = queue[head]
+      head = head + 1
+      local scan, listing_error = scan_dir(dir, state)
+      if listing_error then
+         problems[#problems + 1] = {message = listing_error, path = dir}
+      end
+      for _, file in ipairs(scan.files) do
+         files[#files + 1] = file
+      end
+      for _, path in ipairs(scan.unreadable) do
          -- Reported against the directory that was skipped, which is the thing
          -- an operator has to go and fix, rather than the scan root.
          problems[#problems + 1] = {
-            message = ("could not read directory %s"):format(entry),
-            path = entry,
+            message = ("could not read directory %s"):format(path),
+            path = path,
          }
-      elseif kind == "l" then
-         problems[#problems + 1] = {
-            message = ("could not resolve symlink %s"):format(entry),
-            path = entry,
-         }
+      end
+      for _, link in ipairs(scan.links) do
+         if link.kind == "f" then
+            -- Read under the name the tree gives the link, so the finding lands
+            -- where an operator looks for it; opening it follows the link, so the
+            -- bytes analyzed are the target's.
+            files[#files + 1] = link.path
+         elseif link.kind == "d" then
+            local covered = link.dir == anchor
+               or link.dir:sub(1, #inside_prefix) == inside_prefix
+            if not covered and not walked[link.dir] then
+               walked[link.dir] = true
+               if charge(state, 1) then break end
+               queue[#queue + 1] = link.dir
+            end
+         elseif link.kind == "x" then
+            -- A link that resolves to nothing, and a link that resolves to
+            -- itself are the same report: we could not read what this names.
+            problems[#problems + 1] = {
+               message = ("could not resolve symlink %s"):format(link.path),
+               path = link.path,
+            }
+         end
       end
    end
 
-   if not ok and reason and reason ~= "" and #problems == 0 then
+   if state.over then
+      -- One finding, against the root that spent the budget, and it names the
+      -- number and the way out of it: an operator who hits this on an image that
+      -- is legitimately that big needs to be able to raise it without reading
+      -- this file first.
       problems[#problems + 1] = {
-         message = ("could not list %s: find %s"):format(path, reason),
-         path = path,
+         message = ("%s resolved to more than %d paths, so the rest of it "
+            .. "was not read; %s raises the limit")
+            :format(root, state.limit, MAX_WALK_PATHS_ENV),
+         path = root,
       }
-   end
-
-   for name in tostring(output or ""):gmatch("[^\0]+") do
-      files[#files + 1] = name
    end
    -- Sorted here rather than by `sort -z`, which BSD sort does not have.
    table.sort(files)
@@ -254,19 +551,25 @@ end
 -- error message for a path that does not exist. A directory we cannot read is
 -- collected as an error and the rest of the scan continues: the operator wants
 -- both the findings and the knowledge that a piece was skipped.
+--
+-- `seen` de-duplicates by path, which is what two roots naming the same file
+-- need and is deliberately not content identity: a hard link or a bind mount
+-- reachable at two paths inside one tree is ground the operator can see at both
+-- of them, and dropping one is a coverage hole dressed as an optimization.
 function walk.collect(paths)
    local files, seen, errors = {}, {}, {}
 
    for _, path in ipairs(paths) do
       if is_dir(path) then
-         local listed, list_error = list_dir(path)
+         local listed, list_error = expand_root(path)
          local skipped = path
          if not listed then
             errors[#errors + 1] = {message = list_error, path = skipped}
          else
          -- A partial listing is still a listing, and still an error: the files
-         -- we did get are analyzed, and every directory we could not read is
-         -- reported, each against its own path.
+         -- we did get are analyzed, and every directory we could not read and
+         -- every link we could not resolve is reported, each against its own
+         -- path, and a root that outgrew the limit is reported against itself.
          for _, problem in ipairs(list_error or {}) do
             errors[#errors + 1] = problem
          end
