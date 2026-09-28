@@ -173,10 +173,13 @@ describe("the frozen precision measurement", function()
          frozen.total .. "; re-measure with `make corpus && make precision` and update " ..
          GOLDEN .. " and " .. DOC .. " together")
 
-      assert_equal(files, frozen.corpus_files,
-         "the headline claims " .. files .. " files and the frozen measurement is " ..
-         frozen.corpus_files .. ". The document's denominator is the .lua files" ..
-         " `make corpus` collects; luasec itself scanned " .. frozen.scanned_files ..
-         " of them, and both numbers are frozen")
+      -- The headline carries the ANALYZED count, not the collected one: 146
+      -- findings were divided by the files luasec looked at. The document says
+      -- so in words, and precision_spec checks the other half of the pair.
+      assert_equal(files, frozen.scanned_files,
+         "the headline claims " .. files .. " files and the frozen measurement "
+         .. "analyzed " .. frozen.scanned_files .. ". The corpus table's "
+         .. frozen.corpus_files .. " is what `make corpus` collects, which is a "
+         .. "different question")
    end)
 end)

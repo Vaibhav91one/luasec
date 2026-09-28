@@ -276,9 +276,21 @@ elseif headline ~= golden.total then
 end
 if headline_files == nil then
    difference(opts.doc .. ": the headline does not say how many files it measured")
-elseif headline_files ~= golden.corpus_files then
-   difference(string.format("headline: %s claims %d files, the frozen measurement says %d",
-      opts.doc, headline_files, golden.corpus_files))
+-- The headline carries the ANALYZED count, not the collected one: the findings
+-- were divided by the files luasec looked at, so that is the denominator a
+-- reader quoting the headline is quoting. The corpus table's own figure is
+-- checked against corpus_files below.
+elseif headline_files ~= golden.scanned_files then
+   difference(string.format("headline: %s claims %d files, the frozen measurement analyzed %d",
+      opts.doc, headline_files, golden.scanned_files))
+end
+
+local doc_total = tonumber(doc_text:match("%*%*total%*%*%s*|%s*%*%*(%d+)%*%*"))
+if doc_total == nil then
+   difference(opts.doc .. ": the corpora table has no total")
+elseif doc_total ~= golden.corpus_files then
+   difference(string.format("corpora table: %s claims %d files, the frozen measurement collected %d",
+      opts.doc, doc_total, golden.corpus_files))
 end
 
 -- ---------------------------------------------------------------- verdict

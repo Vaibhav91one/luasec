@@ -17,6 +17,11 @@ command above. The 18.06 tree is pinned rather than tracked, because a
 measurement against a moving branch is not a measurement: the commit is named so
 a reader can tell whether they are looking at the same code.
 
+562 is how many `.lua` files `make corpus` collects. 566 is how many paths
+luasec selects from them and analyzes, the difference being the extensionless
+CGI handlers and generated scripts a firmware image carries. The headline counts
+what was analyzed, because that is what produced the findings.
+
 Command:
 
 ```sh
@@ -25,7 +30,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-146 findings over 562 files, 74 of them carrying at least one (13%), after six
+146 findings over 566 files, 74 of them carrying at least one (13%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is

@@ -352,8 +352,13 @@ describe("a file luasec cannot analyze", function()
    end)
 
    it("fails the run when the file only looks like Lua", function()
+      -- The fixture did not exist. Exit 2 for "no such file" satisfied the
+      -- assertion, so the case passed without ever loading a file that would
+      -- not parse - a spec that cannot fail is worse than no spec.
       local out, code = harness.cli({ "test/fixtures/bytecode/not_lua.txt" })
       assert_true(code ~= 0, "a file that will not parse is not a clean file:\n" .. out)
+      assert_match(out, "901", "the file was read and identified, not merely missing:\n" .. out)
+      assert_no_match(out, "no such file", "the fixture has to exist:\n" .. out)
    end)
 end)
 

@@ -124,13 +124,18 @@ function directives.allows(directives_before, finding, is_suppressed)
    -- Net depth: pushes open a region and pops close one, so counting only
    -- pushes leaves every region open for the rest of the file, which is the bug
    -- this replaced. A pop with no push is a no-op rather than a negative depth.
-   local function open_at(limit)
+   -- A `[push]` on a suppression opens a region, so it counts here exactly as a
+   -- bare `push` line does. `skip_line` leaves one directive out, which is how
+   -- the depth a suppression was written at is measured without its own
+   -- contribution: it governs the region above it rather than nesting in it.
+   local function open_at(limit, skip_line)
       local depth = 0
       for _, directive in ipairs(directives_before) do
-         if directive.marker and directive.line <= limit then
-            if directive.action == "push" then
+         if directive.line <= limit and directive.line ~= skip_line then
+            if (directive.marker and directive.action == "push")
+               or (directive.push == true and directive.action ~= "pop") then
                depth = depth + 1
-            else
+            elseif directive.marker and directive.action == "pop" then
                depth = math.max(0, depth - 1)
             end
          end
@@ -144,10 +149,33 @@ function directives.allows(directives_before, finding, is_suppressed)
       if directive.action == "ignore" then
          -- A suppression written outside every region is file-wide, which is
          -- what a plain `-- luasec: ignore` has always meant. One written inside
-         -- a region lives and dies with it, and `[push]` on the suppression
-         -- itself opens the region it governs.
-         local scoped = open_at(directive.line) > 0 or directive.push
-         if not scoped or open_at_finding > 0 then
+         -- a region lives and dies with it.
+         --
+         -- `[push]` means this suppression opens a region of its own, and it is
+         -- compared against the depth WITHOUT its own contribution: it does not
+         -- nest inside a `push` line above it, it governs the region that line
+         -- opened. Counting it as an extra level instead let one `pop` close
+         -- only half of what was opened and left the suppression in force past
+         -- the end of its region - the same fail-open shape as the pop that was
+         -- never read at all.
+         --
+         -- Three cases, and getting them apart is the whole of the contract:
+         --   written outside every region  -> file-wide, as it always meant
+         --   written inside a region       -> only while that region is open
+         --   carrying [push]               -> the region it opens itself, so the
+         --                                    threshold is one deeper than the
+         --                                    depth it was written at
+         local base = open_at(directive.line, directive.line)
+         local applies
+         if directive.push then
+            applies = open_at_finding >= base + 1
+         elseif base > 0 then
+            applies = open_at_finding > 0
+         else
+            applies = true
+         end
+
+         if applies then
             if directives.matches_any(directive.patterns, finding, directive.line) then
                suppressed_by = true
             end

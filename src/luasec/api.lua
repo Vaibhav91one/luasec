@@ -389,8 +389,12 @@ local function cover_and_expose(result, opts)
 
    -- 708: an exported function whose execution sink nothing in this file feeds.
    -- The sink exists; the input lives somewhere we cannot see.
+   -- `result.expensive`, not a bare `expensive`. This function has no local by
+   -- that name, so the test read a GLOBAL that is always nil, and the 708 pass
+   -- was never actually skipped: a file over the line cap still paid for the
+   -- exposed-sink walk, which is the minutes-long one the cap exists to avoid.
    if chstate.resolved_locals ~= false and not opts.no_interprocedural
-         and opts.report_exposed_sinks ~= false and not expensive then
+         and opts.report_exposed_sinks ~= false and not result.expensive then
       local function sink_key(exposed)
          if not (exposed.sink_line and exposed.sink_offset) then return nil end
          local start = exposed.sink_offset - (chstate.line_offsets[exposed.sink_line] or 0) + 1
@@ -498,17 +502,6 @@ local function finalize(result, opts)
    inline_directives.reset_unreadable()
    local directives, problems = inline_directives.parse(chstate)
 
-   -- Patterns that only reveal themselves as malformed when they are used. Lua
-   -- compiles a pattern as it walks, so a pre-check cannot see `70(`, `70)` or
-   -- `70%`; these are the ones we learned about by trying, and they are added
-   -- before the conversion below. They used to be appended to `problems` after
-   -- it had been turned into findings, which made the whole channel dead code.
-   for _, unreadable in ipairs(inline_directives.unreadable()) do
-      problems[#problems + 1] = {line = unreadable.line,
-         message = ("luasec directive has an unreadable code pattern '%s'"):format(
-            unreadable.pattern)}
-   end
-
    for _, problem in ipairs(problems) do
       findings[#findings + 1] = {
          code = "012", line = problem.line, column = 1, end_column = 1,
@@ -531,6 +524,30 @@ local function finalize(result, opts)
       end
       if inline_directives.allows(applicable, finding, suppressed_by_options(opts, finding)) then
          kept[#kept + 1] = finding
+      end
+   end
+
+   -- Now that the directives have been USED, the patterns that raised are known.
+   -- A Lua pattern cannot be validated ahead of use - string.match compiles it as
+   -- it walks, so `70(` matches "70" and returns before it reaches the unfinished
+   -- capture - which is why this is read here and not at parse time. Appending
+   -- to `kept` rather than to `findings`, because `kept` is what this function
+   -- returns: the finding was being built and then thrown away.
+   -- Only the ones the parse-time probe could not see: it reports most malformed
+   -- patterns already, and reporting the same typo twice is noise in a code the
+   -- operator has to read.
+   local already = {}
+   for _, problem in ipairs(problems) do already[problem.line] = true end
+
+   for _, unreadable in ipairs(inline_directives.unreadable()) do
+      if not already[unreadable.line] then
+         already[unreadable.line] = true
+            kept[#kept + 1] = {
+            code = "012", line = unreadable.line, column = 1, end_column = 1,
+            severity = "low", confidence = "certain", name = "inline directive",
+            message = ("luasec directive has an unreadable code pattern '%s'")
+               :format(unreadable.pattern),
+         }
       end
    end
 
@@ -700,23 +717,6 @@ function api.analyze(paths, opts)
    end
 
    return sort_findings(findings)
-end
-
--- Mirrors the CLI's --ignore/--only/--enable so an in-source `enable` can
--- override them, which is the whole point of allowing directives at all.
-function suppressed_by_options(opts, finding)
-   local suppressed = false
-   for _, pattern in ipairs(opts.ignore or {}) do
-      if inline_directives.code_and_name_match(pattern, finding) then suppressed = true end
-   end
-   if opts.only then
-      local matched = false
-      for _, pattern in ipairs(opts.only) do
-         if inline_directives.code_and_name_match(pattern, finding) then matched = true end
-      end
-      if not matched then suppressed = true end
-   end
-   return suppressed
 end
 
 --- Decide whether a Lua payload actually achieves execution.

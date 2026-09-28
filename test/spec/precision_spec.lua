@@ -56,16 +56,26 @@ describe("the measured precision document", function()
          "; one of them is stale")
    end)
 
-   it("names the corpus size the headline was measured over", function()
+   it("says how many files it measured, and which of the two numbers that is", function()
+      -- 562 is what `make corpus` collects; 566 is what luasec analyzed. The
+      -- headline carries the second, because that is the denominator the 146
+      -- findings were divided by, and the document says so rather than leaving
+      -- a reader to guess which number the headline borrowed from the table.
       local text = read_precision_doc()
       local corpus_files = assert(tonumber(text:match("| %*%*total%*%* | %*%*(%d+)%*%*")),
          "the corpora table has no total")
       local headline_files = assert(tonumber(text:match("(%d+) files")),
          "the headline does not say how many files it measured")
+      local frozen = dofile("scripts/precision-golden.lua")
 
-      assert_equal(corpus_files, headline_files,
-         "the corpus table counts " .. corpus_files ..
-         " files and the headline claims " .. headline_files)
+      assert_equal(headline_files, frozen.scanned_files,
+         "the headline claims " .. headline_files .. " files; the frozen measurement "
+         .. "analyzed " .. frozen.scanned_files)
+      assert_equal(corpus_files, frozen.corpus_files,
+         "the corpus table claims " .. corpus_files .. " files; the frozen "
+         .. "measurement collected " .. frozen.corpus_files)
+      assert_true(text:find("luasec selects", 1, true) ~= nil,
+         "the document does not say which of the two numbers the headline is")
    end)
 
    it("gives the command that reproduces the number", function()
