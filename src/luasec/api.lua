@@ -81,6 +81,16 @@ local function install_registries(opts)
    return true
 end
 
+--- Load extra rule declarations from files, as an operator does with --rules.
+function api.rules_load(paths)
+   for _, path in ipairs(paths or {}) do
+      local declaration, err = profiles.load_file(path)
+      if not declaration then return nil, err end
+      platform_api.apply_profile(declaration)
+   end
+   return true
+end
+
 --- Validate the platform profiles and rule files named by `opts`.
 -- Returns true, or nil plus a message. Callers use this to fail before
 -- analyzing anything.
@@ -208,7 +218,9 @@ function api.check_source(source, opts)
    end
 
    -- Rule modules see the same parsed program, after the dataflow pass.
-   local ctx = rule_context.new(chstate, chstate.source, opts)
+   -- The decoder object is not a string, so `source_bytes` is what a snippet
+   -- can actually be sliced out of.
+   local ctx = rule_context.new(chstate, chstate.source_bytes, opts)
    for _, detector in ipairs(rule_registry.detectors()) do
       local ok, err = pcall(detector, ctx)
       if not ok then

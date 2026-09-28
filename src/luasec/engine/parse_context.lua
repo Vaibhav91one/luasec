@@ -17,6 +17,7 @@ local unwrap_parens = require "luacheck.stages.unwrap_parens"
 local linearize = require "luacheck.stages.linearize"
 local name_functions = require "luacheck.stages.name_functions"
 local resolve_locals = require "luacheck.stages.resolve_locals"
+local utils = require "luacheck.utils"
 
 local parse_context = {}
 
@@ -61,10 +62,16 @@ function parse_context.build(source_bytes, options)
    end)
 
    if not ok then
+      -- The parser raises an instance of its own SyntaxError class, which has no
+      -- `tag` field; without this check every parse error reported "table: 0x...".
+      if type(ast) == "table" and utils.is_instance(ast, parser.SyntaxError) then
+         return nil, ast
+      end
       if type(ast) == "table" and ast.tag == "SyntaxError" then
          return nil, ast
       end
-      return nil, {tag = "SyntaxError", msg = tostring(ast)}
+      return nil, {tag = "SyntaxError", msg = tostring(ast), line = 1,
+         offset = 1, end_offset = 1}
    end
 
    chstate.ast = ast

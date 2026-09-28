@@ -10,6 +10,7 @@
 -- `luasec --std +openwrt+luci` composes profiles. `--rules file.lua` loads the
 -- same shape from anywhere, which is how a vendor documents their own API.
 local util = require "luasec.util.util"
+local builtin_standards = require "luacheck.builtin_standards"
 
 local profiles = {}
 
@@ -50,14 +51,36 @@ function profiles.builtin_names()
    return names
 end
 
+--- Is this a luacheck Lua standard (`lua51`, `luajit`, `min`, `max`, ...)?
+-- Accepted so `--std lua51` means the Lua standard rather than an error, which is
+-- what makes 903, the dialect-mismatch finding, expressible.
+function profiles.is_lua_standard(name)
+   return builtin_standards[name] ~= nil and builtin[name] == nil
+end
+
 --- Load one built-in profile by name.
 function profiles.load_builtin(name)
+   if profiles.is_lua_standard(name) then
+      -- A Lua standard, not a platform profile: it declares no security meaning.
+      return {name = name, lua_standard = true}
+   end
+
    local module = builtin[name]
    if not module then
       return nil, ("unknown platform profile '%s' (known: %s)"):format(
-         name, table.concat(profiles.builtin_names(), ", "))
+         name, table.concat(profiles.known_names(), ", "))
    end
    return validate(name, require(module))
+end
+
+--- Every name `--std` accepts, platform profiles and Lua standards.
+function profiles.known_names()
+   local names = profiles.builtin_names()
+   for name in pairs(builtin_standards) do
+      names[#names + 1] = name
+   end
+   table.sort(names)
+   return names
 end
 
 --- Load a profile from a Lua file returning a declaration table.
