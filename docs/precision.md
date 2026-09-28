@@ -20,18 +20,20 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-136 findings over 566 files (24%), after five rounds of fixing false positives
-that this corpus found, and after the release review found more. An earlier
-version of this document claimed 178; that number never added up, because the
-per-code table below was audited correctly and only the headline was wrong. The
-command is here so the number can be reproduced rather than believed.
+119 findings over 566 files (21%), after five rounds of fixing false positives
+that this corpus found, after the release review found more, and after 747 was
+narrowed to the cases where a name and a value both say a credential is
+embedded. An earlier version of this document claimed 178; that number never
+added up, because the per-code table below was audited correctly and only the
+headline was wrong. The command is here so the number can be reproduced rather
+than believed.
 
 Hand-audited sample by code:
 
 | Code | Count | Assessment |
 | --- | --- | --- |
 | 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed |
-| 747 hardcoded secret | 17 | **false positives**: PEM header markers (`"-----BEGIN RSA PRIVATE KEY-----"`) and `depends({auth = "EAP-TLS"})`, where the name looks secret and the value is not |
+| 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. The corpus has no hardcoded credential in it at all, so the true positives this rule can make are covered by fixtures, not by this table |
 | 901 parse failure | 14 | true: real Lua using gettext escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. A dialect gap, honestly reported |
 | 727 unbounded growth | 12 | true after narrowing: string accumulation in a loop with no visible ceiling |
 | 707 FFI escape | 9 | true: LuaJIT source |
@@ -112,7 +114,69 @@ jq -r '[.findings[].code] | group_by(.) | map({c: .[0], n: length})' /tmp/corpus
 
 ## What is still noisy
 
-747 is the weakest rule in the catalogue: on this corpus every finding was a
-false positive. It needs a value that looks like a secret (length, character
-class) and a name list that drops bare `key` and `auth`, which are as often
-protocol names as credentials.
+### 747, and what it took to measure it honestly
+
+747 was the weakest rule in the catalogue: on this corpus every one of its 17
+findings was a false positive, in two shapes. One was
+`key = "-----BEGIN RSA PRIVATE KEY-----"` in
+`luci-lib-px5g`'s `der2pem`, a table of the header lines a script wraps a key it
+builds at run time - the marker, not the key. The other was
+`cacert2:depends({auth = "EAP-TLS"})`, 16 times in luci's wireless CBI model: a
+name that says secret and a value that is a protocol name.
+
+Three changes, each with a fixture:
+
+1. **A PEM header is not a key.** A value whose lines are all `-----BEGIN ...-----`
+   or `-----END ...-----` lines is a marker and is never reported. A value that
+   opens a block and carries a base64 body is the key, and is reported whatever
+   it is called, with the body redacted by the header. A file holding a marker
+   and a body as separate literals reports the body.
+2. **The name list is two tiers.** A qualifying name (`password`, `api_key`,
+   `psk`, `token`, `secret`, `privkey`, ...) carries the finding on its own and
+   is reported at `high` confidence. A bare `key` or `auth` does not: the value
+   has to look like a secret, and the finding is `low`. The case of the name is
+   no longer part of the name, which also fixed a false negative - `API_TOKEN`
+   and `PASSWORD` were invisible before, because the splitter only matched
+   lower-case letters and a name spelled in capitals has none.
+3. **The value has to look like a secret.** Length floors of 4 under a
+   qualifying name and 12 under a bare one, plus rejection of paths, URLs,
+   format strings, numbers, all-caps enums, placeholders, and values whose every
+   part is protocol vocabulary.
+
+Measured after the change, same command as everywhere else in this file:
+
+```sh
+bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/secrets-after.json corpus
+jq -r '[.findings[] | select(.code=="747")] | length' /tmp/secrets-after.json
+# 0
+```
+
+0 findings over 566 files. **That is not a precision figure: with nothing
+reported there is no denominator, and a rule that finds nothing is as wrong as
+one that finds everything.** The 566-file corpus is upstream LuCI and LuaJIT,
+which ships no hardcoded credential for this rule to find, so the true
+positives are covered by fixtures that are asserted one by one: a router script
+shipping `ADMIN_PASSWORD = "admin"`, a WiFi generator shipping a PSK, an
+`API_TOKEN`, a complete private key block, and a PEM body beside its header.
+Four of the five are found at `high` confidence; the bare `key` beside a
+six-digit hex value is found at `low`. The fixtures, not the corpus, are what
+proves the rule still works.
+
+What 747 gives up, stated rather than hidden: a bare `key` or `auth` holding
+something under twelve characters, or a single lower-case word with no digit in
+it, is not reported. `key = "timeout_ms"` and `auth = "EAP-TLS"` are silence
+rather than a finding, and that is the trade - a bare name plus a bare word is a
+table index about as often as it is a credential, and it was 100% wrong in this
+corpus. Naming the value in a qualifying name gets the report either way.
+
+### Still noisy, and not in this branch
+
+- **903 is true but mislabelled.** All 20 findings are the 5.3 bitwise
+  operators under `--std luajit`, and the message calls an operator an API. The
+  findings are honest about the file; the sentence about it is not.
+- **901 is a dialect gap, not a defect in the code.** 14 files use gettext
+  escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. Reported rather than
+  guessed at, which is the right behaviour, but it is 14 findings an operator
+  has to learn to read.
+- **708 is 36 findings and "mostly true" is not a number.** The claim has not
+  been re-audited since the review fix.

@@ -70,11 +70,53 @@ describe("hardcoded credentials", function()
    end)
 end)
 
+describe("the marker of a PEM", function()
+   it("reports no 747 for the table of BEGIN/END lines a script wraps a key in", function()
+      local report = fixture("pem_header_table")
+      assert_equal(#with_code(report, "747"), 0,
+         "a `-----BEGIN ...-----` line is a marker, not the key it introduces: " .. codes(report))
+   end)
+
+   it("reports the base64 body a marker introduces, and not the marker", function()
+      local report = fixture("pem_marker_and_body")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1,
+         "the marker is not a secret and the body is: " .. codes(report))
+      assert_equal(found[1].name, "key_body", "the finding lands on the body, not on the marker")
+      assert_equal(found[1].line, 10, "the body is the long-bracket literal on line 10")
+      assert_equal(found[1].kind, "key")
+      assert_true(found[1].length > 300, "the whole body is measured: " .. found[1].length)
+      assert_true(found[1].redacted:find("MIIEvQ", 1, true) == nil,
+         "no key material is quoted: " .. found[1].redacted)
+      assert_true(#found[1].redacted <= 20,
+         "a long value does not redact to a long run of nothing: " .. #found[1].redacted)
+      assert_true(found[1].length > 300, "the length carries the size instead: " .. found[1].length)
+   end)
+end)
+
 describe("a constant that is not embedded in the program", function()
    it("reports no 747 for a login form that compares a password or a token constant", function()
       local report = fixture("login_check")
       assert_equal(#with_code(report, "747"), 0,
          "a value compared once is the check, not a secret shipped with the program: " .. codes(report))
+   end)
+
+   it("reports no 747 for a table of default credentials a program validates against", function()
+      local report = fixture("default_credentials")
+      assert_equal(#with_code(report, "747"), 0,
+         "a credential dictionary the program tests input against is the validator: " .. codes(report))
+   end)
+
+   it("reports no 747 for the paths a firmware script hands its TLS library", function()
+      local report = fixture("ca_certificate_path")
+      assert_equal(#with_code(report, "747"), 0,
+         "naming the file a key lives in is not carrying the key: " .. codes(report))
+   end)
+
+   it("reports no 747 for a credential fielded by name and read from a file", function()
+      local report = fixture("config_password_field")
+      assert_equal(#with_code(report, "747"), 0,
+         "the value comes from the file, and the default is empty: " .. codes(report))
    end)
 end)
 
@@ -83,6 +125,18 @@ describe("credential-named values that are not secrets", function()
       local report = fixture("placeholders")
       assert_equal(#with_code(report, "747"), 0,
          "a name that says secret and a value that says nothing was embedded: " .. codes(report))
+   end)
+
+   it("reports no 747 for a qualifying name holding a path, a URL, a format string, an enum, a number or a protocol word", function()
+      local report = fixture("not_a_secret_value")
+      assert_equal(#with_code(report, "747"), 0,
+         "the name says secret and the value says none of it was embedded: " .. codes(report))
+   end)
+
+   it("reports no 747 for a bare `key` or `auth` holding a protocol or mode name", function()
+      local report = fixture("protocol_names")
+      assert_equal(#with_code(report, "747"), 0,
+         "a name that says secret and a value that is a protocol name: " .. codes(report))
    end)
 
    it("reports no 747 for a table of limits keyed by the name of the limit", function()
@@ -104,6 +158,11 @@ describe("keys written into a program", function()
       assert_equal(found[2].name, "apikey")
       assert_equal(found[2].kind, "key")
       assert_equal(found[3].name, "key", "a bare `key` with digits in it is a key")
+      assert_equal(found[3].confidence, "low",
+         "a bare `key` is weak evidence, and the confidence has to say so")
+      assert_equal(found[1].confidence, "high",
+         "a `psk` is a credential in its own right, so the name is the evidence")
+      assert_equal(found[2].confidence, "high", "an `apikey` is a credential in its own right")
       assert_no_secret(found[1], "hunter2000")
       assert_no_secret(found[2], "9f2c41ab77de3058")
       assert_no_secret(found[3], "b41d8ef2a97c")
@@ -116,6 +175,54 @@ describe("keys written into a program", function()
       assert_equal(found[1].name, "password", "the finding names the parameter, not the value")
       assert_equal(found[1].line, 10, "the call is on line 10 of the fixture")
       assert_no_secret(found[1], "toor")
+   end)
+end)
+
+describe("secrets that really are embedded", function()
+   -- The corpus this rule is measured on has no hardcoded credential in it, so
+   -- without these four a clean corpus would only prove the rule is quiet.
+   it("reports the admin password a router script ships", function()
+      local report = fixture("router_default_password")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1,
+         "a shipped admin password is the finding this rule exists for: " .. codes(report))
+      assert_equal(found[1].name, "ADMIN_PASSWORD", "the name is the binding, verbatim")
+      assert_equal(found[1].kind, "password")
+      assert_equal(found[1].length, 5, "five characters is a real credential length here")
+      assert_equal(found[1].confidence, "high", "the name is the evidence")
+      assert_no_secret(found[1], "admin")
+   end)
+
+   it("reports the PSK a WiFi config generator ships", function()
+      local report = fixture("wifi_psk_generator")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1,
+         "the pre-shared key in the image is the key the installer writes: " .. codes(report))
+      assert_equal(found[1].name, "guest_psk")
+      assert_equal(found[1].kind, "key", "a psk is a key, not a password")
+      assert_no_secret(found[1], "correcthorsebattery9")
+   end)
+
+   it("reports an API token whose name is in capitals", function()
+      local report = fixture("api_token")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1,
+         "case is not part of a name, so API_TOKEN is a credential name: " .. codes(report))
+      assert_equal(found[1].name, "API_TOKEN")
+      assert_equal(found[1].kind, "token")
+      assert_no_secret(found[1], "ghp_4eC39Jqklj3nR2vB8sY1wZ5")
+   end)
+
+   it("reports a complete private key block, quoting none of the body", function()
+      local report = fixture("embedded_private_key")
+      local found = with_code(report, "747")
+      assert_equal(#found, 1,
+         "one block, one finding: " .. codes(report))
+      assert_equal(found[1].kind, "pem")
+      assert_true(found[1].length > 400, "the whole block is measured: " .. found[1].length)
+      assert_match(found[1].redacted, "^%-%-%-%-%-BEGIN RSA PRIVATE KEY%-%-%-%-%- ",
+         "the header is the only part of a PEM a report may carry: " .. found[1].redacted)
+      assert_true(found[1].redacted:find("Lh%pclU9", 1, true) == nil, "no key material is quoted")
    end)
 end)
 
