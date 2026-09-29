@@ -26,6 +26,7 @@ The default report is plain text, one finding per line, followed by a summary.
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
 ```
 
 Exit code is `1` because the default threshold is `low`, so any finding fails
@@ -63,6 +64,7 @@ bin/luasec --std +openwrt test/fixtures/firmware/uci_tainted_value.lua
 test/fixtures/firmware/uci_tainted_value.lua:7:4: [722] high: configuration value set from untrusted data, which a service may later execute (uci.set) (CWE-78) [source: ]
 
 Total: 1 finding (1 high)
+Score: 94/100 (good) - firmware 1
 ```
 
 ### luci
@@ -129,6 +131,7 @@ The default. One line per finding, then a summary line.
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
 ```
 
 Fields are: `file:line:column:` then `[code] severity: message (sink) (CWE-78)
@@ -232,6 +235,23 @@ bin/luasec --quiet test/fixtures/tainted_exec/handler.lua
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
+```
+
+### `--score`
+
+Prints only the 0-100 health score, one number and nothing else. The exit
+code is unchanged. The score is 100 minus each finding's severity weight
+(critical 25, high 10, medium 4, low 1) times its confidence (certain/high 1,
+medium 0.6, low 0.3), floored at 0. Labels are good at 90 and above, needs
+work at 60 and above, else critical.
+
+```sh
+bin/luasec --score test/fixtures/tainted_exec/handler.lua
+```
+
+```
+75
 ```
 
 ## Config file
@@ -264,6 +284,7 @@ bin/luasec --config luasec.config.lua test/fixtures/tainted_exec/handler.lua
 ```
 luasec: allowed 1 finding(s) of 709 in handler.lua: reviewed: sanitized upstream
 Total: 0 findings (none)
+Score: 100/100 (good)
 ```
 
 Exit code is `0` — the allowed finding is removed from the report.
@@ -282,6 +303,7 @@ where `sev.lua` holds `return {severity = {["709"] = "low"}}`:
 test/fixtures/tainted_exec/handler.lua:3:4: [709] low: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 low)
+Score: 99/100 (good) - exec 1
 ```
 
 Exit code is `0` — the 709 now reports as `low`, below `--fail-on high`.
@@ -302,6 +324,7 @@ luasec: config allow for 701 in any file matched nothing
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
 ```
 
 A bad config stops the run with exit `2`:
@@ -377,6 +400,7 @@ nothing and exits `0`:
 
 ```
 Total: 0 findings (none)
+Score: 100/100 (good)
 EXIT: 0
 ```
 
@@ -481,6 +505,7 @@ bin/luasec --whole-program --std +luci test/fixtures/whole_program/cross_file/
 test/fixtures/whole_program/cross_file/util.lua:5:4: [709] critical: untrusted data reaches command execution (os.execute); untrusted data reached this sink from test/fixtures/whole_program/cross_file/handler.lua (CWE-78) [source: http.formvalue]
 
 Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
 ```
 
 Without `--whole-program`, the same directory reports a 708: the source

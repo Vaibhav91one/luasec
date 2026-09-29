@@ -1,4 +1,6 @@
 -- Human readable report.
+local score = require "luasec.report.score"
+local categories = require "luasec.rules.categories"
 local plain = {}
 
 local SEVERITY_ORDER = {low = 1, medium = 2, high = 3, critical = 4}
@@ -58,6 +60,18 @@ function plain.render(report, opts)
 
    buffer[#buffer + 1] = string.format("Total: %d finding%s (%s)",
       #report, #report == 1 and "" or "s", #parts > 0 and table.concat(parts, ", ") or "none")
+
+   -- The health score, computed from the same findings the total counts. A
+   -- category with nothing in it is left out, so the line stays short.
+   local summary = score.summarize(report)
+   local counted = {}
+   for _, id in ipairs(categories.order()) do
+      if summary.categories[id] > 0 then
+         counted[#counted + 1] = id .. " " .. summary.categories[id]
+      end
+   end
+   buffer[#buffer + 1] = string.format("Score: %d/100 (%s)%s", summary.score, summary.label,
+      #counted > 0 and (" - " .. table.concat(counted, ", ")) or "")
 
    return table.concat(buffer, "\n")
 end

@@ -28,6 +28,7 @@ local BOOLEAN_FLAGS = {
    ["--no-raw-scan"] = "no_raw_scan",
    ["--no-dynamic-sinks"] = "no_dynamic_sinks",
    ["--quiet"] = "quiet",
+   ["--score"] = "score",
    ["--ranges"] = "ranges",
    ["--no-config"] = "no_config",
 }
@@ -124,6 +125,7 @@ output:
   -o, --output <file>        write the report to a file instead of stdout
   --ranges                   include the end column of each finding
   --quiet                    print nothing when there are no findings
+  --score                    print only the 0-100 health score (exit code unchanged)
 
 selection:
   --std <names>              platform API sets, '+' separated, e.g. +openwrt+luci
