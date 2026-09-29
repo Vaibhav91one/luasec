@@ -77,12 +77,13 @@ describe("luasec fix", function()
       local out, code = harness.cli({"fix", "--agent", "copilot", TAINTED})
       assert_equal(code, 2, out)
       assert_match(out, "claude, codex, cursor", out)
-      local empty = harness.scratch_dir("fix_missing")
-      out, code = run_with_path(empty, {"fix", "--agent", "cursor", TAINTED})
-      os.execute("rm -rf " .. string.format("%q", empty))
-      if not os.execute("command -v cursor-agent >/dev/null 2>&1") then
-         assert_equal(code, 2, out)
-         assert_match(out, "cursor%-agent is not on PATH", out)
-      end
+      -- Only the system directories: prepending to the real PATH would find,
+      -- and launch, a cursor-agent installed on the machine running the specs.
+      local pipe = assert(io.popen("PATH=/usr/bin:/bin ./bin/luasec fix --agent cursor "
+         .. string.format("%q", TAINTED) .. " 2>&1; printf '\\n__EXIT__%d' $?"))
+      out = pipe:read("*a")
+      pipe:close()
+      assert_match(out, "__EXIT__2%s*$", out)
+      assert_match(out, "cursor%-agent is not on PATH", out)
    end)
 end)
