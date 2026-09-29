@@ -28,7 +28,7 @@ We never modify `vendor/`. It is pinned (see `vendor/PINNED`) and checked by
 
 | Seam | Interface |
 | --- | --- |
-| library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name, opts)`, `rules_load(paths)`, `validate_payload(src, opts)` |
+| library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name, opts)`, `score(report)`, `rules_load(paths)`, `validate_payload(src, opts)` |
 | CLI | `bin/luasec <args>` as a subprocess (flags, exit codes, stdout contracts) |
 | allowed extra | `luasec.util.util` (string/entropy helpers), `luasec.util.const_eval` (constant folding), `luasec.bytecode.detect`, `luasec.bytecode.header`, `luasec.bytecode.protos` - public modules in their own right, each with a narrow interface |
 

@@ -5,7 +5,10 @@
 --   format(report, name, opts)   render a report
 --   rules_load(paths)            load custom rules files
 --   validate_payload(src, opts)  run the payload validator, return a verdict
+--   score(report)               the 0-100 health score and a count per category
 local codes = require "luasec.rules.codes"
+local categories = require "luasec.rules.categories"
+local score = require "luasec.report.score"
 local platform_api = require "luasec.registry.platform_api"
 local profiles = require "luasec.registry.profiles"
 local inline_directives = require "luasec.engine.inline_directives"
@@ -31,6 +34,7 @@ function api.rule_catalogue()
          cwe = spec.cwe,
          message = spec.message,
          fields = spec.fields,
+         category = categories.of(spec.code),
       }
    end
    return catalogue
@@ -337,6 +341,14 @@ end
 -- trailing newline (the CLI's `emit` is what adds one).
 function api.format(report, name, opts)
    return render.render(report_contract.normalize(report), name, opts)
+end
+
+--- The 0-100 health score of a report, and how many findings are in each
+-- category. `report` is what check_source or analyze returned; it is not
+-- changed. Returns {score = n, label = "good"|"needs work"|"critical",
+-- categories = {exec = n, firmware = n, payload = n, artifact = n, meta = n}}.
+function api.score(report)
+   return score.summarize(report)
 end
 
 --- Decide whether a Lua payload actually achieves execution.
