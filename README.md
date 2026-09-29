@@ -148,17 +148,37 @@ it is `pcall`, not a trust decision.
 `2` is deliberately distinct from `1`. A typo in a flag is a configuration
 error and must not be reported to a CI as a security finding.
 
+Under `--validate` a verification verdict maps to one of these three, with no
+separate threshold or baseline:
+
+| | |
+| --- | --- |
+| `0` | `benign` — the snippet ran and reached no sink |
+| `1` | `rce`, `escape`, `partial`, or `timeout` — reached a sink or was stopped by a sandbox limit |
+| `2` | `error` — the payload produced no usable verdict |
+
+A verdict is an outcome, not a finding count: `1` means the snippet reached a
+sink or the sandbox had to stop it, and `2` means no verdict could be produced.
+
 ## Build and test
 
 ```sh
 make            # build Lua 5.4.9, fetch pinned luacheck, run the specs
-make test       # 576 specs
+make test       # 582 specs
 make ci-verify  # the full gate, including the corpus measurement
 make corpus     # clone the firmware corpora (network, gitignored)
 ```
 
 No luarocks, no C dependencies beyond a locally compiled Lua. `vendor/luacheck`
 is pinned by commit and `make vendor-verify` fails on any drift.
+
+Runs on Linux and macOS. Not Windows: the walk in
+[`src/luasec/cli/walk.lua`](src/luasec/cli/walk.lua) shells out to `find -H` and
+`sh -c` through `io.popen`, and
+[`src/luasec/validate/driver.lua`](src/luasec/validate/driver.lua) launches the
+sandbox child with `io.popen` over `/bin/sh` plus `kill`, `ps` and `ulimit`.
+Windows `io.popen` is `cmd.exe`, which has none of those tools, so neither the
+directory walk nor the validator runs there.
 
 CI runs the specs, an adversarial suite, a TDD proof on every pull request, the
 `luasec` scan of itself, and `make precision` — which clones the corpora and
