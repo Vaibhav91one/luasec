@@ -451,6 +451,47 @@ exit code — the upload step is what surfaces findings in the Security tab.
 or `2`. `category` tags the results so they are replaced on re-run rather than
 stacked.
 
+## GitHub Action
+
+The repository publishes a composite action (`action.yml`). It builds luasec,
+scans the given paths, uploads the SARIF report to code scanning, and fails
+the job at or above `--fail-on` via the scanner's exit code.
+
+| Input | Default | What it is |
+| --- | --- | --- |
+| `path` | `"."` | Files or directories to scan, space separated. |
+| `std` | `""` | Platform profiles, e.g. `+openwrt+luci`. Empty for generic Lua only. |
+| `fail-on` | `high` | Fail the job at or above this severity (`low`, `medium`, `high`, `critical`). |
+| `args` | `""` | Extra luasec arguments. |
+| `upload-sarif` | `"true"` | Upload the SARIF report to GitHub code scanning (needs `security-events: write`). |
+
+| Output | What it is |
+| --- | --- |
+| `score` | The 0-100 health score. |
+
+```yaml
+- uses: Vaibhav91one/luasec@v0.1.0
+  with:
+    path: .
+    fail-on: high
+    # std: +openwrt+luci
+```
+
+`luasec ci install` writes a workflow that runs the action on every push and
+pull request, pinned to the version of the luasec that wrote it:
+
+```sh
+bin/luasec ci install --dir ./my-project
+```
+
+```
+wrote ./my-project/.github/workflows/luasec.yml
+```
+
+The generated file requests `contents: read` and `security-events: write`,
+checks out the tree, and runs the action with `path: .` and `fail-on: high`.
+Pass `--force` to replace an existing workflow.
+
 ## Custom rules
 
 `--rules <file>` loads an extra Lua module that returns a table in the same
