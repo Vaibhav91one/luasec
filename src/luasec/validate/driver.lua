@@ -165,12 +165,6 @@ local function collect(output, token)
                report.reason_source = fields[6]
                report.lua = fields[7]
                report.source = fields[8]
-               report.payload_result = fields[3]
-               report.instructions = tonumber(fields[4])
-               report.duration_ms = tonumber(fields[5])
-               report.reason_source = fields[6]
-               report.lua = fields[7]
-               report.source = fields[8]
             elseif tag == "__LUASEC_SINK__" then
                report.sinks_reached[#report.sinks_reached + 1] =
                   {name = fields[1], line = tonumber(fields[2]), source = fields[3],
