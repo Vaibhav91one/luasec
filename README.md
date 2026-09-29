@@ -55,9 +55,9 @@ tree:
 
 | | |
 | --- | --- |
-| Findings | **146** across 74 files (13%) |
-| Severity | 8 critical, 92 high, 12 medium, 34 low |
-| `709` untrusted data → execution | 3 |
+| Findings | **231** across 103 files (18%) |
+| Severity | 11 critical, 174 high, 12 medium, 34 low |
+| `709` untrusted data → execution | 5 |
 | `724` execution sink exposed as an RPC handler | 27 |
 | `708` exposed sink, input not visible in this file | 36 |
 | Hardcoded credentials (`747`) | **0** — see below |

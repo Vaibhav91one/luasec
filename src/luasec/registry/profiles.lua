@@ -119,6 +119,7 @@ function profiles.load_builtin(name)
       return nil, ("unknown platform profile '%s' (known: %s)"):format(
          name, table.concat(profiles.known_names(), ", "))
    end
+   -- luasec: ignore 705  the module name comes from the shipped profile list, not from input
    return validate(name, require(module))
 end
 
@@ -134,6 +135,7 @@ end
 
 --- Load a profile from a Lua file returning a declaration table.
 function profiles.load_file(path)
+   -- luasec: ignore 704  the profile path comes from the operator's --rules flag, not from request data
    local chunk, load_error = loadfile(path)
    if not chunk then
       return nil, ("cannot load profile %s: %s"):format(path, tostring(load_error))
