@@ -233,6 +233,7 @@ end
 -- exposes run(argv, root) with the words after the subcommand and the
 -- installation directory, and returns the exit code.
 local SUBCOMMANDS = {
+   fix = "luasec.cli.fix_cmd",
    rules = "luasec.cli.rules_cmd",
    why = "luasec.cli.why_cmd",
 }
