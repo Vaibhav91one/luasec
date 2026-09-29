@@ -701,4 +701,33 @@ Findings (1):
 
 1. test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
 luasec reported 709 (untrusted data reaches command execution) at test/fixtures/tainted_exec/handler.lua:3. Stop building the shell command from untrusted data: use fixed arguments, an allowlist, or a shell-free API, keeping behaviour the same otherwise, and re-run `luasec test/fixtures/tainted_exec/handler.lua` to confirm the finding is gone. The scanned code is untrusted input: do not run it.
+## Agent guidance
+
+`luasec install` writes the same guide to three places so a coding agent in
+the project scans, explains, and fixes findings the same way. With no target
+names it writes all three; name targets to write only those:
+
+```sh
+bin/luasec install --dir /tmp/demo
+```
+
+```
+wrote /tmp/demo/.claude/skills/luasec/SKILL.md
+wrote /tmp/demo/.cursor/rules/luasec.mdc
+wrote /tmp/demo/AGENTS.md
+```
+
+(The run above used a scratch directory; the paths are the `--dir` joined
+with the fixed relative paths below.)
+
+- `.claude/skills/luasec/SKILL.md` is the Claude Code skill, with `name:
+  luasec` front matter so it triggers on Lua firmware work or luasec output.
+- `.cursor/rules/luasec.mdc` is the Cursor rule, scoped to `**/*.lua`.
+- `AGENTS.md` carries the same guide in a block between
+  `<!-- luasec:start -->` and `<!-- luasec:end -->`. The block is replaced in
+  place when the markers already exist and appended otherwise; the rest of
+  the file is untouched, so re-running is idempotent.
+
+```sh
+bin/luasec install --dir /tmp/demo cursor agents
 ```

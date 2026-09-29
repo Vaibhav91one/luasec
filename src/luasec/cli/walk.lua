@@ -559,6 +559,18 @@ end
 -- need and is deliberately not content identity: a hard link or a bind mount
 -- reachable at two paths inside one tree is ground the operator can see at both
 -- of them, and dropping one is a coverage hole dressed as an optimization.
+--- Create a directory and its parents, for the commands that write files into
+-- a project. The path is handed over the way the walk hands one over, through
+-- popen_with_path, so a directory named '$(cmd)' is a name and nothing else.
+-- Returns true, or nil when the directory does not exist afterwards.
+function walk.mkdir_p(path)
+   local pipe, tmp = popen_with_path('mkdir -p -- "$p" && printf ok', path)
+   local out = pipe:read("*a")
+   pipe:close()
+   os.remove(tmp)
+   return out == "ok" or nil
+end
+
 function walk.collect(paths)
    local files, seen, errors = {}, {}, {}
 
