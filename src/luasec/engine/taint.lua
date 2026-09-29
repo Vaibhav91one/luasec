@@ -7,8 +7,8 @@
 -- Sources introduce taint at a call site. Propagation moves it through
 -- concatenation, assignments, table fields, string/table library calls and
 -- the return value of a local function (the function and its returns live in
--- the same file). A module field (M.id) and a cross-file return are not
--- followed. Sinks consume it and produce findings.
+-- the same file). A module field (M.id) in the same file is followed too;
+-- a cross-file return is not. Sinks consume it and produce findings.
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
