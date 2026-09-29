@@ -6,9 +6,11 @@
 --
 -- Sources introduce taint at a call site. Propagation moves it through
 -- concatenation, assignments, table fields, string/table library calls and
--- the return value of a local function (the function and its returns live in
--- the same file). A module field (M.id) in the same file is followed too;
--- a cross-file return is not. Sinks consume it and produce findings.
+-- the return value of a function the analyzer can identify in the same file:
+-- a local function, and a module field (M.id) in that same file. Under
+-- --whole-program a required module's function return is followed too. What is
+-- not followed: a method call (M:m), a function passed as a value, and
+-- anything past the depth cap. Sinks consume taint and produce findings.
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
@@ -473,8 +475,9 @@ local function taint_of_call(node, item, state, depth)
    -- the function's return expressions as context-sensitive bindings. A guard
    -- on state.returning[fn] prevents unbounded recursion on a function that
    -- returns its own call.
-   -- ponytail: a module field (M.id) in the same file is followed too; a
-   -- cross-file return is not.
+   -- ponytail: a module field (M.id) in the same file is followed too;
+   -- a cross-file return is not (that needs --whole-program's
+   -- resolve_external).
    if not sanitized and node.tag == "Call"
          and node[1] and node[1].tag == "Id" and node[1].var
          and item and item.used_values then
@@ -519,6 +522,44 @@ local function taint_of_call(node, item, state, depth)
          elseif state.returns and state.returns[fn]
                and not state.returning[fn] then
             set_union_into(result, return_taint(fn, arg_taints, state, depth))
+         end
+      end
+   end
+
+   -- Cross-file return: a require edge nested in an expression (e.g.
+   -- os.execute(m.id(http.formvalue("h"))) where m.id lives in another file).
+   -- The only local resolution that applies is `node[1].var`, so a call through
+   -- a variable bound to a required module -- m.id(x) -- falls through both
+   -- branches above. When the whole-program pass has wired in a resolver, ask
+   -- it for the target function and follow its return the same way a local or
+   -- field function is followed, just in the target file's state.
+   if not sanitized and state.resolve_external
+         and node.tag == "Call" and node[1] then
+      local fn, target_state, target_path = state.resolve_external(node, item)
+      if fn and target_state.returns and target_state.returns[fn]
+            and not target_state.returning[fn] then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         if looks_like_shell_quote(fn) then
+            -- A quoting helper in another file neutralises the shell sink:
+            -- each argument's taint is quoted rather than propagated raw.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
+            end
+            if state.on_external_return then
+               state.on_external_return(new_set(), arg_taints, target_path)
+            end
+         else
+            local returned = return_taint(fn, arg_taints, target_state, depth + 1)
+            if state.on_external_return then
+               state.on_external_return(returned, arg_taints, target_path)
+            end
+            set_union_into(result, returned)
          end
       end
    end
@@ -1108,6 +1149,7 @@ end
 -- Exposed for the interprocedural pass, which reuses the same propagation.
 taint.new_state = new_state
 taint.of_expr = function(state, node, item) return taint_of_expr(node, item, state, 0) end
+taint.return_taint = return_taint
 taint.callee_path = function(node, item, state) return callee_path(node, item, state, 0) end
 taint.add_value = function(state, value, set)
    local existing = state.value_taint[value]
