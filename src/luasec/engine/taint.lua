@@ -492,29 +492,61 @@ local function taint_of_call(node, item, state, depth)
             if arg.var then formals[#formals + 1] = arg.var end
          end
 
+         -- Context-sensitive bindings: each formal -> its argument's taint.
          local saved = {}
+         local arg_taints = {}
          for i, var in ipairs(formals) do
             saved[i] = state.arg_binding[var]
             local arg = arg_nodes[i]
             if arg then
-               state.arg_binding[var] = taint_of_expr(arg, item, state, depth + 1)
+               arg_taints[i] = taint_of_expr(arg, item, state, depth + 1)
             else
-               state.arg_binding[var] = new_set()
+               arg_taints[i] = new_set()
             end
+            state.arg_binding[var] = arg_taints[i]
          end
          state.returning[fn] = true
 
-         local ok, err = pcall(function()
-            for _, r in ipairs(state.returns[fn]) do
-               set_union_into(result, taint_of_expr(r.node, r.item, state, depth + 1))
+         -- Cache key: sorted descriptor ids of each bound argument, joined
+         -- by formals with ";", so the same argument taint rebinds at once.
+         local parts = {}
+         for i, var in ipairs(formals) do
+            local ids = {}
+            for _, d in pairs(arg_taints[i]) do ids[#ids + 1] = d.id end
+            table.sort(ids)
+            parts[i] = table.concat(ids, ",")
+         end
+         local key = table.concat(parts, ";")
+
+         local cached = state.return_cache[fn] and state.return_cache[fn][key]
+         if cached then
+            set_union_into(result, cached)
+         else
+            local ret = new_set()
+            local ok, err = pcall(function()
+               for _, r in ipairs(state.returns[fn]) do
+                  set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
+               end
+            end)
+            if not ok then
+               state.returning[fn] = nil
+               for i, var in ipairs(formals) do
+                  state.arg_binding[var] = saved[i]
+               end
+               error(err)
             end
-         end)
+            -- Store a copy so later mutation of result cannot corrupt the cache.
+            local copy = new_set()
+            for _, d in pairs(ret) do copy[d.id] = d end
+            if not state.return_cache[fn] then state.return_cache[fn] = {} end
+            state.return_cache[fn][key] = copy
+            set_union_into(result, ret)
+         end
 
          state.returning[fn] = nil
          for i, var in ipairs(formals) do
             state.arg_binding[var] = saved[i]
          end
-         if not ok then error(err) end
       end
    end
 
@@ -781,6 +813,9 @@ end
 local function propagate(chstate, state, opts)
    for _ = 1, MAX_ITERATIONS do
       local changed = false
+      -- Cached return taint is only valid for the current value_taint snapshot:
+      -- taint only grows, so a cached answer computed before growth may be stale.
+      state.return_cache = {}
 
       for _, line in ipairs(chstate.lines) do
          for _, item in ipairs(line.items) do
@@ -907,6 +942,10 @@ function taint.run(chstate, opts, existing_state)
    -- returning[fn] = true while we are mid-evaluation of fn's returns, so a
    -- recursive call cannot descend into itself.
    state.returning = state.returning or {}
+   -- return_cache: fn -> { [argkey] = taint_set }, memoising a function's
+   -- return taint for a given binding of its arguments. Cleared every
+   -- propagate iteration so cached answers cannot outlive value_taint growth.
+   state.return_cache = state.return_cache or {}
 
    if state.approx then
       -- One forward pass. No loops, no closures, no reaching definitions: enough
