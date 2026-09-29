@@ -18,6 +18,8 @@ local whole_program = require "luasec.engine.whole_program"
 local rawscan = require "luasec.rules.rawscan"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
+local render = require "luasec.report.render"
+local report_contract = require "luasec.report.findings"
 
 local api = {}
 
@@ -729,6 +731,18 @@ function api.analyze(paths, opts)
    end
 
    return sort_findings(findings)
+end
+
+--- Render a report in the named format.
+--
+-- `report` is the raw findings list `check_source` and `analyze` return: it is
+-- normalized against the report contract before rendering, so a caller does not
+-- have to project findings onto it first. `name` is one of `"plain"`, `"json"`,
+-- `"sarif"` or `"html"`; any other name returns nil plus the same "unknown
+-- format" message the command line uses. Returns the rendered report, without a
+-- trailing newline (the CLI's `emit` is what adds one).
+function api.format(report, name, opts)
+   return render.render(report_contract.normalize(report), name, opts)
 end
 
 --- Decide whether a Lua payload actually achieves execution.
