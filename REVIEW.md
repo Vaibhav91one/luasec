@@ -163,15 +163,16 @@ Not reported. A factory whose name contains neither `uci` nor a trailing
 `cursor` is invisible to the credential rule. This is the same direction as the
 losses in section 4 — a credential that should be reported and is not — and it
 is *known* rather than suspected. Fixing it means return-value flow inside the
-secrets rule, which is the same machinery the whole-program pass lacks
-(section 7.2).
+secrets rule; return-value flow now exists for taint (section 7.2) but the
+secrets rule does not use it yet.
 
-### 7.2 No taint through a return value
+### 7.2 No taint through a return value (fixed)
 
-`function M.id(x) return x end` is opaque, with and without `--whole-program`.
-Documented in `--help` and in the out-of-scope list. Firmware that pipes request
-data through such a helper is missed. This is the largest *known* coverage gap in
-the tool and it has never been implemented.
+Fixed. PR #49 made taint follow the return value of a local function
+(`local function id(x) return x end`), and PR #56 extended it to a module field
+(`function M.id(x) return x end`, so `os.execute(M.id(io.read()))` reports 709)
+and, under `--whole-program`, across files: `local u = require "util";
+os.execute(u.id(io.read()))` reports 709 with the flag and 701 without it.
 
 ### 7.3 The measurement still cannot see the class of defect that has been most
 common
@@ -228,6 +229,11 @@ me, using the same repository and the same understanding of what mattered. That
 is genuine adversarial review — it found roughly thirty defects I had missed, and
 it found them without my help — but it is not the same as a security researcher
 who did not already believe the tool works. I would not represent it as one.
+
+After the nine rounds, one further round ran with independent AI agents with no
+part in writing the code, and its findings were fixed in PRs #61, #62, #63,
+#68, #70, #71, #72, #73 and #74. That round was still AI review, not a human
+outside the project.
 
 ## 8. What I am unsure about, in order
 
