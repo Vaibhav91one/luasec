@@ -384,6 +384,7 @@ local function capture(interpreter, program, limits, token)
    end
 
    local command = "(\n" .. table.concat(lines, "\n") .. "\n) 2>/dev/null"
+   -- luasec: ignore 702  the command is built from quoted, sandboxed fragments, not from request data
    local pipe = io.popen(command, "r")
    if not pipe then return "" end
    local output = pipe:read("*a")

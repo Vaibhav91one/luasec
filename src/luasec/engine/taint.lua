@@ -875,6 +875,25 @@ local function check_sink(node, item, state, chstate, opts)
    end
 end
 
+-- Walk an expression and run shape + sink checks on every Call/Invoke node it
+-- contains, including calls nested inside arguments. A Function body is its
+-- own chstate line with its own items and is not walked from here: descending
+-- into one would re-check the same calls from outside their scope.
+local function check_calls_in(expr, item, state, chstate, opts, depth)
+   depth = depth or 0
+   if depth > 64 or type(expr) ~= "table" then return end
+   if expr.tag == "Function" then return end
+   if expr.tag == "Call" or expr.tag == "Invoke" then
+      check_shape(expr, item, state, chstate, opts)
+      check_sink(expr, item, state, chstate, opts)
+   end
+   for _, child in ipairs(expr) do
+      if type(child) == "table" then
+         check_calls_in(child, item, state, chstate, opts, depth + 1)
+      end
+   end
+end
+
 code_confidence = function(code)
    local spec = codes.get(code)
    return spec and spec.confidence or "medium"
@@ -905,6 +924,13 @@ local function propagate(chstate, state, opts)
             local tag = item.tag
 
             if tag == "Local" or tag == "Set" or tag == "OpSet" then
+               -- Check every RHS expression for calls and invokes used as
+               -- values (e.g. `local f = loadstring(x)`), so sinks are
+               -- found wherever their result is consumed.
+               for _, rhs_node in ipairs(item.rhs or {}) do
+                  check_calls_in(rhs_node, item, state, chstate, opts)
+               end
+
                -- Field writes (`M.cmd = x`) never appear in set_variables, because
                -- only plain locals get a value object there.
                for index, lhs_node in ipairs(item.lhs or {}) do
@@ -964,10 +990,7 @@ local function propagate(chstate, state, opts)
                end
             elseif tag == "Eval" then
                local node = item.node
-               if node and (node.tag == "Call" or node.tag == "Invoke") then
-                  check_shape(node, item, state, chstate, opts)
-                  check_sink(node, item, state, chstate, opts)
-               end
+               check_calls_in(node, item, state, chstate, opts)
                if node then
                   record_table_write(node, nil, item, state, 0)
                end
@@ -1071,6 +1094,9 @@ function taint.run(chstate, opts, existing_state)
       for _, line in ipairs(chstate.lines) do
          for _, item in ipairs(line.items) do
             if item.tag == "Local" or item.tag == "Set" or item.tag == "OpSet" then
+               for _, rhs_node in ipairs(item.rhs or {}) do
+                  check_calls_in(rhs_node, item, state, chstate, opts)
+               end
                for index, lhs_node in ipairs(item.lhs or {}) do
                   local written = item.rhs and item.rhs[index]
                   if written and lhs_node.var then
@@ -1087,10 +1113,7 @@ function taint.run(chstate, opts, existing_state)
                end
             elseif item.tag == "Eval" then
                local node = item.node
-               if node and (node.tag == "Call" or node.tag == "Invoke") then
-                  check_shape(node, item, state, chstate, opts)
-                  check_sink(node, item, state, chstate, opts)
-               end
+               check_calls_in(node, item, state, chstate, opts)
             end
          end
       end
