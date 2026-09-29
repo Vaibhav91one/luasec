@@ -128,7 +128,12 @@ reproducible.
 | 801-805 | artifact / bytecode |
 | 901-903 | meta (parse failed, unsupported dialect, dialect mismatch) |
 
-Codes 0xx-6xx belong to luacheck. Do not use them.
+The 0xx-6xx range is luacheck's vocabulary and a luasec code must not collide with
+one it uses. The reserved set is enumerated in
+`test/spec/rules_catalogue_spec.lua` and a spec fails the build on a collision.
+`012` is the one luasec code in that range: luasec sat on 021, which is
+luacheck's, so a finding meant one thing in this tool's output and another in
+luacheck's.
 
 Every code carries `severity` (critical/high/medium/low), `confidence`
 (certain/high/medium/low), and `cwe` where a CWE applies. Codes are registered in

@@ -1,8 +1,14 @@
 # Rule catalogue
 
 Every finding carries a stable three-digit code, a severity, a confidence and,
-where one applies, a CWE reference. Codes in the 0xx-6xx range belong to
-[luacheck](https://github.com/lunarmodules/luacheck) and are never reused here.
+where one applies, a CWE reference.
+
+The 0xx-6xx range is [luacheck](https://github.com/lunarmodules/luacheck)'s
+vocabulary and a code in it is never reused here - a spec fails the build on a
+collision with the reserved set. The one exception is `012`, which is luasec's
+and was not always: the suppression-directive code sat on `021`, which is
+luacheck's, so the same finding meant one thing in this report and another in
+luacheck's.
 
 Severity: `critical`, `high`, `medium`, `low`.
 Confidence: `certain` (the data flow is unambiguous), `high`, `medium` (heuristic
