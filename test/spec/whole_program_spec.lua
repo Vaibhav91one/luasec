@@ -605,6 +605,56 @@ describe("whole-program mode: the module shapes firmware uses", function()
    end)
 end)
 
+describe("whole-program mode: a required module's function return is followed", function()
+   it("follows a module field return bound to a local before use", function()
+      local states = states_for("cross_return/handler_local.lua", "cross_return/idmod.lua")
+      local findings = whole_program.analyze(states, {whole_program = true})
+
+      assert_equal(codes(findings), "709")
+      local finding = only(findings, "709")
+      assert_true(finding.file:match("handler_local.lua$"),
+         "the sink is in handler_local.lua, so the finding lives there")
+   end)
+
+   it("follows a module field return used as a nested call argument", function()
+      local states = states_for("cross_return/handler_nested.lua", "cross_return/idmod.lua")
+      local findings = whole_program.analyze(states, {whole_program = true})
+
+      assert_equal(codes(findings), "709")
+      local finding = only(findings, "709")
+      assert_true(finding.trace[1].file:match("handler_nested.lua$"),
+         "http.formvalue is read in handler_nested.lua")
+      local seen_idmod = false
+      for _, f in ipairs(finding.whole_program.files) do
+         if f:match("idmod.lua$") then seen_idmod = true end
+      end
+      assert_true(seen_idmod,
+         "the flow crossed into idmod.lua and the finding must name it")
+   end)
+
+   it("stays silent when the only call across the boundary is a constant", function()
+      local states = states_for("cross_return/handler_constant.lua", "cross_return/idmod.lua")
+      local findings = whole_program.analyze(states, {whole_program = true})
+
+      assert_equal(codes(findings), "",
+         "a constant argument through the identity field must not produce 709")
+   end)
+
+   it("does not let a cross-file quoting helper raise a 712", function()
+      local states = states_for("cross_return/handler_quote.lua", "cross_return/idmod.lua")
+      local findings = whole_program.analyze(states, {whole_program = true})
+
+      for _, finding in ipairs(findings) do
+         assert_true(finding.code ~= "712",
+            "a quoting helper in a module must not raise 712: " .. tostring(finding.code))
+         if finding.code == "709" then
+            assert_equal(finding.sanitizer, "shell-quoted",
+               "the finding should say the data crossed a quoting helper")
+         end
+      end
+   end)
+end)
+
 describe("whole-program mode through the public API", function()
    -- Writes into a directory named for the test, so one spec's files cannot be
    -- resolved by another's.

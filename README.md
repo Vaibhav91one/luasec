@@ -77,10 +77,14 @@ this corpus will not notice, which has happened more than once.
 Stated plainly, because a security tool that overstates its coverage is worse
 than one that does not have the feature.
 
-- **Taint follows a local function's return value, not a module field's.** A
-  local `id` that hands its argument back — `local function id(x) return x end` —
-  is followed, so `os.execute(id(http.formvalue("h")))` is reported. A module
-  field (`M.id`) and a cross-file return are not followed: that flow is missed.
+- **Taint follows a function's return value, in one file and, with
+  `--whole-program`, across files.** A local `id` or a module field `M.id` in the
+  same file that hands its argument back is followed, so
+  `os.execute(id(http.formvalue("h")))` is reported. With `--whole-program`, the
+  return value of a function in a module bound with `local m = require "mod"`
+  (e.g. `m.id(x)`) is followed too. A method call (`M:m`), a function passed as a
+  value, and a `require(...)` called inline inside an expression are not: that
+  flow is missed.
 - **A call that returns a cursor is opaque to the credential rule.** A factory
   named `open_section()` that returns `uci.cursor()` is not recognised as a
   config handle, so a credential written through it is not reported.
@@ -165,7 +169,7 @@ sink or the sandbox had to stop it, and `2` means no verdict could be produced.
 
 ```sh
 make            # build Lua 5.4.9, fetch pinned luacheck, run the specs
-make test       # 591 specs
+make test       # 601 specs
 make ci-verify  # the full gate, including the corpus measurement
 make corpus     # clone the firmware corpora (network, gitignored)
 ```

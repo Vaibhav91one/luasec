@@ -413,6 +413,65 @@ os.execute(r(http.formvalue("h")))
       assert_true(table.concat(found, ","):find("709", 1, true),
          "the fan-out chain must still report 709: " .. table.concat(found, ","))
    end)
+
+    it("follows a tainted value out of a local function bound to a module field", function()
+       local report = api.check_source([[
+       local M = {}
+       function M.id(x) return x end
+       os.execute(M.id(http.formvalue("h")))
+       ]])
+       local found = {}
+       for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+       assert_true(table.concat(found, ","):find("709", 1, true),
+          "a module field returning its argument must not hide the flow: " .. table.concat(found, ","))
+       assert_true(table.concat(found, ","):find("708", 1, true) == nil,
+          "no exposure when the source is visible through the module field: " .. table.concat(found, ","))
+    end)
+
+    it("follows a tainted value out of a module field assigned with an anonymous function", function()
+       local report = api.check_source([[
+       local M = {}
+       M.id = function(x) return x end
+       os.execute(M.id(http.formvalue("h")))
+       ]])
+       local found = {}
+       for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+       assert_true(table.concat(found, ","):find("709", 1, true),
+          "M.id = function(x) return x end must not hide the flow: " .. table.concat(found, ","))
+    end)
+
+    it("recognizes a shell quoting helper defined as a module field", function()
+       local report = api.check_source([[
+       local M = {}
+        function M.q(s) return "'" .. tostring(s):gsub("'", "'\\\\''") .. "'" end
+       os.execute("echo " .. M.q(http.formvalue("h")))
+       ]])
+       local found = {}
+       for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+       assert_true(not table.concat(found, ","):find("712", 1, true),
+          "a quoting field helper neutralizes the shell sink: " .. table.concat(found, ","))
+       assert_equal(report[1].sanitizer, "shell-quoted",
+          "the finding should say the data crossed a quoting helper")
+    end)
+
+    it("follows only the shadowed local M whose field returns its argument", function()
+       local report = api.check_source([[
+       local M = {}
+       function M.id(x) return "safe" end
+       os.execute(M.id(http.formvalue("h")))
+       local M = {}
+       function M.id(x) return x end
+       os.execute(M.id(http.formvalue("h")))
+       ]])
+       local found = {}
+       for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+       assert_true(table.concat(found, ","):find("709", 1, true),
+          "only the call through the x-returning shadow reports 709: " .. table.concat(found, ","))
+       -- The "safe"-returning shadow must not produce its own 709.
+       local count = 0
+       for _, code in ipairs(found) do if code == "709" then count = count + 1 end end
+       assert_equal(count, 1, "exactly one 709 from the x-returning shadow: " .. table.concat(found, ","))
+    end)
 end)
 
 describe("sources beyond HTTP", function()

@@ -6,9 +6,11 @@
 --
 -- Sources introduce taint at a call site. Propagation moves it through
 -- concatenation, assignments, table fields, string/table library calls and
--- the return value of a local function (the function and its returns live in
--- the same file). A module field (M.id) and a cross-file return are not
--- followed. Sinks consume it and produce findings.
+-- the return value of a function the analyzer can identify in the same file:
+-- a local function, and a module field (M.id) in that same file. Under
+-- --whole-program a required module's function return is followed too. What is
+-- not followed: a method call (M:m), a function passed as a value, and
+-- anything past the depth cap. Sinks consume taint and produce findings.
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
@@ -23,7 +25,7 @@ local SHELL_METACHARS = "; | & $ ` ( ) < > newline"
 
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
-local emit, check_sink, build_trace, snippet_at, code_confidence
+local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint
 
 -- ------------------------------------------------------------ taint sets
 -- A taint set is a set of descriptors keyed by id so union is cheap and
@@ -473,8 +475,9 @@ local function taint_of_call(node, item, state, depth)
    -- the function's return expressions as context-sensitive bindings. A guard
    -- on state.returning[fn] prevents unbounded recursion on a function that
    -- returns its own call.
-   -- ponytail: local functions only; a module field (M.id) and cross-file
-   -- returns are not followed.
+   -- ponytail: a module field (M.id) in the same file is followed too;
+   -- a cross-file return is not (that needs --whole-program's
+   -- resolve_external).
    if not sanitized and node.tag == "Call"
          and node[1] and node[1].tag == "Id" and node[1].var
          and item and item.used_values then
@@ -487,65 +490,76 @@ local function taint_of_call(node, item, state, depth)
       end
       if fn and state.returns and state.returns[fn] and not state.returning[fn] then
          local arg_nodes = args_of(node)
-         local formals = {}
-         for _, arg in ipairs(fn[1] or {}) do
-            if arg.var then formals[#formals + 1] = arg.var end
-         end
-
-         -- Context-sensitive bindings: each formal -> its argument's taint.
-         local saved = {}
          local arg_taints = {}
-         for i, var in ipairs(formals) do
-            saved[i] = state.arg_binding[var]
-            local arg = arg_nodes[i]
-            if arg then
-               arg_taints[i] = taint_of_expr(arg, item, state, depth + 1)
-            else
-               arg_taints[i] = new_set()
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         set_union_into(result, return_taint(fn, arg_taints, state, depth))
+      end
+   elseif not sanitized and node.tag == "Call"
+         and node[1] and node[1].tag == "Index"
+         and node[1][1] and node[1][1].tag == "Id" and node[1][1].var
+         and node[1][2] and node[1][2].tag == "String"
+         and state and state.field_functions then
+      -- A module field (M.id) in this same file: resolve it to its function
+      -- value, if there is exactly one.
+      local fn = (state.field_functions[node[1][1].var] or {})[node[1][2][1]]
+      if fn then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         if looks_like_shell_quote(fn) then
+            -- A quoting field helper neutralizes the shell sink: each argument's
+            -- taint is quoted rather than propagated raw, and the return is not
+            -- followed so the sink marks the call shell-quoted.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
             end
-            state.arg_binding[var] = arg_taints[i]
+         elseif state.returns and state.returns[fn]
+               and not state.returning[fn] then
+            set_union_into(result, return_taint(fn, arg_taints, state, depth))
          end
-         state.returning[fn] = true
+      end
+   end
 
-         -- Cache key: sorted descriptor ids of each bound argument, joined
-         -- by formals with ";", so the same argument taint rebinds at once.
-         local parts = {}
-         for i, var in ipairs(formals) do
-            local ids = {}
-            for _, d in pairs(arg_taints[i]) do ids[#ids + 1] = d.id end
-            table.sort(ids)
-            parts[i] = table.concat(ids, ",")
+   -- Cross-file return: a require edge nested in an expression (e.g.
+   -- os.execute(m.id(http.formvalue("h"))) where m.id lives in another file).
+   -- The only local resolution that applies is `node[1].var`, so a call through
+   -- a variable bound to a required module -- m.id(x) -- falls through both
+   -- branches above. When the whole-program pass has wired in a resolver, ask
+   -- it for the target function and follow its return the same way a local or
+   -- field function is followed, just in the target file's state.
+   if not sanitized and state.resolve_external
+         and node.tag == "Call" and node[1] then
+      local fn, target_state, target_path = state.resolve_external(node, item)
+      if fn and target_state.returns and target_state.returns[fn]
+            and not target_state.returning[fn] then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
          end
-         local key = table.concat(parts, ";")
-
-         local cached = state.return_cache[fn] and state.return_cache[fn][key]
-         if cached then
-            set_union_into(result, cached)
+         if looks_like_shell_quote(fn) then
+            -- A quoting helper in another file neutralises the shell sink:
+            -- each argument's taint is quoted rather than propagated raw.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
+            end
+            if state.on_external_return then
+               state.on_external_return(new_set(), arg_taints, target_path)
+            end
          else
-            local ret = new_set()
-            local ok, err = pcall(function()
-               for _, r in ipairs(state.returns[fn]) do
-                  set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
-               end
-            end)
-            if not ok then
-               state.returning[fn] = nil
-               for i, var in ipairs(formals) do
-                  state.arg_binding[var] = saved[i]
-               end
-               error(err)
+            local returned = return_taint(fn, arg_taints, target_state, depth + 1)
+            if state.on_external_return then
+               state.on_external_return(returned, arg_taints, target_path)
             end
-            -- Store a copy so later mutation of result cannot corrupt the cache.
-            local copy = new_set()
-            for _, d in pairs(ret) do copy[d.id] = d end
-            if not state.return_cache[fn] then state.return_cache[fn] = {} end
-            state.return_cache[fn][key] = copy
-            set_union_into(result, ret)
-         end
-
-         state.returning[fn] = nil
-         for i, var in ipairs(formals) do
-            state.arg_binding[var] = saved[i]
+            set_union_into(result, returned)
          end
       end
    end
@@ -586,6 +600,75 @@ taint_of_expr = function(node, item, state, depth)
    end
 
    return new_set()
+end
+
+-- Evaluate a function's return taint given the taint of its call-site arguments.
+-- Binds each formal parameter to its argument's taint (context-sensitive), walks
+-- the function's recorded return expressions, memoises the result, and restores
+-- the caller's binding state. Returns a new taint set.
+return_taint = function(fn, arg_taints, state, depth)
+   local result = new_set()
+   if not (fn and state.returns and state.returns[fn]) or state.returning[fn] then
+      return result
+   end
+
+   local formals = {}
+   for _, arg in ipairs(fn[1] or {}) do
+      if arg.var then formals[#formals + 1] = arg.var end
+   end
+
+   -- Context-sensitive bindings: each formal -> its argument's taint.
+   local saved = {}
+   for i, var in ipairs(formals) do
+      saved[i] = state.arg_binding[var]
+      local arg_taint = arg_taints[i]
+      if not arg_taint then arg_taint = new_set() end
+      state.arg_binding[var] = arg_taint
+   end
+   state.returning[fn] = true
+
+   -- Cache key: sorted descriptor ids of each bound argument, joined
+   -- by formals with ";", so the same argument taint rebinds at once.
+   local parts = {}
+   for i, var in ipairs(formals) do
+      local ids = {}
+      for _, d in pairs(arg_taints[i] or new_set()) do ids[#ids + 1] = d.id end
+      table.sort(ids)
+      parts[i] = table.concat(ids, ",")
+   end
+   local key = table.concat(parts, ";")
+
+   local cached = state.return_cache[fn] and state.return_cache[fn][key]
+   if cached then
+      set_union_into(result, cached)
+   else
+      local ret = new_set()
+      local ok, err = pcall(function()
+         for _, r in ipairs(state.returns[fn]) do
+            set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
+         end
+      end)
+      if not ok then
+         state.returning[fn] = nil
+         for i, var in ipairs(formals) do
+            state.arg_binding[var] = saved[i]
+         end
+         error(err)
+      end
+      -- Store a copy so later mutation of result cannot corrupt the cache.
+      local copy = new_set()
+      for _, d in pairs(ret) do copy[d.id] = d end
+      if not state.return_cache[fn] then state.return_cache[fn] = {} end
+      state.return_cache[fn][key] = copy
+      set_union_into(result, ret)
+   end
+
+   state.returning[fn] = nil
+   for i, var in ipairs(formals) do
+      state.arg_binding[var] = saved[i]
+   end
+
+   return result
 end
 
 -- Record taint written into a table constructor or a field assignment.
@@ -916,6 +999,7 @@ function taint.run(chstate, opts, existing_state)
    -- re-runs propagation), so build this lazily and cache it on the state.
    if not state.returns then
       state.returns = {}
+      state.field_functions = {}
       for _, line in ipairs(chstate.lines) do
          if line.node and line.node.tag == "Function" then
             local exprs = {}
@@ -932,6 +1016,39 @@ function taint.run(chstate, opts, existing_state)
                end
             end
             state.returns[line.node] = exprs
+         end
+
+         -- Index a module field's function value, so a call through a field
+         -- access (M.id(...)) can follow the same local-function return taint
+         -- as a plain local call (id(...)). A var/key with two different
+         -- function definitions is ambiguous and recorded as false so it is
+         -- not followed.
+         for _, item in ipairs(line.items) do
+            if item.tag == "Set" or item.tag == "Local" then
+               for i = 1, #(item.lhs or {}) do
+                  local lhs_node = item.lhs[i]
+                  if lhs_node and lhs_node.tag == "Index"
+                        and lhs_node[1] and lhs_node[1].tag == "Id"
+                        and lhs_node[1].var
+                        and lhs_node[2] and lhs_node[2].tag == "String"
+                        and item.rhs then
+                     local rhs_node = item.rhs[i]
+                     if rhs_node and rhs_node.tag == "Function" then
+                        local per_var = state.field_functions[lhs_node[1].var]
+                        if not per_var then
+                           per_var = {}
+                           state.field_functions[lhs_node[1].var] = per_var
+                        end
+                        local key = lhs_node[2][1]
+                        if per_var[key] == nil then
+                           per_var[key] = rhs_node
+                        elseif per_var[key] ~= rhs_node then
+                           per_var[key] = false
+                        end
+                     end
+                  end
+               end
+            end
          end
       end
    end
@@ -1032,6 +1149,7 @@ end
 -- Exposed for the interprocedural pass, which reuses the same propagation.
 taint.new_state = new_state
 taint.of_expr = function(state, node, item) return taint_of_expr(node, item, state, 0) end
+taint.return_taint = return_taint
 taint.callee_path = function(node, item, state) return callee_path(node, item, state, 0) end
 taint.add_value = function(state, value, set)
    local existing = state.value_taint[value]

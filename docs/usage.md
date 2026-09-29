@@ -359,8 +359,11 @@ before analysis.
 By default each file is analyzed in isolation. `--whole-program` follows `require`
 edges across files and passes taint into a required module's parameters. A local
 function's return value is also followed — `local function id(x) return x end`
-hands taint through — but a module field (`M.id`) and a cross-file return are
-not: a function that hands its argument back is opaque across files.
+hands taint through — and under `--whole-program` the return value of a function in
+a module bound with `local m = require "mod"` (e.g. `m.id(x)`) is followed too.
+A method call (`M:m`), a function passed as a value, and a `require(...)` called
+inline inside an expression are not: a function that hands its argument back is
+opaque across files in those shapes.
 
 ```sh
 bin/luasec --whole-program --std +luci test/fixtures/whole_program/cross_file/
@@ -378,8 +381,10 @@ are in different files, and without cross-file resolution the sink is reported
 as `708` only if the sink is in an exported function and nothing in the file
 feeds it — or nothing at all.
 
-`--whole-program` is slower and opt-in. It resolves calls across files but does
-not follow a module field or a cross-file return.
+`--whole-program` is slower and opt-in. It resolves calls across files and follows
+the return value of a function in a module bound with `local m = require "mod"`,
+but does not follow a method call (`M:m`), a function passed as a value, or a
+`require(...)` called inline inside an expression.
 
 ## `--validate`
 
