@@ -7,8 +7,8 @@ local codes = require "luasec.rules.codes"
 local degraded = require "luasec.rules.degraded"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
-local sarif = require "luasec.report.sarif"
 local report_contract = require "luasec.report.findings"
+local render = require "luasec.report.render"
 local validate_report = require "luasec.validate.report"
 local version = require "luasec.version"
 
@@ -141,24 +141,15 @@ end
 -- Every format is rendered from the contract, not from the engine's raw
 -- findings, so `plain`, `json`, `sarif` and `html` cannot disagree about what a
 -- finding is or in what order it appears. `list` is an already normalized list
--- when the caller has one, which is how a baseline run can render its own.
-local function render(list, format, opts)
-   list = list or report_contract.normalize(list)
-   if format == "json" then
-      return json.encode(report_contract.document(list))
-   elseif format == "sarif" then
-      return sarif.render(list, opts)
-   elseif format == "html" then
-      return require("luasec.report.html").render(list, opts)
-   end
-   return plain.render(list, opts)
-end
+-- when the caller has one, which is how a baseline run can render its own; the
+-- renderer renders it as given, so the per-finding status a baseline carries
+-- is not dropped by re-normalizing.
 
 -- Write the report where the caller asked for it. Kept in one place because the
 -- baseline path and the ordinary path must obey the same -o and --quiet
 -- contract, or a report that only appears on one of them is worse than neither.
 local function emit(list, format, opts)
-   local output = render(list, format, opts)
+   local output = render.render(list, format, opts)
 
    if opts.output then
       local handle, open_error = io.open(opts.output, "wb")
