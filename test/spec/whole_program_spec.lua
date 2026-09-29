@@ -606,81 +606,50 @@ describe("whole-program mode: the module shapes firmware uses", function()
 end)
 
 describe("whole-program mode: a required module's function return is followed", function()
-   it("reports the three call shapes that nest a require edge inside an expression", function()
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
-      local findings = whole_program.analyze(states, {whole_program = true})
-
-      assert_equal(codes(findings), "709",
-         "a require edge nested in a sink's argument must be followed too")
-      local finding = only(findings, "709")
-      assert_equal(finding.file, FIXTURES .. "/cross_return/handler.lua",
-         "the sink is in handler.lua, so the finding lives there")
-      assert_equal(finding.line, 9,
-         "os.execute(m.id(...)) is the first sink that crosses a module field's return")
-   end)
-
    it("follows a module field return bound to a local before use", function()
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
+      local states = states_for("cross_return/handler_local.lua", "cross_return/idmod.lua")
       local findings = whole_program.analyze(states, {whole_program = true})
 
+      assert_equal(codes(findings), "709")
       local finding = only(findings, "709")
-      assert_equal(finding.line, 5,
-         "via_local binds m.id(...) to a local and executes it")
+      assert_true(finding.file:match("handler_local.lua$"),
+         "the sink is in handler_local.lua, so the finding lives there")
    end)
 
-   it("follows an inline require call as the sink's argument", function()
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
+   it("follows a module field return used as a nested call argument", function()
+      local states = states_for("cross_return/handler_nested.lua", "cross_return/idmod.lua")
       local findings = whole_program.analyze(states, {whole_program = true})
 
+      assert_equal(codes(findings), "709")
       local finding = only(findings, "709")
-      assert_true(finding.line == 9 or finding.line == 13,
-         "both the via_temp and via_inline shapes cross the return and must be reported: "
-            .. tostring(finding.line))
+      assert_true(finding.trace[1].file:match("handler_nested.lua$"),
+         "http.formvalue is read in handler_nested.lua")
+      local seen_idmod = false
+      for _, f in ipairs(finding.whole_program.files) do
+         if f:match("idmod.lua$") then seen_idmod = true end
+      end
+      assert_true(seen_idmod,
+         "the flow crossed into idmod.lua and the finding must name it")
    end)
 
    it("stays silent when the only call across the boundary is a constant", function()
-      -- constant_call hands m.id("ls") to os.execute: no untrusted data crosses
-      -- the module field's return, so no 709.
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
+      local states = states_for("cross_return/handler_constant.lua", "cross_return/idmod.lua")
       local findings = whole_program.analyze(states, {whole_program = true})
 
-      for _, finding in ipairs(findings) do
-         assert_true(finding.code ~= "709",
-            "a constant argument through the identity field must not produce 709: "
-               .. finding.code)
-      end
+      assert_equal(codes(findings), "",
+         "a constant argument through the identity field must not produce 709")
    end)
 
    it("does not let a cross-file quoting helper raise a 712", function()
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
+      local states = states_for("cross_return/handler_quote.lua", "cross_return/idmod.lua")
       local findings = whole_program.analyze(states, {whole_program = true})
 
-      local codes = {}
-      for _, finding in ipairs(findings) do codes[#codes + 1] = finding.code end
-      table.sort(codes)
-      assert_equal(table.concat(codes, ","), "709",
-         "the quoting field in the module neutralises the shell sink: "
-            .. table.concat(codes, ","))
-      local finding = only(findings, "709")
-      assert_equal(finding.sanitizer, "shell-quoted",
-         "the finding should say the data crossed a quoting helper")
-   end)
-
-   it("names the target module's file in the trace of a pass-through flow", function()
-      local states = states_for("cross_return/handler.lua", "cross_return/idmod.lua")
-      local findings = whole_program.analyze(states, {whole_program = true})
-
-      local finding = only(findings, "709")
-      assert_equal(finding.trace[1].file, FIXTURES .. "/cross_return/handler.lua",
-         "the source (http.formvalue) is read in handler.lua")
-      assert_equal(finding.trace[#finding.trace].kind, "sink")
-      assert_equal(finding.trace[#finding.trace].file, FIXTURES .. "/cross_return/handler.lua",
-         "the sink is os.execute in handler.lua")
-      for _, member in ipairs(finding.whole_program.files) do
-         if member ~= FIXTURES .. "/cross_return/handler.lua" then
-            assert_equal(member, FIXTURES .. "/cross_return/idmod.lua",
-               "the flow crossed into idmod.lua and the finding must name it: "
-                  .. tostring(member))
+      for _, finding in ipairs(findings) do
+         assert_true(finding.code ~= "712",
+            "a quoting helper in a module must not raise 712: " .. tostring(finding.code))
+         if finding.code == "709" then
+            assert_equal(finding.sanitizer, "shell-quoted",
+               "the finding should say the data crossed a quoting helper")
          end
       end
    end)

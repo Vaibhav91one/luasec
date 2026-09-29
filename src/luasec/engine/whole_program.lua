@@ -819,6 +819,18 @@ local function annotate(finding, file, ctx)
       if hop.approximate then approximate[#approximate + 1] = hop.path end
    end
 
+   -- A flow that crossed a required module's return names that module's file.
+   if ctx.via and type(sources) == "table" then
+      for _, descriptor in ipairs(sources) do
+         local via = ctx.via[descriptor.id]
+         if via then
+            local seen = false
+            for _, p in ipairs(paths) do if p == via then seen = true end end
+            if not seen then paths[#paths + 1] = via end
+         end
+      end
+   end
+
    local notes = {}
    if crossed and from then
       notes[#notes + 1] = "untrusted data reached this sink from " .. from
@@ -980,6 +992,57 @@ function whole_program.analyze(states, opts)
    -- so a bound hit in the last round annotates every finding the run produced
    -- rather than only the ones after it.
    local pending = {}
+
+   -- A call whose value is used - os.execute(m.id(x)), local v = m.id(x) - is
+   -- not a statement, so sites_of never sees it and bind never runs. The taint
+   -- engine asks for such a callee through state.resolve_external, and follows
+   -- the target function's return in the target file's own state. Every file
+   -- gets its state first, so no taint run starts inside another file's
+   -- propagation. Only a variable bound to a required module is resolved; a
+   -- require() called inline inside an expression is not.
+   local hooked = {}
+   for _, file in ipairs(files) do
+      if next(file.modules_of_var or {}) then hooked[#hooked + 1] = file end
+   end
+   if #hooked > 0 then
+      for _, file in ipairs(files) do state_of(file, ctx) end
+      for _, file in ipairs(hooked) do
+         local memo = {}
+         file.state.resolve_external = function(call_node)
+            local cached = memo[call_node]
+            if cached == nil then
+               cached = false
+               local resolved = member_of(file, call_node[1])
+               local entry = resolved and (resolved.entry or entry_for(index, resolved.module))
+               local fn = entry and entry.file ~= file and function_for(entry, resolved.member)
+               if fn then cached = {fn, state_of(entry.file, ctx), entry.file.path} end
+               memo[call_node] = cached
+            end
+            if cached then return cached[1], cached[2], cached[3] end
+            return nil
+         end
+         file.state.on_external_return = function(returned, arg_taints, target_path)
+            local from_caller = {}
+            for _, set in ipairs(arg_taints) do
+               for id in pairs(set) do from_caller[id] = true end
+            end
+            ctx.via = ctx.via or {}
+            for id, descriptor in pairs(returned) do
+               if from_caller[id] then
+                  ctx.via[id] = ctx.via[id] or target_path
+               elseif not ctx.origin[descriptor] then
+                  ctx.origin[descriptor] = target_path
+               end
+            end
+         end
+         taint_engine.run(file.chstate, opts, file.state)
+         diagnostics.propagations = diagnostics.propagations + 1
+         for i = file.findings_mark + 1, #file.state.findings do
+            pending[#pending + 1] = {finding = file.state.findings[i], file = file}
+         end
+         file.findings_mark = #file.state.findings
+      end
+   end
 
    while #queue > 0 and rounds < max_rounds do
       rounds = rounds + 1
