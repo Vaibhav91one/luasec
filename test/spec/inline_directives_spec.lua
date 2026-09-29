@@ -179,3 +179,46 @@ describe("every malformed code pattern", function()
       end
    end)
 end)
+
+describe("a suppression pattern with too many repetition quantifiers", function()
+   it("is rejected as 012 before it can backtrack against the 127-byte probe", function()
+      -- Issue #66: a pattern with more than three repetition quantifiers
+      -- (-, *, +, ?) can force Lua's matcher into exponential backtracking
+      -- against the 127-byte probe that is_valid_pattern uses to sanity-check
+      -- readability. `-- luasec: ignore .-.-.-.-.-` costs ~127^k where k is the
+      -- number of quantifiers; k=4 takes seconds, k=5 never returns. The
+      -- pattern must be refused before string.match is ever called, treated as
+      -- unreadable, and the finding it would have hidden stays reported.
+      local source = "-- luasec: ignore .-.-.-.-.-.\nos.execute(cmd)\n"
+      local start = os.clock()
+      local report = api.check_source(source, {std = "luajit"})
+      local elapsed = os.clock() - start
+
+      assert_true(elapsed < 1,
+         ("the probe must not backtrack on a too-complex pattern: %.3fs"):format(elapsed))
+
+      local unreadable, kept = false, false
+      for _, finding in ipairs(report) do
+         if finding.code == "012" then unreadable = true end
+         if finding.code == "701" then kept = true end
+      end
+      assert_true(unreadable,
+         "the too-complex pattern is reported as unreadable: " .. codes(report))
+      assert_true(kept,
+         "the finding the rejected suppression would have hidden is still reported: "
+         .. codes(report))
+   end)
+
+   it("still suppresses with patterns at or under the quantifier and length bounds", function()
+      -- Patterns with three or fewer quantifiers and 64 bytes or fewer must
+      -- still work as before: the guard only refuses what is too complex to run.
+      local forms = {"70[0-9]", "701:os%.execute"}
+      for _, form in ipairs(forms) do
+         local report = api.check_source(
+            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
+         assert_equal(#report, 0,
+            "a bounded suppression still suppresses: " .. form
+            .. " left " .. codes(report))
+      end
+   end)
+end)

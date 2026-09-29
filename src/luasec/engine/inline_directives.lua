@@ -36,7 +36,70 @@ do
    PATTERN_PROBE = table.concat(bytes)
 end
 
+-- Refuse a pattern too complex to run before Lua ever compiles it. The probe
+-- above is 127 bytes; a pattern with k repetition quantifiers that ends in a
+-- character absent from the probe forces backtracking of cost ~127^k: k=4 takes
+-- seconds, k=5 never returns. Rejecting patterns longer than 64 bytes or with
+-- more than three quantifiers (before is_valid_pattern calls string.match) keeps
+-- that from happening. A rejected pattern is treated exactly like one Lua could
+-- not read: reported as 012 and never matched.
+-- Measurement: `.-.-.-.-.<0x7F>` against the 127-byte probe takes 3.7s at k=4
+-- and does not return at k=5; `.-` is quantified by `-` on the preceding item,
+-- and `*`, `+`, `?` likewise quantify the item before them.
+local MAX_PATTERN_LEN = 64
+local MAX_QUANTIFIERS = 3
+
+local QUANT = {["-"] = true, ["*"] = true, ["+"] = true, ["?"] = true}
+
+local function count_quantifiers(pattern)
+   local n = 0
+   local i = 1
+   local len = #pattern
+   while i <= len do
+      local c = pattern:sub(i, i)
+      if c == "%" then
+         -- An escaped item is consumed as a pair: %a, %d, %bxy, etc. A quantifier
+         -- right after an escape is a literal, not a repetition of the escaped
+         -- item, but it is still a character in the pattern, not a quantifier.
+         i = i + 2
+      elseif c == "[" then
+         -- A character class [..] consumes everything up to its closing ].
+         -- Inside a class, -, *, + and ? are range operators or literals,
+         -- never repetition quantifiers. % still escapes.
+         i = i + 1
+         while i <= len do
+            local cc = pattern:sub(i, i)
+            if cc == "%" then
+               i = i + 2
+            elseif cc == "]" then
+               i = i + 1
+               break
+            else
+               i = i + 1
+            end
+         end
+         if i > len then i = len + 1 end  -- unterminated class, Lua will reject
+      else
+         local next_c = pattern:sub(i + 1, i + 1)
+         if c ~= "^" and c ~= "$" and c ~= "(" and c ~= ")"
+            and QUANT[next_c] then
+            n = n + 1
+            i = i + 2
+         else
+            i = i + 1
+         end
+      end
+   end
+   return n
+end
+
 local function is_valid_pattern(pattern)
+   -- Guard before string.match: a pattern too long or too quantified can force
+   -- exponential backtracking against the 127-byte probe. Treat it as unreadable
+   -- so it is reported as 012 and never matched.
+   if #pattern > MAX_PATTERN_LEN or count_quantifiers(pattern) > MAX_QUANTIFIERS then
+      return false
+   end
    if pcall(string.match, PATTERN_PROBE, pattern) then return true end
    -- Anchored, in case the failure only shows up with a fixed subject.
    return (pcall(string.match, PATTERN_PROBE, "^" .. pattern .. "$"))
@@ -100,7 +163,7 @@ function directives.parse(chstate)
                         :format(action, unreadable)}
                end
                found[#found + 1] = {line = line, action = action, patterns = patterns,
-                  push = scoped_by_itself}
+                  push = scoped_by_itself, unreadable = unreadable}
             end
          end
       end
@@ -425,6 +488,17 @@ function directives.reset_unreadable()
 end
 
 local function matches_safely(subject, pattern, line, directive)
+   -- A directive marked unreadable while it was parsed (e.g. a pattern the guard
+   -- rejected for too many quantifiers) is never tried again: running string.match
+   -- on it could backtrack against the 127-byte probe, so it is recorded and
+   -- returned as a non-match without calling Lua.
+   if directive and directive.unreadable then
+      if line then
+         UNREADABLE[line] = pattern
+      end
+      return false
+   end
+
    local ok, result = pcall(string.match, subject, pattern)
    if ok then return result ~= nil end
 
