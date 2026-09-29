@@ -278,3 +278,87 @@ describe("a suppression region and ground we did not cover", function()
       end
    end)
 end)
+
+describe("a severity threshold value that is not a severity", function()
+   it("is a config error and exits 2, naming the valid values", function()
+      -- A typo in --severity-threshold used to slip through: the bad value was
+      -- not in SEVERITY_RANK, so `SEVERITY_RANK[opts.severity_threshold] or 0`
+      -- returned 0, and every finding sat above it. The report came back full of
+      -- findings and the run exited 1 — a config mistake handed to CI as a finding.
+      local out, code = harness.cli({"--severity-threshold", "crtical",
+                                     "test/fixtures/clean/report.lua"})
+      assert_equal(code, 2, out)
+      assert_match(out, "%-%-severity%-threshold", out)
+      assert_match(out, "critical", out)
+      assert_match(out, "high", out)
+      assert_match(out, "medium", out)
+      assert_match(out, "low", out)
+      assert_no_match(out, "stack traceback", out)
+   end)
+end)
+
+describe("a min-confidence value that is not a confidence level", function()
+   it("is a config error and exits 2, naming the valid values", function()
+      -- Same shape as the severity check: a typo in --min-confidence fell through
+      -- to 0 and every finding sat above it, so the confidence filter did nothing
+      -- and the run reported everything.
+      local out, code = harness.cli({"--min-confidence", "hgih",
+                                     "test/fixtures/clean/report.lua"})
+      assert_equal(code, 2, out)
+      assert_match(out, "%-%-min%-confidence", out)
+      assert_match(out, "certain", out)
+      assert_match(out, "high", out)
+      assert_match(out, "medium", out)
+      assert_match(out, "low", out)
+      assert_no_match(out, "stack traceback", out)
+   end)
+end)
+
+describe("a --fail-on value that is not a severity", function()
+   it("is a config error and exits 2, naming the valid values", function()
+      -- --fail-on is a severity floor for the exit code. A typo like "crtical"
+      -- was not in SEVERITY_RANK, so the floor became 0 and the run exited 0
+      -- even on a file with critical findings — a CI green-lighted by a typo.
+      local out, code = harness.cli({"--fail-on", "crtical",
+                                     "test/fixtures/clean/report.lua"})
+      assert_equal(code, 2, out)
+      assert_match(out, "%-%-fail%-on", out)
+      assert_match(out, "critical", out)
+      assert_no_match(out, "stack traceback", out)
+   end)
+end)
+
+describe("--no-dynamic-sinks", function()
+   it("suppresses a dynamic sink with no proven source, but keeps 709 taint", function()
+      -- A sink fed by a non-constant argument that is not proven untrusted is a
+      -- dynamic sink: 701 says "this could be something" but does not name a
+      -- source. --no-dynamic-sinks turns those off, so an operator who only
+      -- wants proven flows does not get noise from every os.execute(arg) guard.
+      --
+      -- But a proven flow — untrusted data reaching the sink — is not a dynamic
+      -- sink and must still be reported: 709 under +luci with http.formvalue as
+      -- the source.
+      local dyn_dir = scratch_dir("nodyn_dyn")
+      local dyn_file = write_file(dyn_dir .. "/d.lua",
+         "local cmd = arg[1]\nos.execute(cmd)\n")
+
+      local dyn_out, dyn_code = harness.cli({
+         "--std", "+openwrt", "--no-dynamic-sinks", dyn_file})
+      assert_equal(dyn_code, 0,
+         "the dynamic 701 was not suppressed:\n" .. dyn_out)
+      assert_no_match(dyn_out, "701", dyn_out)
+
+      local taint_dir = scratch_dir("nodyn_taint")
+      local taint_file = write_file(taint_dir .. "/t.lua",
+         'os.execute("x" .. http.formvalue("h"))\n')
+
+      local taint_out, taint_code = harness.cli({
+         "--std", "+openwrt+luci", "--no-dynamic-sinks", taint_file})
+      assert_equal(taint_code, 1,
+         "the proven 709 was suppressed:\n" .. taint_out)
+      assert_match(taint_out, "709", taint_out)
+
+      rm(dyn_dir)
+      rm(taint_dir)
+   end)
+end)

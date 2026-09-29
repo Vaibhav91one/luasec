@@ -99,6 +99,13 @@ function args.parse(argv)
       end
    end
 
+   -- --no-dynamic-sinks is a CLI-facing name; the engine reads report_dynamic_sinks.
+   -- Translate here so the rest of the pipeline sees the flag it expects, and a
+   -- library caller using report_dynamic_sinks directly is unaffected.
+   if opts.no_dynamic_sinks then
+      opts.report_dynamic_sinks = false
+   end
+
    return opts
 end
 
