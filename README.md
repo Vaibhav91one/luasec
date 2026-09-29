@@ -192,6 +192,7 @@ executed the analyzer over the corpus.
 | | |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | how the pipeline is layered and why |
+| [docs/usage.md](docs/usage.md) | quick-start scan, --std profiles, output formats, CI, --validate |
 | [docs/rules.md](docs/rules.md) | all 40 codes, severity, CWE |
 | [docs/precision.md](docs/precision.md) | the measurement, and what it does not cover |
 | [docs/firmware-stds.md](docs/firmware-stds.md) | what each platform profile declares |
