@@ -10,18 +10,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match =
    harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
-
--- A unique directory under TMPDIR, created eagerly so the path is a directory
--- rather than a name inside one. Nothing here may be written into the repo.
-local scratch_serial = 0
-local function scratch_dir(tag)
-   scratch_serial = scratch_serial + 1
-   local dir = os.getenv("TMPDIR") or "/tmp"
-   dir = dir:gsub("/$", "")
-   dir = ("%s/luasec_cliflag_%s_%d_%d"):format(dir, tag, os.time(), scratch_serial)
-   os.execute("mkdir -p " .. string.format("%q", dir))
-   return dir
-end
+local scratch_dir = harness.scratch_dir
 
 local function write_file(path, text)
    local handle = assert(io.open(path, "w"))
@@ -83,7 +72,7 @@ describe("--only", function()
       -- multi-character pattern matched nothing: --only 70, --only 7 and the
       -- documented --only 70[0-9] all reported an empty tree and exited 0, which
       -- is a clean bill of health for a file with a critical RCE in it.
-      local dir = scratch_dir("only_direction")
+      local dir = scratch_dir("cliflag_only_direction")
       write_file(dir .. "/h.lua", RCE .. "\n")
 
       for _, pattern in ipairs({"709", "70", "7", "70[0-9]"}) do
@@ -102,7 +91,7 @@ describe("--only", function()
       -- nobody can read is a typo in the invocation, so it is exit 2 and the
       -- pattern is named: the in-source directive path had already learned this
       -- and the command line had not.
-      local dir = scratch_dir("only_bad")
+      local dir = scratch_dir("cliflag_only_bad")
       write_file(dir .. "/h.lua", RCE .. "\n")
       local out, code = harness.cli({"--only", "[bad", dir})
       rm(dir)
@@ -164,7 +153,7 @@ describe("--format", function()
       -- tool that was never wrong. A typo in a flag is a config error, like the
       -- numbers -- and the file the operator named must not exist at all, or the
       -- next step of their pipeline reads an empty file and calls it a pass.
-      local dir = scratch_dir("format")
+      local dir = scratch_dir("cliflag_format")
       write_file(dir .. "/h.lua", RCE .. "\n")
       local target = dir .. "/report.json"
 
@@ -188,7 +177,7 @@ describe("a file that could not be read", function()
       -- threshold is a report filter, and --only narrows what the operator wants
       -- to read. None of them is a way to green a run that covered less ground
       -- than it was asked to.
-      local dir = scratch_dir("unreadable")
+      local dir = scratch_dir("cliflag_unreadable")
       local file = write_file(dir .. "/locked.lua", "local x = 1\n")
       os.execute("chmod 000 " .. string.format("%q", file))
       local really_unreadable = unreadable(file)
@@ -230,7 +219,7 @@ describe("a file with no source to read", function()
       -- than as a failure to read the file. The threshold quiets low-severity
       -- findings; the bytecode findings ARE low-severity, and a file that cannot
       -- be read is not a low-severity finding.
-      local dir = scratch_dir("degraded")
+      local dir = scratch_dir("cliflag_degraded")
       local broken = write_file(dir .. "/broken.lua", 'local x = "unterminated\n')
 
       local cases = {
@@ -259,7 +248,7 @@ describe("a suppression region and ground we did not cover", function()
       -- must not print a clean report and exit non-zero, which reads as a
       -- contradiction: "nothing to report" and "here is what I found" cannot both
       -- be true of the same run.
-      local dir = scratch_dir("only_and_locked")
+      local dir = scratch_dir("cliflag_only_and_locked")
       os.execute("mkdir " .. string.format("%q", dir .. "/locked"))
       -- A push/pop region in the file we can read. Its findings are of a code
       -- --only drops, so the only thing left in the report is the coverage gap.
