@@ -22,7 +22,7 @@ We never modify `vendor/`. It is pinned (see `vendor/PINNED`) and checked by
 3. Refactor only while GREEN.
 4. If a test breaks because you renamed a private function, the test was wrong.
 5. Every new warning code needs: registry entry (CWE + severity), a doc row, one
-   firing fixture and one silent fixture.
+   firing fixture and one silent fixture, a docs/rules/<code>.md page (checked by test/spec/rule_docs_spec.lua).
 
 ### Public seams - the only things tests may use
 
