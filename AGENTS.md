@@ -47,10 +47,10 @@ Test names describe behavior, not mechanism:
 ## Layout
 
     src/luasec/
-      api.lua          public entry points and the analysis pipeline
+      api.lua          public entry points
       main.lua         CLI entry
       cli/             args, baseline, walk
-      engine/          parse_context, taint, callgraph, interprocedural, whole_program, inline_directives
+      engine/          pipeline, parse_context, taint, callgraph, interprocedural, whole_program, inline_directives
       rules/           code registry + rule modules
       registry/        platform API registry + firmware std data
       bytecode/        magic sniff, header, prototypes
