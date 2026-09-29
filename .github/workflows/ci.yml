@@ -78,3 +78,27 @@ jobs:
           upload-sarif: "false"
       - name: The action reports a score
         run: test "${{ steps.luasec.outputs.score }}" = "100"
+
+  rock:
+    # The rock is built from this checkout exactly as LuaRocks would build the
+    # release tarball, then run from the LuaRocks tree, not from the repository.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-luarocks@v4
+      - name: Fetch the vendored luacheck
+        run: make vendor
+      - name: Build and install the rock
+        run: luarocks make --local luasec-scanner-*.rockspec
+      - name: The installed command works
+        run: |
+          cd "$RUNNER_TEMP"
+          export PATH="$HOME/.luarocks/bin:$PATH"
+          luasec --version
+          luasec rules explain 709 | head -3
+          printf 'os.execute(io.read())\n' > t.lua
+          set +e; luasec t.lua; status=$?; set -e
+          test "$status" = 1

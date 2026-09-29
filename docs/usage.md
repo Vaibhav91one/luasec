@@ -1,5 +1,24 @@
 # Usage
 
+## Install
+
+From LuaRocks:
+
+```sh
+luarocks install luasec-scanner
+```
+
+The rock is called `luasec-scanner` because the name `luasec` on LuaRocks is
+already taken by the LuaSec TLS binding. The command it installs is still
+`luasec`.
+
+From source:
+
+```sh
+make lua vendor
+bin/luasec --help
+```
+
 ## Install and first scan
 
 `luasec` is a single binary: a shell script at `bin/luasec` that launches a locally
@@ -161,7 +180,7 @@ bin/luasec --format json test/fixtures/tainted_exec/handler.lua
       "trace": [ ... ]
     }
   ],
-  "luasecVersion": "0.1.0",
+  "luasecVersion": "0.2.0",
   "reportVersion": "1.0"
 }
 ```
