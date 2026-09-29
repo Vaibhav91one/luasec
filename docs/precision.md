@@ -31,7 +31,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-146 findings over 566 files, 74 of them carrying at least one (13%), after six
+231 findings over 566 files, 103 of them carrying at least one (18%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
@@ -57,12 +57,14 @@ Hand-audited sample by code:
 | 707 FFI escape | 9 | true: LuaJIT source |
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
-| 709 injection | 3 | true, and the one that matters |
-| 701 shape-only | 3 | true: a sink whose argument the analyzer could not trace |
-| 703 file write | 6 | true: writes outside /tmp and /var/run |
-| 702 env manipulation | 4 | true: setfenv grants and _G metatables |
-| 704 unencrypted transport | 1 | true: a request body over plain HTTP |
-| 705 dynamic require | 5 | true after the rule was un-inverted; see below |
+| 709 injection | 5 | true, and the one that matters |
+| 701 shape-only | 25 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked |
+| 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
+| 702 env manipulation | 22 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
+| 704 unencrypted transport | 17 | true: a request body over plain HTTP, including loadfile/load calls whose result is used |
+| 705 dynamic require | 19 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment |
+| 710 dynamic code | 1 | true: loadstring reached through a wrapper call (assert(loadstring(...))) |
+| 712 partial quote | 1 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression |
 | 725 env escape | 1 | true after 725 was narrowed from every setfenv to the dangerous ones |
 
 ## What the corpus fixed
