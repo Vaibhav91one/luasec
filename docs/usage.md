@@ -520,6 +520,38 @@ Luasec traced untrusted data, such as an HTTP request parameter, into a command 
 A subcommand is recognised only as the first argument, exactly `rules`, so a
 directory named `rules` is still scanned when passed as a path (`./rules`).
 
+## Explaining one finding
+
+`luasec why <file>:<line>` analyses that one file and explains every finding
+on that line: the finding line as the plain report prints it, then its data
+flow (source steps first, sink last), then how to fix it. A finding with no
+trace reports a shape, not a flow. Scan options after the target are passed
+through, so a finding that needs `--std` or `--whole-program` can be asked
+about. A bad target, extra paths, or a bad option exits `2`.
+
+```sh
+bin/luasec why test/fixtures/tainted_exec/handler.lua:3
+```
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+  source  http.formvalue  test/fixtures/tainted_exec/handler.lua:3
+  sink    os.execute  test/fixtures/tainted_exec/handler.lua:3
+  how to fix:
+    Do not build a shell command from request data; pass fixed arguments, validate against an allowlist, or use an API that does not go through the shell. If a shell is unavoidable, quote every untrusted part with a shell-quoting helper before concatenation.
+  more: luasec rules explain 709
+```
+
+When nothing is reported on that line, `why` says so and exits `0`:
+
+```sh
+bin/luasec why test/fixtures/tainted_exec/handler.lua:1
+```
+
+```
+nothing reported at test/fixtures/tainted_exec/handler.lua:1
+```
+
 ## `--whole-program`
 
 By default each file is analyzed in isolation. `--whole-program` follows `require`

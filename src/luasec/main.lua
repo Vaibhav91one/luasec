@@ -234,6 +234,7 @@ end
 -- installation directory, and returns the exit code.
 local SUBCOMMANDS = {
    rules = "luasec.cli.rules_cmd",
+   why = "luasec.cli.why_cmd",
 }
 
 local function run(argv)
