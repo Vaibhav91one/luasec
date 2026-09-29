@@ -1,7 +1,7 @@
 # Rule catalogue
 
 Every finding carries a stable three-digit code, a severity, a confidence and,
-where one applies, a CWE reference.
+where one applies, a CWE reference. Each code has its own page under [docs/rules/](rules/), with an example, how to fix it, and a prompt you can hand to an AI coding agent.
 
 The 0xx-6xx range is [luacheck](https://github.com/lunarmodules/luacheck)'s
 vocabulary and a code in it is never reused here - a spec fails the build on a
