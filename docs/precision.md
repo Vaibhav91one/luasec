@@ -57,13 +57,13 @@ Hand-audited sample by code:
 | 707 FFI escape | 9 | true: LuaJIT source |
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
-| 709 injection | 5 | true, and the one that matters |
+| 709 injection | 5 | true, and the one that matters. Two are new with #58, both previously missed only because the sink's result was assigned: `luci-app-cshark/controller/cshark.lua:73`, `local res = os.execute("kill -TERM " .. pid)` where `pid` is read from the world-writable `/tmp/cshark-luci.pid`; and `luci-app-wol/model/cbi/wol.lua:85`, `local p = io.popen(cmd .. " 2>&1")` where `cmd` carries form input (with a 712 beside it: part of it is quoted, part is not) |
 | 701 shape-only | 25 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked |
 | 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
 | 702 env manipulation | 22 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
 | 704 unencrypted transport | 17 | true: a request body over plain HTTP, including loadfile/load calls whose result is used |
 | 705 dynamic require | 19 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment |
-| 710 dynamic code | 1 | true: loadstring reached through a wrapper call (assert(loadstring(...))) |
+| 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
 | 712 partial quote | 1 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression |
 | 725 env escape | 1 | true after 725 was narrowed from every setfenv to the dangerous ones |
 
