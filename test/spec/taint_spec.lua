@@ -632,3 +632,25 @@ end
 ]])
    end)
 end)
+
+describe("708 location", function()
+   it("reports the column of the function on its line, not its offset in the file", function()
+      local report = api.check_source(table.concat({
+         "local M = {}",
+         "local function helper() return 1 end",
+         "helper()",
+         "function M.run(dir)",
+         "   os.execute(\"x \" .. dir)",
+         "end",
+         "return M",
+         "",
+      }, "\n"))
+      local found
+      for _, finding in ipairs(report) do
+         if finding.code == "708" then found = finding end
+      end
+      assert_true(found, "the exported sink is a 708")
+      assert_equal(found.line, 4, "on the function's line")
+      assert_equal(found.column, 1, "`function` starts the line")
+   end)
+end)
