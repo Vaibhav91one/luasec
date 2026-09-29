@@ -121,7 +121,7 @@ output:
   --format <name>            plain (default), json, sarif, html
   -o, --output <file>        write the report to a file instead of stdout
   --ranges                   include the end column of each finding
-  --quiet                    only print the summary line
+  --quiet                    print nothing when there are no findings
 
 selection:
   --std <names>              platform API sets, '+' separated, e.g. +openwrt+luci
