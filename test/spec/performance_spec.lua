@@ -110,9 +110,9 @@ describe("suppression directives scale linearly with directive count", function(
       -- not a benchmark of the constant. Run against 7e159bd, the build before
       -- that fix, this spec fails with a ratio of 16.6.
       --
-      -- Scaling D and F together is still quadratic today: `finalize` scans
-      -- every directive once per finding, O(F*D). That is #53, and its spec
-      -- belongs with its fix.
+      -- Scaling D and F together is linear today: #53's one-pass allows_all
+      -- shares the depth prefix and matches each directive at most once per
+      -- (code, name) key, so the suppression pass is O(F+D) not O(F*D).
       local FINDING_COUNT = 20
 
       local function with_suppressions(n)
@@ -123,6 +123,25 @@ describe("suppression directives scale linearly with directive count", function(
       end
 
       assert_linear(with_suppressions, 500, {}, "suppression directives")
+   end)
+end)
+
+describe("suppression directives scale linearly with directive count and finding count together", function()
+   it("t(4N)/t(N) < 8 on N directives and N findings interleaved", function()
+      -- Guards #53: the suppression pass in finalize was O(F*D) - every
+      -- directive was scanned once per finding. This fixture interleaves
+      -- suppression directives and findings so both scale together, and
+      -- asserts the ratio stays linear.
+      local function interleaved(n)
+         local lines = {}
+         for i = 1, n do
+            lines[#lines + 1] = "-- luasec: ignore 701"
+            lines[#lines + 1] = "os.execute(cmd)"
+         end
+         return table.concat(lines, "\n")
+      end
+
+      assert_linear(interleaved, 500, {}, "directives and findings together")
    end)
 end)
 

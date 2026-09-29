@@ -232,6 +232,168 @@ function directives.allows(directives_before, finding, is_suppressed)
    return (not suppressed_by) or enabled
 end
 
+--- Decide the survival of every finding in one pass over the directive list.
+-- `allows` answered one finding at a time; this answers all of them, sharing the
+-- depth prefix and the per-directive match work instead of recomputing both for
+-- every finding. The result has one boolean per finding: allowed[i] is true when
+-- findings[i] survives the directives that apply at its line, by the same rules as
+-- allows(). allows() is left in place - it is exported and some callers still ask
+-- one question.
+--
+-- WHY LAZY: a directive's unreadable flag is set by matches_safely the first time
+-- the pattern is actually tried, and allows() learns that flag at match time.
+-- allows_all cannot know which patterns are unreadable until it has matched them,
+-- so the per-key summary is extended forward over the directives as each new
+-- finding is reached: directive j is only consulted for finding i when i is the
+-- first finding whose key reaches past j. A directive matched against a key once
+-- is never matched again (its unreadable result, if any, is already recorded),
+-- which is what collapses the O(F*D) behaviour into O(F+D).
+--
+-- THE ONE ACCEPTED DIFFERENCE from allows(): allows() never matched a scoped
+-- ignore whose region was already closed, so a malformed pattern sitting in a
+-- closed region went unreported. allows_all matches it (the region-closed test is
+-- positional, not a skip), so that pattern may now surface as a 012. The
+-- difference is bounded to a malformed pattern that was already a no-op - a
+-- suppression we could not read was never a suppression we applied - so a finding
+-- that was hidden stays hidden and one that was reported stays reported.
+--
+-- The findings need not arrive sorted: they are reordered by (line, original
+-- index) so directives are walked forward, and 012 findings are never matched or
+-- filtered, exactly as allows() leaves them.
+function directives.allows_all(list, findings, is_suppressed)
+   -- --- 1. depth_before/depth_after over the whole list, ONCE -------------------
+   local count = #list
+   local depth_before, depth_after
+   if count > 0 then
+      depth_before, depth_after = {}, {}
+      local depth = 0
+      for index = 1, count do
+         local directive = list[index]
+         depth_before[index] = depth
+         if (directive.marker and directive.action == "push")
+            or (directive.push == true and directive.action ~= "pop") then
+            depth = depth + 1
+         elseif directive.marker and directive.action == "pop" then
+            depth = math.max(0, depth - 1)
+         end
+         depth_after[index] = depth
+      end
+   end
+
+   -- --- 2. order = findings sorted by (line, original index) -----------------
+   local order = {}
+   for i = 1, #findings do order[i] = i end
+   table.sort(order, function(a, b)
+      local la, lb = findings[a].line or 0, findings[b].line or 0
+      if la ~= lb then return la < lb end
+      return a < b
+   end)
+
+   -- --- 3. k = number of directives with line <= finding.line -----------------
+   -- Advanced by a pointer; list is sorted by line because the lexer appends one
+   -- record per comment in token order.
+   local k = 0
+
+   -- --- 4. per-key summary, extended lazily ----------------------------------
+   -- `upto` is the highest directive index folded into S for this key.
+   local summaries = {} -- keyed by finding.key
+
+   local function open_depth(k_)
+      return k_ > 0 and depth_after[k_] or 0
+   end
+
+   -- A finding proxy with just code+name: that is all matches_any reads, and
+   -- matches_safely records unreadable via the directive_line and directive args.
+   local function matches(d, finding)
+      return directives.matches_any(d.patterns, finding, d.line, d)
+   end
+
+   local function extend(S, finding, k_)
+      if S.upto >= k_ then return end
+      for j = S.upto + 1, k_ do
+         local d = list[j]
+         if d.action == "ignore" then
+            if matches(d, finding) then
+               if d.push then
+                  S.push_min_base = math.min(S.push_min_base or math.huge, depth_before[j])
+               elseif depth_before[j] > 0 then
+                  S.region_ignore = true
+               else
+                  S.fw_ignore = true
+               end
+            end
+         elseif d.action == "enable" then
+            if matches(d, finding) then
+               S.enabled = true
+            end
+         elseif d.action == "only" then
+            -- Capture unreadable FOR THIS KEY only: a pattern like `70(` or
+            -- `701:[bad` raises against some codes/names but not others, so
+            -- `d.unreadable` set by a previous key's match must not leak. We
+            -- clear it before the call so the flag reflects only this match's
+            -- subject, then carry the per-key verdict forward.
+            local prev_unreadable = d.unreadable
+            d.unreadable = nil
+            local selected = matches(d, finding)
+            local key_unreadable = d.unreadable == true
+            d.unreadable = prev_unreadable or key_unreadable
+            S.only[#S.only + 1] = {d = d, selected = selected,
+               unreadable = key_unreadable}
+         end
+      end
+      S.upto = k_
+   end
+
+   local allowed = {}
+   for _, i in ipairs(order) do
+      local finding = findings[i]
+
+      -- --- 3. A 012 is never filtered, never matched -------------------------
+      if finding.code == "012" then
+         allowed[i] = true
+      else
+         local fkey = (finding.code or "") .. "\0" .. (finding.name or "")
+
+         local S = summaries[fkey]
+         if not S then
+            S = {upto = 0, fw_ignore = false, region_ignore = false,
+                 push_min_base = nil, enabled = false, only = {}}
+            summaries[fkey] = S
+         end
+
+         -- advance k to directives with line <= finding.line
+         while k < count and (list[k + 1].line or 1) <= (finding.line or 0) do
+            k = k + 1
+         end
+
+         extend(S, finding, k)
+
+         local open = open_depth(k)
+
+         -- --- 5. evaluate, mirroring allows() -------------------------------
+         local suppressed = (is_suppressed(finding) or false)
+            or S.fw_ignore
+            or (S.region_ignore and open > 0)
+            or (S.push_min_base ~= nil and open >= S.push_min_base + 1)
+
+         local enabled = S.enabled
+         for _, o in ipairs(S.only) do
+            if not o.unreadable then
+               if o.selected then
+                  enabled = true
+               else
+                  suppressed = true
+               end
+            end
+         end
+
+         allowed[i] = (not suppressed) or enabled
+      end
+   end
+
+   return allowed
+end
+
 function directives.matches_any(patterns, finding, directive_line, directive)
    for _, pattern in ipairs(patterns) do
       if directives.code_and_name_match(pattern, finding, directive_line, directive) then
