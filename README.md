@@ -169,7 +169,7 @@ sink or the sandbox had to stop it, and `2` means no verdict could be produced.
 
 ```sh
 make            # build Lua 5.4.9, fetch pinned luacheck, run the specs
-make test       # 591 specs
+make test       # 601 specs
 make ci-verify  # the full gate, including the corpus measurement
 make corpus     # clone the firmware corpora (network, gitignored)
 ```
