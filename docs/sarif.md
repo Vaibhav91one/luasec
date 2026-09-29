@@ -49,6 +49,13 @@ propagation step. The order is **source first, sink last**, and that order is
 guaranteed by the contract rather than by whatever order an engine happened to
 produce them in.
 
+The JSON document carries a top-level `score` object beside `findings`, with
+`value`, `label` (`good`, `needs work`, `critical`) and per-category `categories`
+counts. It is computed from the findings, so the finding shape itself is unchanged.
+The score is 100 minus, for each finding, its severity weight (critical 25,
+high 10, medium 4, low 1) times its confidence (certain or high 1, medium 0.6,
+low 0.3), rounded down and floored at 0.
+
 ## Determinism
 
 Two runs over unchanged input produce byte-identical `--format json` output.
@@ -98,6 +105,11 @@ the wrong text is worse than no location.
   are emitted because the standard key cannot be stable under a line move, and a
   code scanning UI that keys on it would report a known finding as new every time
   somebody inserts a comment.
+
+**Score and category.** The run carries `properties.score` with the same
+`value`, `label` and `categories` counts as the JSON document's top-level
+`score`, and each result carries `properties.category` with the finding's
+category id.
 
 ### Validation
 

@@ -148,9 +148,11 @@ end
 --- The machine-readable document: what version of the contract, which tool, and
 -- the findings. `list` is already normalized by `findings.normalize`.
 function findings.document(list)
+   local s = require("luasec.report.score").summarize(list or {})
    return {
       reportVersion = REPORT_VERSION,
       luasecVersion = require("luasec.version").luasec,
+      score = {value = s.score, label = s.label, categories = s.categories},
       findings = list or {},
    }
 end
@@ -171,6 +173,8 @@ function findings.read_document(text)
    end
    return parsed
 end
+
+findings.decode = function(text) return decode(text) end
 
 -- The reader itself.
 decode = function(text)

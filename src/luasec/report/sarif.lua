@@ -18,6 +18,8 @@ local codes = require "luasec.rules.codes"
 local util = require "luasec.util.util"
 local json = require "luasec.report.json"
 local version = require "luasec.version"
+local score = require "luasec.report.score"
+local categories = require "luasec.rules.categories"
 
 local sarif = {}
 
@@ -68,6 +70,7 @@ end
 
 function sarif.render(report, opts)
    opts = opts or {}
+   local s = score.summarize(report or {})
    local results = {}
 
    for _, finding in ipairs(report) do
@@ -95,6 +98,7 @@ function sarif.render(report, opts)
          properties = {
             severity = finding.severity,
             confidence = finding.confidence,
+            category = categories.of(finding.code),
             sink = finding.sink,
             source = finding.source,
          },
@@ -141,6 +145,7 @@ function sarif.render(report, opts)
             rules = sarif.rules_table(),
          }},
          results = results,
+         properties = {score = {value = s.score, label = s.label, categories = s.categories}},
       }},
    })
 end
