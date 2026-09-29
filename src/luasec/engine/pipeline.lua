@@ -277,11 +277,13 @@ local function cover_and_expose(result, opts)
             -- 708 replaces the shape-only finding at this sink, so it carries
             -- that sink's severity rather than a lower one of its own.
             local sink_spec = codes.get(exposed.code)
+            local col = math.max(1, (exposed.function_node.offset or 1)
+               - (chstate.line_offsets[exposed.function_node.line] or 0) + 1)
             local finding = {
                code = "708",
                line = exposed.function_node.line or 1,
-               column = math.max(1, exposed.function_node.offset or 1),
-               end_column = math.max(1, exposed.function_node.offset or 1),
+               column = col,
+               end_column = col,
                severity = (sink_spec and sink_spec.severity) or spec.severity,
                confidence = "low",
                cwe = spec.cwe,
