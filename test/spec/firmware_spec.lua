@@ -705,3 +705,22 @@ describe("724: a controller field that is not a hook", function()
          "a readable controller is not a parse failure")
    end)
 end)
+
+describe("espressif: node request argument to exec", function()
+   it("reports tainted node.getArgument reaching node.exec as 709", function()
+      local report = api.check_source([[
+local cmd = node.getArgument("c")
+node.exec(cmd)
+]], {std = "+espressif"})
+      assert_equal(#with_code(report, "709"), 1,
+         "tainted HTTP parameter reaching node.exec is reported as 709")
+   end)
+
+   it("reports tainted node.getArgument reaching os.execute as 709", function()
+      local report = api.check_source([[
+os.execute("x" .. node.getArgument("a"))
+]], {std = "+espressif"})
+      assert_equal(#with_code(report, "709"), 1,
+         "tainted HTTP parameter reaching os.execute is reported as 709")
+   end)
+end)

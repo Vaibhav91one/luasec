@@ -305,8 +305,9 @@ number, and a payload that reaches a sink that runs something *and* then calls
 
 Every field of a verdict that the payload chose - what it printed, what it
 returned, the argument it passed to a sink, and its own error message - is
-labelled as payload text in the plain report, prefixed `payload|`, and named
-`payload_*` in the JSON, with a note in the JSON saying so. Control bytes are
+labelled as payload text in the plain report, prefixed `[payload text]`, and named
+`payload_*` in the JSON, with a note in the JSON saying so. Only the printed
+output uses `payload|`. Control bytes are
 escaped, so a payload cannot put a newline or a carriage return into a line the
 report is counting. This is about not putting words in someone's log. It is not a
 claim that the payload cannot influence what the tool prints: a payload can

@@ -40,7 +40,9 @@ A profile declares the platform API set — sources, sinks, propagators, and
 sanitizers — that a platform exposes. `--std` takes one or more profile names
 joined with `+`, each prefixed with `+`. The set is additive: `--std +openwrt+luci`
 loads both. With no `--std` at all, only the generic Lua sinks are tracked:
-`os.execute`, `io.popen`, `loadstring`, `load`, `dofile`, and `loadfile`. See
+`os.execute`, `io.popen`, `loadstring`, `load`, `dofile`, `loadfile`,
+`package.loadlib` (706), `ffi.load`, and a `require` with a computed name
+(705). See
 [docs/firmware-stds.md](firmware-stds.md) for the data each profile declares.
 
 `signatures.lua` is not a `--std` profile. It is the 750 malware-signature pack,
@@ -65,7 +67,7 @@ Total: 1 finding (1 high)
 
 ### luci
 
-The LuCI web interface, which adds HTTP request parameters (`luci.http.formdata`)
+The LuCI web interface, which adds HTTP request parameters (`luci.http.formvalue`)
 as sources with `certain` confidence and a dispatch-tree exposure sink (`724`).
 Combine it with `openwrt` to scan a full LuCI web handler.
 
@@ -183,7 +185,8 @@ output:
 
 Each finding becomes a `result` with `ruleId` matching the luasec code,
 `level` derived from severity (`error` for critical/high, `warning` for
-medium, `note` for low), a `message`, a `location` with region
+medium, `note` for low), except that a critical or high finding with low
+confidence gets `warning`, a `message`, a `location` with region
 (`startLine`, `startColumn`, `endColumn`), and `properties` carrying
 `severity`, `confidence`, `sink`, and `source`. The `rules` array in the
 reporting descriptor defines every registered code.
@@ -209,11 +212,26 @@ bin/luasec --format sarif -o report.sarif .
 
 ### `--quiet`
 
-Suppresses output when there are no findings. When findings exist, they still
-print — the flag tells a clean run to say nothing, not a noisy one.
+Prints nothing at all when there are no findings. When findings exist, the
+full report still prints — the flag tells a clean run to say nothing, not a
+noisy one.
+
+```sh
+bin/luasec --quiet test/fixtures/clean/report.lua
+```
 
 ```
-Total: 0 findings (none)
+(no output, exit 0)
+```
+
+```sh
+bin/luasec --quiet test/fixtures/tainted_exec/handler.lua
+```
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
 ```
 
 ## CI and exit codes
@@ -257,7 +275,9 @@ bin/luasec --std +openwrt --fail-on critical test/fixtures/firmware/uci_tainted_
 
 Report only what is new since a stored JSON report. A finding already in the
 baseline is not reported, and one that was in the baseline and is no longer
-found is reported as fixed.
+found is reported as fixed: marked `"status": "fixed"` in JSON and
+`baselineState "absent"` in SARIF, but printed like a live finding in plain
+text.
 
 ```sh
 bin/luasec --format json -o baseline.json rootfs/
@@ -375,11 +395,10 @@ test/fixtures/whole_program/cross_file/util.lua:5:4: [709] critical: untrusted d
 Total: 1 finding (1 critical)
 ```
 
-Without `--whole-program`, the same directory produces no finding: the source
+Without `--whole-program`, the same directory reports a 708: the source
 (`http.formvalue`, in `handler.lua`) and the sink (`os.execute`, in `util.lua`)
-are in different files, and without cross-file resolution the sink is reported
-as `708` only if the sink is in an exported function and nothing in the file
-feeds it — or nothing at all.
+are in different files, and without cross-file resolution the sink in the
+exported function nothing in its file feeds is reported as an exposed sink.
 
 `--whole-program` is slower and opt-in. It resolves calls across files and follows
 the return value of a function in a module bound with `local m = require "mod"`,
@@ -395,10 +414,10 @@ The verdicts are:
 | verdict | meaning | exit code |
 | --- | --- | --- |
 | `benign` | reached no sink | `0` |
-| `rce` | reached a command execution sink | `1` |
+| `rce` | reached a command execution sink, or `loadfile`/`require` reached the loader | `1` |
 | `escape` | escaped the sandbox | `1` |
-| `partial` | some sink reached, or sandbox limit hit | `1` |
-| `timeout` | wall-clock limit exceeded | `1` |
+| `partial` | reached a sink other than an exec or process one | `1` |
+| `timeout` | a limit fired: wall clock, instruction count, memory ceiling, or resident-set limit | `1` |
 | `error` | payload produced no verdict | `2` |
 
 ```sh
