@@ -468,3 +468,36 @@ describe("a numeric option that is not a number", function()
       end
    end)
 end)
+
+describe("a path that looks like a flag", function()
+   it("scans a directory named with a leading dash instead of treating it as one", function()
+      -- cd -P "$p" in walk.lua read a directory named -x as the option --x
+      -- to cd, which failed and so the directory was reported as unlisted (901)
+      -- rather than scanned. The file inside it calls os.execute(arg[1]), which
+      -- is a 701, so a successful scan reports 701 and never mentions 901.
+      local dir = scratch_dir("spec_walk_flag_dir")
+      os.execute("mkdir " .. string.format("%q", dir .. "/-x"))
+      local f = assert(io.open(dir .. "/-x/evil.lua", "w"))
+      f:write('os.execute(arg[1])\n')
+      f:close()
+
+      -- Scan -x as a relative path from its parent, so the path starts with a
+      -- dash and cd would read it as an option without --.
+      -- An absolute path, since the command runs after cd into the scratch dir.
+      local luasec = io.popen("pwd"):read("*l") .. "/bin/luasec"
+      local cmd = ("(cd %q && %q --only 701 -- -x) 2>&1; "
+          .. "printf '\\n__EXIT__%%d' $?\n"):format(dir, luasec)
+      local pipe = assert(io.popen(cmd))
+      local out = pipe:read("*a")
+      pipe:close()
+      local code = tonumber(out:match("__EXIT__(%d+)%s*$") or "-1")
+      out = out:gsub("__EXIT__%d+%s*$", "")
+
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      assert_match(out, "701", "the file inside -x should be scanned:\n" .. out)
+      assert_no_match(out, "901", "a directory named -x must not be unlisted:\n" .. out)
+      assert_no_match(out, "stack traceback", out)
+      assert_true(code ~= 0, "a 701 is at least a low-severity finding:\n" .. out)
+   end)
+end)

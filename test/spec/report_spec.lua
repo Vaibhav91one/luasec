@@ -528,4 +528,35 @@ describe("a baseline and ground we did not cover", function()
       assert_match(out, "901", "the finding is still in the report:\n" .. out)
       assert_true(code ~= 0, "and the run still fails:\n" .. out)
    end)
+
+   it("refuses a baseline whose finding is missing name or file", function()
+      local scratch = harness.scratch_dir("spec_baseline_absent_fields")
+      local base = assert(io.open(scratch .. "/base.json", "w"))
+      base:write('{"findings":[{"code":"701","file":"x.lua"}]}')
+      base:close()
+
+      local out, code = harness.cli({"--format", "json", "--baseline", scratch .. "/base.json",
+         "test/fixtures/clean/report.lua"})
+      os.execute("rm -rf " .. string.format("%q", scratch))
+
+      assert_equal(code, 2, "a finding missing name is malformed:\n" .. out)
+      assert_match(out, "field 'name'", out)
+      assert_no_match(out, "stack traceback", out)
+   end)
+
+   it("refuses a baseline whose finding code is not a string", function()
+      local scratch = harness.scratch_dir("spec_baseline_bad_code")
+      local base = assert(io.open(scratch .. "/base.json", "w"))
+      base:write('{"findings":[{"code":701,"name":"os.execute","file":"x.lua"}]}')
+      base:close()
+
+      local out, code = harness.cli({"--format", "json", "--baseline", scratch .. "/base.json",
+         "test/fixtures/clean/report.lua"})
+      os.execute("rm -rf " .. string.format("%q", scratch))
+
+      assert_equal(code, 2, "a finding with a non-string code is malformed:\n" .. out)
+      assert_match(out, "baseline", out)
+      assert_no_match(out, "stack traceback", out)
+   end)
+
 end)

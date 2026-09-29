@@ -116,10 +116,13 @@ end
 local function popen_with_path(command, path)
    local tmp = os.tmpname()
    local handle = assert(io.open(tmp, "wb"))
+   -- A path that starts with "-" is read as an option by shell builtins
+   -- and commands like find. Prefix it with "./" so it is a path.
+   if path:sub(1, 1) == "-" then path = "./" .. path end
    handle:write(path)
    handle:close()
    local command_text = string.format(
-      'p="$(cat %s)" || exit 0; %s', string.format("%q", tmp), command)
+      'p="$(cat %s; printf x)" || exit 0; p="${p%%x}"; %s', string.format("%q", tmp), command)
    return io.popen(command_text, "r"), tmp
 end
 
@@ -414,7 +417,7 @@ end
 
 -- The physical path of a directory, as the kernel resolves it.
 --
--- `cd -P "$p" && printf "%s\0" "$PWD"`, and not a string comparison in Lua: this
+-- `cd -P -- "$p" && printf "%s\0" "$PWD"`, and not a string comparison in Lua: this
 -- is what turns `x`, `./x`, `a/../x` and a path that goes through another link
 -- into one string, and a lexical comparison gets that wrong in the one direction
 -- this tool cannot afford -- a link inside the root to somewhere else entirely,
@@ -426,7 +429,7 @@ end
 -- ends in one is not renamed.
 local function physical_dir(path)
    local pipe, tmp = popen_with_path(
-      'test -d "$p" || exit 0; cd -P "$p" && printf "%s\\0" "$PWD"', path)
+      'test -d "$p" || exit 0; cd -P -- "$p" && printf "%s\\0" "$PWD"', path)
    if not pipe then return nil end
    local answer = tostring(pipe:read("*a") or "")
    pipe:close()
