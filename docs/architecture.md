@@ -223,8 +223,11 @@ the verdict itself are luasec's, and come from the sandbox rather than the paylo
   files, which is slower and needs a real rootfs.
 - Taint follows a local function's return value. A `local function` that hands
   its argument back (`local function id(x) return x end`) is followed, so
-  `os.execute(id(http.formvalue("h")))` is reported. A module field (`M.id`)
-  and a cross-file return are not followed: that flow stops and no finding is
+  `os.execute(id(http.formvalue("h")))` is reported. Under `--whole-program`,
+  the return value of a function in a module bound with `local m = require "mod"`
+  is also followed (`m.id(x)`). A module field without `--whole-program`, a method
+  call (`M:m`), a function passed as a value, and a `require(...)` called inline
+  inside an expression are not followed: that flow stops and no finding is
   produced. Firmware that pipes request data through such a helper is missed,
   and that is a known limit rather than a clean bill of health.
 - Bytecode is triaged, not decompiled.
