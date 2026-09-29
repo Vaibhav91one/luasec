@@ -116,6 +116,7 @@ local USAGE = [[
 luasec - RCE checker and security analyzer for Lua in embedded firmware
 
 usage: luasec [options] <file|directory>...
+       luasec rules [list | explain <code>]
 
 input:
   <path>                     Lua file, or directory to scan recursively
@@ -170,6 +171,7 @@ the sandbox itself failed.
 other:
   -h, --help                 this message
   --version                  print version and exit
+  rules list | explain <code>  the rule catalogue, and one code's doc page
 
 with --baseline: 0 nothing new, 3 at least one new finding at or above --fail-on.
 A finding already in the baseline is not reported, and one that was in the
