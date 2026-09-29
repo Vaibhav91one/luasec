@@ -144,6 +144,7 @@ registered code has a doc row.
 
 - One issue = one branch `issue/<n>-<slug>` = one PR. Body starts with `Closes #<n>`.
 - Squash merge. Do not merge your own PR; the orchestrator merges after verification.
+- A PR with no behavior change (dead code, documentation) is labelled `type:chore` or `type:docs`, which skips the TDD proof; the label is reviewed like code, and a PR that changes behavior never carries it.
 - Do not touch files outside your issue's declared owned paths.
 - Never push to `main`, never create merge commits, never run `gh pr merge`.
 

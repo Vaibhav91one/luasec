@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -45,8 +46,10 @@ jobs:
           PRECISION_REQUIRE_CORPUS: "1"
         run: make precision
 
+      # A PR with no behavior change (dead code, documentation) has no spec
+      # that can fail without it, so the TDD proof is skipped for those.
       - name: TDD proof
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'type:chore') && !contains(github.event.pull_request.labels.*.name, 'type:docs')
         run: make tdd-proof "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
       - name: Scan the project with itself
