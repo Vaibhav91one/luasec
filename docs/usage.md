@@ -19,6 +19,14 @@ make lua vendor
 bin/luasec --help
 ```
 
+### npx
+
+```sh
+npx luasec <path>
+```
+
+It downloads the release tarball matching its own version once and caches the extracted tree under `$LUASEC_CACHE` (else `$XDG_CACHE_HOME/luasec`, else `~/.cache/luasec`).
+
 ## Install and first scan
 
 `luasec` is a single binary: a shell script at `bin/luasec` that launches a locally

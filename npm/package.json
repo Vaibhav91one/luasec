@@ -1,0 +1,13 @@
+{
+  "name": "luasec",
+  "version": "0.2.0",
+  "description": "Static security scanner for Lua in embedded firmware: finds remote code execution. Runs luasec without installing Lua tooling.",
+  "bin": { "luasec": "bin/luasec.js" },
+  "files": ["bin/luasec.js", "README.md"],
+  "engines": { "node": ">=18" },
+  "os": ["darwin", "linux"],
+  "repository": { "type": "git", "url": "git+https://github.com/Vaibhav91one/luasec.git" },
+  "homepage": "https://github.com/Vaibhav91one/luasec",
+  "license": "MIT",
+  "keywords": ["lua", "security", "static-analysis", "firmware", "sarif", "openwrt"]
+}
