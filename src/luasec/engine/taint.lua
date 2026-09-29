@@ -482,7 +482,7 @@ local function taint_of_call(node, item, state, depth)
          and node[1] and node[1].tag == "Id" and node[1].var
          and item and item.used_values then
       local fn
-      for _, value in ipairs(item.used_values[node[1].var]) do
+      for _, value in ipairs(item.used_values[node[1].var] or {}) do
          if value.node and value.node.tag == "Function" then
             fn = value.node
             break

@@ -615,3 +615,20 @@ end
          "a constant argument to a sink must stay silent")
    end)
 end)
+
+describe("hostile input", function()
+   local function assert_analyzes_without_raising(src, opts)
+      local ok, report = pcall(api.check_source, src, opts)
+      assert_true(ok, "the analyzer must not raise on: " .. src:sub(1, 80))
+      assert_true(type(report) == "table", "check_source must return a table")
+   end
+
+   it("does not crash when a callee has no reaching value for its var", function()
+      assert_analyzes_without_raising([[
+local cb = {}
+function cb.run()
+   status = cb(function() last_error = nil end)
+end
+]])
+   end)
+end)
