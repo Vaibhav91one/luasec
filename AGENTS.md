@@ -28,7 +28,7 @@ We never modify `vendor/`. It is pinned (see `vendor/PINNED`) and checked by
 
 | Seam | Interface |
 | --- | --- |
-| library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name)`, `rules.load(path)`, `validate_payload(src, opts)` |
+| library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name, opts)`, `rules_load(paths)`, `validate_payload(src, opts)` |
 | CLI | `bin/luasec <args>` as a subprocess (flags, exit codes, stdout contracts) |
 | allowed extra | `luasec.util.util` (string/entropy helpers), `luasec.util.const_eval` (constant folding), `luasec.bytecode.detect`, `luasec.bytecode.header`, `luasec.bytecode.protos` - public modules in their own right, each with a narrow interface |
 
@@ -47,16 +47,16 @@ Test names describe behavior, not mechanism:
 ## Layout
 
     src/luasec/
-      api.lua          public entry points
+      api.lua          public entry points and the analysis pipeline
       main.lua         CLI entry
-      cli/             args, config, walk, baseline
-      engine/          pipeline, taint, callgraph, const_eval, sanitizers, directives
+      cli/             args, baseline, walk
+      engine/          parse_context, taint, callgraph, interprocedural, whole_program, inline_directives
       rules/           code registry + rule modules
       registry/        platform API registry + firmware std data
       bytecode/        magic sniff, header, prototypes
       validate/        payload validator sandbox
-      report/          json, sarif, plain, html
-      util/            small shared helpers
+      report/          findings, render, json, sarif, plain, html
+      util/            util, const_eval
     test/
       run.lua          zero-dep runner: `make test`
       spec/            behavior specs, one file per area
