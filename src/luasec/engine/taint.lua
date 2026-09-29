@@ -473,8 +473,8 @@ local function taint_of_call(node, item, state, depth)
    -- the function's return expressions as context-sensitive bindings. A guard
    -- on state.returning[fn] prevents unbounded recursion on a function that
    -- returns its own call.
-   -- ponytail: local functions only; a module field (M.id) and cross-file
-   -- returns are not followed.
+   -- ponytail: a module field (M.id) in the same file is followed too; a
+   -- cross-file return is not.
    if not sanitized and node.tag == "Call"
          and node[1] and node[1].tag == "Id" and node[1].var
          and item and item.used_values then
@@ -492,6 +492,34 @@ local function taint_of_call(node, item, state, depth)
             arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
          end
          set_union_into(result, return_taint(fn, arg_taints, state, depth))
+      end
+   elseif not sanitized and node.tag == "Call"
+         and node[1] and node[1].tag == "Index"
+         and node[1][1] and node[1][1].tag == "Id" and node[1][1].var
+         and node[1][2] and node[1][2].tag == "String"
+         and state and state.field_functions then
+      -- A module field (M.id) in this same file: resolve it to its function
+      -- value, if there is exactly one.
+      local fn = (state.field_functions[node[1][1].var] or {})[node[1][2][1]]
+      if fn then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         if looks_like_shell_quote(fn) then
+            -- A quoting field helper neutralizes the shell sink: each argument's
+            -- taint is quoted rather than propagated raw, and the return is not
+            -- followed so the sink marks the call shell-quoted.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
+            end
+         elseif state.returns and state.returns[fn]
+               and not state.returning[fn] then
+            set_union_into(result, return_taint(fn, arg_taints, state, depth))
+         end
       end
    end
 
@@ -930,6 +958,7 @@ function taint.run(chstate, opts, existing_state)
    -- re-runs propagation), so build this lazily and cache it on the state.
    if not state.returns then
       state.returns = {}
+      state.field_functions = {}
       for _, line in ipairs(chstate.lines) do
          if line.node and line.node.tag == "Function" then
             local exprs = {}
@@ -946,6 +975,39 @@ function taint.run(chstate, opts, existing_state)
                end
             end
             state.returns[line.node] = exprs
+         end
+
+         -- Index a module field's function value, so a call through a field
+         -- access (M.id(...)) can follow the same local-function return taint
+         -- as a plain local call (id(...)). A var/key with two different
+         -- function definitions is ambiguous and recorded as false so it is
+         -- not followed.
+         for _, item in ipairs(line.items) do
+            if item.tag == "Set" or item.tag == "Local" then
+               for i = 1, #(item.lhs or {}) do
+                  local lhs_node = item.lhs[i]
+                  if lhs_node and lhs_node.tag == "Index"
+                        and lhs_node[1] and lhs_node[1].tag == "Id"
+                        and lhs_node[1].var
+                        and lhs_node[2] and lhs_node[2].tag == "String"
+                        and item.rhs then
+                     local rhs_node = item.rhs[i]
+                     if rhs_node and rhs_node.tag == "Function" then
+                        local per_var = state.field_functions[lhs_node[1].var]
+                        if not per_var then
+                           per_var = {}
+                           state.field_functions[lhs_node[1].var] = per_var
+                        end
+                        local key = lhs_node[2][1]
+                        if per_var[key] == nil then
+                           per_var[key] = rhs_node
+                        elseif per_var[key] ~= rhs_node then
+                           per_var[key] = false
+                        end
+                     end
+                  end
+               end
+            end
          end
       end
    end
