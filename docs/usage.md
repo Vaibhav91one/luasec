@@ -1,0 +1,458 @@
+# Usage
+
+## Install and first scan
+
+`luasec` is a single binary: a shell script at `bin/luasec` that launches a locally
+built Lua 5.4.9 interpreter with the `src/` and `vendor/` trees on its module path.
+No luarocks, no C extensions, no runtime dependencies beyond a POSIX shell.
+
+```sh
+bin/luasec --help
+```
+
+Point it at a file or a directory. A directory is walked recursively, but one
+scan root is bounded at 50,000 paths; past that the run reports a coverage gap
+rather than walking further. Raise the limit with `LUASEC_MAX_WALK_PATHS`. A
+symlink that leaves the tree is followed and read — point `luasec` at a tree you
+trust to be the tree you want read.
+
+```sh
+bin/luasec --std +openwrt+luci rootfs/
+```
+
+The default report is plain text, one finding per line, followed by a summary.
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
+```
+
+Exit code is `1` because the default threshold is `low`, so any finding fails
+the run. See [Exit codes](#ci-and-exit-codes).
+
+This example is the fixture at `test/fixtures/tainted_exec/handler.lua`:
+the request parameter `host` flows into `os.execute` with no sanitization.
+
+## Choosing `--std`
+
+A profile declares the platform API set — sources, sinks, propagators, and
+sanitizers — that a platform exposes. `--std` takes one or more profile names
+joined with `+`, each prefixed with `+`. The set is additive: `--std +openwrt+luci`
+loads both. With no `--std` at all, only the generic Lua sinks are tracked:
+`os.execute`, `io.popen`, `loadstring`, `load`, `dofile`, and `loadfile`. See
+[docs/firmware-stds.md](firmware-stds.md) for the data each profile declares.
+
+`signatures.lua` is not a `--std` profile. It is the 750 malware-signature pack,
+loaded directly by the payload detector on every run. Do not pass `--std +signatures`.
+
+### openwrt
+
+OpenWrt router firmware. Sources are UCI config reads (`uci.get`, `nixio.getenv`,
+`ubus.call`), sinks are shell execution (`nixio.process.execute`, `luci.sys.call`)
+and UCI config writes (`uci.set`, `uci.add`). This is the profile for anything that
+looks like a LuCI or OpenWrt init script.
+
+```sh
+bin/luasec --std +openwrt test/fixtures/firmware/uci_tainted_value.lua
+```
+
+```
+test/fixtures/firmware/uci_tainted_value.lua:7:4: [722] high: configuration value set from untrusted data, which a service may later execute (uci.set) (CWE-78) [source: ]
+
+Total: 1 finding (1 high)
+```
+
+### luci
+
+The LuCI web interface, which adds HTTP request parameters (`luci.http.formdata`)
+as sources with `certain` confidence and a dispatch-tree exposure sink (`724`).
+Combine it with `openwrt` to scan a full LuCI web handler.
+
+```sh
+bin/luasec --std +openwrt+luci test/fixtures/firmware/uci_tainted_value.lua
+```
+
+### openresty
+
+OpenResty / ngx_lua. Sources are nginx request variables (`ngx.var.*`,
+`ngx.req.get_headers`, `ngx.req.get_body_data`), sinks are `ngx.exec` and
+`ngx.pty.spawn`. The bundled luacheck `ngx` standard is already loaded for name
+checks; this profile only attaches the security meaning.
+
+```sh
+bin/luasec --std +openresty app/
+```
+
+### espressif
+
+ESP8266/ESP32 NodeMCU firmware. Sources are `node.getArgument` and `httpServerRequest`,
+sinks include `node.exec` and `file.open` (flash write, code 721). Load this when
+scanning a NodeMCU image.
+
+```sh
+bin/luasec --std +espressif /path/to/nodeMCU/
+```
+
+### hisi
+
+HiSilicon camera SDKs. Adds `hi_system.exec`, `hi_mpi.exec`, and `os.system` as
+exec sinks, plus `hi_mpi.*` and `isp.*` as low-confidence sources. Used when
+scanning HiSilicon media/sensor Lua bindings.
+
+```sh
+bin/luasec --std +hisi /path/to/camera/
+```
+
+### luajit
+
+LuaJIT FFI bindings. Sinks are `ffi.C.system`, `ffi.C.execve`,
+`ffi.C.popen`, `ffi.load` (dynamic load), and `ffi.cdef`. Load this in addition
+to another profile when the firmware uses LuaJIT's FFI for native interop.
+
+```sh
+bin/luasec --std +openwrt+luajit rootfs/
+```
+
+## Reading the report
+
+`--format` selects the output. `plain` is default; `json`, `sarif`, and `html`
+are also available. `-o` writes to a file instead of stdout.
+
+### Plain
+
+The default. One line per finding, then a summary line.
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
+```
+
+Fields are: `file:line:column:` then `[code] severity: message (sink) (CWE-78)
+[source: source-name]`. The trailing `Total:` line is the summary.
+
+### JSON
+
+```sh
+bin/luasec --format json test/fixtures/tainted_exec/handler.lua
+```
+
+```json
+{
+  "findings": [
+    {
+      "code": "709",
+      "column": 4,
+      "confidence": "certain",
+      "cwe": "CWE-78",
+      "file": "test/fixtures/tainted_exec/handler.lua",
+      "line": 3,
+      "message": "untrusted data reaches command execution (os.execute)",
+      "name": "os.execute",
+      "severity": "critical",
+      "sink": "os.execute",
+      "source": "http.formvalue",
+      "trace": [ ... ]
+    }
+  ],
+  "luasecVersion": "0.1.0",
+  "reportVersion": "1.0"
+}
+```
+
+Exit code is `1` — JSON output does not change the exit contract. The `trace`
+array lists each source and sink step in the flow. This is the format `--baseline`
+stores internally, so a JSON report is what you pass to `--baseline`.
+
+### SARIF
+
+```sh
+bin/luasec --format sarif -o findings.sarif test/fixtures/tainted_exec/handler.lua
+```
+
+Produces a SARIF 2.1.0 document. The schema reference is the first line of the
+output:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  ...
+}
+```
+
+Each finding becomes a `result` with `ruleId` matching the luasec code,
+`level` derived from severity (`error` for critical/high, `warning` for
+medium, `note` for low), a `message`, a `location` with region
+(`startLine`, `startColumn`, `endColumn`), and `properties` carrying
+`severity`, `confidence`, `sink`, and `source`. The `rules` array in the
+reporting descriptor defines every registered code.
+
+### HTML
+
+```sh
+bin/luasec --format html -o findings.html test/fixtures/tainted_exec/handler.lua
+```
+
+Self-contained HTML with inline CSS. A severity pill, a table of findings, and
+a source-to-sink flow trace per finding.
+
+### `-o` and `--output`
+
+`-o` and `--output` are aliases. Either writes the report to the given file
+instead of stdout. This works with every `--format`.
+
+```sh
+bin/luasec --format json -o report.json .
+bin/luasec --format sarif -o report.sarif .
+```
+
+### `--quiet`
+
+Suppresses output when there are no findings. When findings exist, they still
+print — the flag tells a clean run to say nothing, not a noisy one.
+
+```
+Total: 0 findings (none)
+```
+
+## CI and exit codes
+
+Exit codes from a static scan:
+
+| code | meaning |
+| --- | --- |
+| `0` | clean — no findings at or above the threshold |
+| `1` | findings at or above the threshold, or ground not covered |
+| `2` | error — bad flag, unreadable rules file, unreadable path |
+| `3` | new findings since a `--baseline` |
+
+Exit code `2` is distinct from `1`. A typo in a flag is a configuration error,
+not a security finding. Do not treat `2` as a pass.
+
+A file that could not be read, parsed, or only analyzed approximately is reported
+as code `901`–`904` and forces exit `1` regardless of `--fail-on`. These cannot
+be filtered into a green build with `--only` or `--severity-threshold`. The only
+way to remove them is `--ignore 901`, which means accepting that the run covered
+less ground than it was asked to.
+
+### `--fail-on`
+
+Exit `1` when a finding at or above this severity is present. Takes `low`,
+`medium`, `high`, or `critical`. The default is `low`, which means any finding
+that passes `--severity-threshold` fails the run.
+
+```sh
+bin/luasec --fail-on high --std +openwrt+luci rootfs/
+```
+
+A 709 critical finding fails this check. A 723 medium one does not:
+
+```sh
+bin/luasec --std +openwrt --fail-on critical test/fixtures/firmware/uci_tainted_value.lua
+# 722 high shows, but exit 0 — below critical
+```
+
+### `--baseline`
+
+Report only what is new since a stored JSON report. A finding already in the
+baseline is not reported, and one that was in the baseline and is no longer
+found is reported as fixed.
+
+```sh
+bin/luasec --format json -o baseline.json rootfs/
+bin/luasec --baseline baseline.json rootfs/
+```
+
+When the baseline holds every finding from the last run, the next run prints
+nothing and exits `0`:
+
+```
+Total: 0 findings (none)
+EXIT: 0
+```
+
+Exit code is `3` when there is at least one new finding at or above
+`--fail-on`.
+
+### `--severity-threshold` and `--min-confidence`
+
+`--severity-threshold` filters below the given severity (`low` is the default,
+so all severities pass). `--min-confidence` filters below the given confidence
+(`low` is the default). A file that could not be analyzed is always reported
+through `901`–`904`, and those codes survive both filters.
+
+```sh
+bin/luasec --severity-threshold critical --min-confidence high .
+```
+
+### `--only` and `--ignore`
+
+`--only` takes comma-separated code patterns and reports nothing else.
+`--ignore` takes the same patterns and suppresses matching codes. Patterns
+are Lua patterns, so `--ignore 70[1-9]` suppresses 701 through 709.
+
+```sh
+bin/luasec --only 709 test/fixtures/tainted_exec/handler.lua
+```
+
+### SARIF upload in CI
+
+The project's own CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+exports a SARIF report and uploads it with `github/codeql-action/upload-sarif`:
+
+```yaml
+- name: Export SARIF
+  if: always()
+  run: |
+    ./bin/luasec --format sarif -o luasec.sarif src/ || true
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: luasec.sarif
+    category: luasec
+```
+
+The `|| true` after the `luasec` step ensures the workflow does not fail on the
+exit code — the upload step is what surfaces findings in the Security tab.
+`if: always()` on both means the SARIF is uploaded even when the scan exits `1`
+or `2`. `category` tags the results so they are replaced on re-run rather than
+stacked.
+
+## Custom rules
+
+`--rules <file>` loads an extra Lua module that returns a table in the same
+shape as a `--std` profile. A profile declares five fields (all optional):
+
+| Field | What it is |
+| --- | --- |
+| `name` | identifier string |
+| `sources` | `{pattern, id, name, confidence}` — untrusted input origins |
+| `sinks` | `{pattern, code, kind, arg}` — where untrusted data reaches an effect |
+| `propagators` | `{pattern, arg}` — functions that carry taint without being sinks |
+| `sanitizers` | `{shell, dyncode, path}` — lists of functions that scrub each sink class |
+
+The `--std` profile files live in `src/luasec/registry/stds/`. A custom rules
+file mirrors that structure. See [docs/firmware-stds.md](firmware-stds.md) for
+the semantics of each field.
+
+```sh
+bin/luasec --rules myrules.lua --std +openwrt rootfs/
+```
+
+A missing or unparseable rules file is an error — exit `2` — never a silently
+narrower report:
+
+```sh
+bin/luasec --rules /nonexistent rootfs/
+```
+
+```
+luasec: cannot load profile /nonexistent: cannot open /nonexistent: No such file or directory
+```
+
+`--rules` is repeatable. Each file is loaded and merged into the profile set
+before analysis.
+
+## `--whole-program`
+
+By default each file is analyzed in isolation. `--whole-program` follows `require`
+edges across files and passes taint into a required module's parameters. A local
+function's return value is also followed — `local function id(x) return x end`
+hands taint through — but a module field (`M.id`) and a cross-file return are
+not: a function that hands its argument back is opaque across files.
+
+```sh
+bin/luasec --whole-program --std +luci test/fixtures/whole_program/cross_file/
+```
+
+```
+test/fixtures/whole_program/cross_file/util.lua:5:4: [709] critical: untrusted data reaches command execution (os.execute); untrusted data reached this sink from test/fixtures/whole_program/cross_file/handler.lua (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
+```
+
+Without `--whole-program`, the same directory produces no finding: the source
+(`http.formvalue`, in `handler.lua`) and the sink (`os.execute`, in `util.lua`)
+are in different files, and without cross-file resolution the sink is reported
+as `708` only if the sink is in an exported function and nothing in the file
+feeds it — or nothing at all.
+
+`--whole-program` is slower and opt-in. It resolves calls across files but does
+not follow a module field or a cross-file return.
+
+## `--validate`
+
+`--validate` runs a snippet in a sandboxed child process to check whether it
+actually reaches execution. This is dynamic confirmation, not static analysis.
+The verdicts are:
+
+| verdict | meaning | exit code |
+| --- | --- | --- |
+| `benign` | reached no sink | `0` |
+| `rce` | reached a command execution sink | `1` |
+| `escape` | escaped the sandbox | `1` |
+| `partial` | some sink reached, or sandbox limit hit | `1` |
+| `timeout` | wall-clock limit exceeded | `1` |
+| `error` | payload produced no verdict | `2` |
+
+```sh
+bin/luasec --validate test/fixtures/validate/rce.lua
+```
+
+```
+luasec: validation of test/fixtures/validate/rce.lua
+  verdict:   rce
+  exit:      payload completed
+  reached:
+    os.execute [exec] at test/fixtures/validate/rce.lua:3 with [payload text] id
+  escapes:
+    os.execute
+  chain:     payload -> os.execute
+  cpu:       0ms, 100 instructions
+  lua:       Lua 5.4 (/Users/vaibhavtomar/Desktop/luasec/.worktrees/51/build/lua-5.4.9/src/lua)
+```
+
+Exit code is `1` because the snippet reached `os.execute`.
+
+A benign payload exits `0`:
+
+```sh
+bin/luasec --validate test/fixtures/validate/benign.lua
+```
+
+```
+luasec: validation of test/fixtures/validate/benign.lua
+  verdict:   benign
+  exit:      payload completed
+  chain:     payload
+  returned:  [payload text] 5050
+  cpu:       0ms, 200 instructions
+  lua:       Lua 5.4 (/Users/vaibhavtomar/Desktop/luasec/.worktrees/51/build/lua-5.4.9/src/lua)
+```
+
+### `--stdin`
+
+With `--stdin`, `--validate` reads the payload from standard input instead of
+a file path. The report line reads `validation of <stdin>`.
+
+```sh
+echo 'os.execute("id")' | bin/luasec --validate --stdin
+```
+
+```
+luasec: validation of <stdin>
+  verdict:   rce
+  exit:      payload completed
+  reached:
+    os.execute [exec] at <stdin>:1 with [payload text] id
+  escapes:
+    os.execute
+  chain:     payload -> os.execute
+  cpu:       0ms, 100 instructions
+  lua:       Lua 5.4 (/Users/vaibhavtomar/Desktop/luasec/.worktrees/51/build/lua-5.4.9/src/lua)
+```
+
+The child interpreter is the same Lua build that runs `luasec` itself, so the
+verdict describes the interpreter in use. `--validate-timeout <ms>` sets the
+wall-clock limit (default 2000).
