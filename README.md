@@ -94,6 +94,10 @@ than one that does not have the feature.
   is reported as a coverage gap rather than walked forever. Raise it with
   `LUASEC_MAX_WALK_PATHS`. This exists because following a symlink to `/` turned
   a 4,000-file scan into a walk of the filesystem.
+- **A file over the node budget (`--max-nodes`, default 20,000), or with
+   functions nested more than 64 deep, is analysed approximately** and reported
+   as `904`: flow-sensitive local resolution is skipped and results degrade to
+   a single forward pass. This does not mean the file is clean.
 - **Alias resolution is bounded at 4 definitions and 6 hops.** Past that the
   answer is "not a cursor", so a credential can be missed.
 - **`--whole-program` is opt-in** and slower. It follows `require` edges and

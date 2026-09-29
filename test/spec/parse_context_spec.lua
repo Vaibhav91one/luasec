@@ -123,3 +123,49 @@ return pack
       assert_true(seen, "the bitwise operators are still reported, as 903")
    end)
 end)
+
+describe("deeply nested functions", function()
+   it("finishes quickly and reports 904 for 1,000 nested functions", function()
+      -- count_nodes budgets node counting, but the budget alone does not bound
+      -- the cost of resolve_locals: a Function node inside another is visited
+      -- super-linearly there. 1,000 nested functions (~3,000 nodes) used to take
+      -- more than 60 seconds and now must finish in under 3 seconds, and report
+      -- 904 so the run says its analysis was approximate.
+      local src = ""
+      for i = 1, 1000 do
+         src = src .. "local f" .. i .. " = function() "
+      end
+      src = src .. "return 1"
+      for i = 1, 1000 do
+         src = src .. " end"
+      end
+      src = src .. "\n"
+
+      local started = os.clock()
+      local report = api.check_source(src, {})
+      local elapsed = os.clock() - started
+
+      assert_true(elapsed < 3,
+         "1,000 nested functions took " .. elapsed .. " s, expected under 3 s")
+      assert_equal(codes(report), "904",
+         "deeply nested functions are flagged as approximate, not dropped")
+   end)
+
+   it("analyzes 10 nested functions normally without reporting 904", function()
+      -- A shallow nesting is well within resolve_locals's cost and must not trip
+      -- the depth bound: the file is analyzed in full, no 904.
+      local src = ""
+      for i = 1, 10 do
+         src = src .. "local f" .. i .. " = function() "
+      end
+      src = src .. "return 1"
+      for i = 1, 10 do
+         src = src .. " end"
+      end
+      src = src .. "\n"
+
+      local report = api.check_source(src, {})
+      assert_no_match(codes(report), "904",
+         "10 nested functions are not too deep to analyze")
+   end)
+end)
