@@ -207,6 +207,39 @@ describe("configuration errors", function()
       assert_equal(report[1].code, "901")
       assert_match(report[1].message, "cannot read file")
    end)
+
+   -- Severity and confidence values are looked up in a rank table keyed by word.
+   -- A typo falls through to 0, which silently disables the filter — a config
+   -- mistake that reads as "everything passes the threshold". These are the same
+   -- flags the CLI rejects at exit 2; the library must refuse them too.
+   it("refuses a severity_threshold that is not a severity word", function()
+      local message = refused_by(api.validate_options, {severity_threshold = "crtical"})
+      assert_match(message, "%-%-severity%-threshold")
+      assert_match(message, "critical")
+   end)
+
+   it("refuses a fail_on that is not a severity word", function()
+      local message = refused_by(api.validate_options, {fail_on = "hgih"})
+      assert_match(message, "%-%-fail%-on")
+      assert_match(message, "critical")
+   end)
+
+   it("refuses a min_confidence that is not a confidence word", function()
+      local message = refused_by(api.validate_options, {min_confidence = "hgih"})
+      assert_match(message, "%-%-min%-confidence")
+      assert_match(message, "certain")
+   end)
+
+   it("accepts the severity and confidence words a valid run uses", function()
+      for _, severity in ipairs({"critical", "high", "medium", "low"}) do
+         local ok = api.validate_options({severity_threshold = severity, fail_on = severity})
+         assert_true(ok, "refused valid severity " .. severity)
+      end
+      for _, confidence in ipairs({"certain", "high", "medium", "low"}) do
+         local ok = api.validate_options({min_confidence = confidence})
+         assert_true(ok, "refused valid confidence " .. confidence)
+      end
+   end)
 end)
 
 describe("a source declared through the options table", function()

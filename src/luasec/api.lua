@@ -123,6 +123,32 @@ local function validate_config(opts)
       end
    end
 
+   -- Severity and confidence values name a rank the analyzer looks up in a table
+   -- keyed by word: a typo like "crtical" was not a key, so the lookup fell to 0
+   -- and every finding sat above it. The threshold silently did nothing, the
+   -- confidence filter let everything through, and --fail-on handed CI a green
+   -- build for a file full of criticals. All three are configuration, so a bad
+   -- word is a config error -- the operator needs to know before any analysis.
+   local SEVERITY_VALUES = {critical = true, high = true, medium = true, low = true}
+   local CONFIDENCE_VALUES = {certain = true, high = true, medium = true, low = true}
+
+   for _, option in ipairs({
+      {key = "severity_threshold", flag = "--severity-threshold", valid = SEVERITY_VALUES},
+      {key = "fail_on", flag = "--fail-on", valid = SEVERITY_VALUES},
+      {key = "min_confidence", flag = "--min-confidence", valid = CONFIDENCE_VALUES},
+   }) do
+      local value = opts[option.key]
+      if value ~= nil then
+         if type(value) ~= "string" or not option.valid[value] then
+            local valid = option.flag == "--min-confidence"
+               and "certain, high, medium, low"
+               or "critical, high, medium, low"
+            return nil, ("%s needs one of %s, got %s"):format(option.flag, valid,
+               type(value) == "string" and value or type(value))
+         end
+      end
+   end
+
    -- Carried on every declared source and reported as the confidence of anything
    -- it reaches, and read as a pattern on the way: 42 here reached the wildcard
    -- matcher as a nil pattern.
