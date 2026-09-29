@@ -37,12 +37,19 @@ function baseline.read(path)
    end
 
    local known = {}
-   for _, finding in ipairs(document.findings) do
-      if type(finding) == "table" then
-         known[contract.fingerprint({
-            code = finding.code, name = finding.name, file = finding.file,
-         })] = finding
+   for index, finding in ipairs(document.findings) do
+      if type(finding) ~= "table" then
+         return nil, ("cannot use baseline %s: finding %d is not a table"):format(path, index)
       end
+      for _, field in ipairs({"code", "name", "file"}) do
+         local value = finding[field]
+         if type(value) ~= "string" then
+            return nil, ("cannot use baseline %s: finding %d field '%s' is missing or not a string"):format(path, index, field)
+         end
+      end
+      known[contract.fingerprint({
+         code = finding.code, name = finding.name, file = finding.file,
+      })] = finding
    end
 
    return known
