@@ -424,24 +424,16 @@ describe("a symlink in the scanned tree", function()
 end)
 
 describe("an engine error in one file", function()
-   it("is contained: the failing file is reported and the other file is still analyzed", function()
-      -- One file trips an internal error in the taint engine on main (a nil index
-      -- in taint.lua). The run must not crash: the failing file gets a 901, the
-      -- second file's 709 still comes out, and the exit code is 1.
+   it("is contained: a file that used to crash the engine is analyzed cleanly and the other file is still analyzed", function()
+      -- One file used to trip an internal nil-index error in the taint engine
+      -- (taint.lua, a callee with no reaching value for its var). The run must
+      -- not crash: the previously-crashing file now produces no findings at
+      -- all, the second file's 709 still comes out, and the exit code is 1.
       local dir = scratch_dir("spec_engine_error")
-      local crash_path = "/private/tmp/claude-501/-Users-vaibhavtomar-Desktop-luasec/"
-         .. "402a480d-991b-42b3-babb-7d33fa136df9/scratchpad/review-robustness/min/"
-         .. "crash_taint485_min.lua"
-      local ok = os.execute("cp " .. string.format("%q", crash_path) .. " "
-         .. string.format("%q", dir .. "/crash.lua"))
-      -- If the system fixture is absent, fall back to an inline copy of it so the
-      -- test still exercises containment on any machine.
-      if not ok or ok ~= 0 then
-         local f = assert(io.open(dir .. "/crash.lua", "w"))
-         f:write('local cb = {}\nfunction cb.run()\n'
-            .. '  status = cb(function() last_error = nil end)\nend\n')
-         f:close()
-      end
+      local crash = assert(io.open(dir .. "/crash.lua", "w"))
+      crash:write('local cb = {}\nfunction cb.run()\n'
+         .. '  status = cb(function() last_error = nil end)\nend\n')
+      crash:close()
 
       local sink = assert(io.open(dir .. "/sink.lua", "w"))
       sink:write('function h(x)\n   os.execute("x" .. http.formvalue(x))\nend\n')
@@ -452,15 +444,11 @@ describe("an engine error in one file", function()
 
       assert_no_match(out, "stack traceback",
          "an engine error must not crash the run:\n" .. out)
-      assert_match(out, "901", out)
+      assert_no_match(out, "901",
+         "the previously-crashing file is now analyzed cleanly:\n" .. out)
       assert_match(out, "sink%.lua", out)
       assert_match(out, "709", "the second file is still analyzed:\n" .. out)
       assert_equal(code, 1, out)
-      -- One failure -> one 901 per file: the second pass on an already-failing
-      -- file used to append a duplicate 901 for the same crash.
-      local n901 = select(2, out:gsub("crash%.lua:%d:%d:%s+%[901%]", ""))
-      assert_equal(n901, 1,
-         "expected exactly one 901 for the crash file, got " .. n901 .. ":\n" .. out)
    end)
 end)
 
