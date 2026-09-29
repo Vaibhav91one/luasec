@@ -23,7 +23,7 @@ local SHELL_METACHARS = "; | & $ ` ( ) < > newline"
 
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
-local emit, check_sink, build_trace, snippet_at, code_confidence
+local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint
 
 -- ------------------------------------------------------------ taint sets
 -- A taint set is a set of descriptors keyed by id so union is cheap and
@@ -487,66 +487,11 @@ local function taint_of_call(node, item, state, depth)
       end
       if fn and state.returns and state.returns[fn] and not state.returning[fn] then
          local arg_nodes = args_of(node)
-         local formals = {}
-         for _, arg in ipairs(fn[1] or {}) do
-            if arg.var then formals[#formals + 1] = arg.var end
-         end
-
-         -- Context-sensitive bindings: each formal -> its argument's taint.
-         local saved = {}
          local arg_taints = {}
-         for i, var in ipairs(formals) do
-            saved[i] = state.arg_binding[var]
-            local arg = arg_nodes[i]
-            if arg then
-               arg_taints[i] = taint_of_expr(arg, item, state, depth + 1)
-            else
-               arg_taints[i] = new_set()
-            end
-            state.arg_binding[var] = arg_taints[i]
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
          end
-         state.returning[fn] = true
-
-         -- Cache key: sorted descriptor ids of each bound argument, joined
-         -- by formals with ";", so the same argument taint rebinds at once.
-         local parts = {}
-         for i, var in ipairs(formals) do
-            local ids = {}
-            for _, d in pairs(arg_taints[i]) do ids[#ids + 1] = d.id end
-            table.sort(ids)
-            parts[i] = table.concat(ids, ",")
-         end
-         local key = table.concat(parts, ";")
-
-         local cached = state.return_cache[fn] and state.return_cache[fn][key]
-         if cached then
-            set_union_into(result, cached)
-         else
-            local ret = new_set()
-            local ok, err = pcall(function()
-               for _, r in ipairs(state.returns[fn]) do
-                  set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
-               end
-            end)
-            if not ok then
-               state.returning[fn] = nil
-               for i, var in ipairs(formals) do
-                  state.arg_binding[var] = saved[i]
-               end
-               error(err)
-            end
-            -- Store a copy so later mutation of result cannot corrupt the cache.
-            local copy = new_set()
-            for _, d in pairs(ret) do copy[d.id] = d end
-            if not state.return_cache[fn] then state.return_cache[fn] = {} end
-            state.return_cache[fn][key] = copy
-            set_union_into(result, ret)
-         end
-
-         state.returning[fn] = nil
-         for i, var in ipairs(formals) do
-            state.arg_binding[var] = saved[i]
-         end
+         set_union_into(result, return_taint(fn, arg_taints, state, depth))
       end
    end
 
@@ -586,6 +531,75 @@ taint_of_expr = function(node, item, state, depth)
    end
 
    return new_set()
+end
+
+-- Evaluate a function's return taint given the taint of its call-site arguments.
+-- Binds each formal parameter to its argument's taint (context-sensitive), walks
+-- the function's recorded return expressions, memoises the result, and restores
+-- the caller's binding state. Returns a new taint set.
+return_taint = function(fn, arg_taints, state, depth)
+   local result = new_set()
+   if not (fn and state.returns and state.returns[fn]) or state.returning[fn] then
+      return result
+   end
+
+   local formals = {}
+   for _, arg in ipairs(fn[1] or {}) do
+      if arg.var then formals[#formals + 1] = arg.var end
+   end
+
+   -- Context-sensitive bindings: each formal -> its argument's taint.
+   local saved = {}
+   for i, var in ipairs(formals) do
+      saved[i] = state.arg_binding[var]
+      local arg_taint = arg_taints[i]
+      if not arg_taint then arg_taint = new_set() end
+      state.arg_binding[var] = arg_taint
+   end
+   state.returning[fn] = true
+
+   -- Cache key: sorted descriptor ids of each bound argument, joined
+   -- by formals with ";", so the same argument taint rebinds at once.
+   local parts = {}
+   for i, var in ipairs(formals) do
+      local ids = {}
+      for _, d in pairs(arg_taints[i] or new_set()) do ids[#ids + 1] = d.id end
+      table.sort(ids)
+      parts[i] = table.concat(ids, ",")
+   end
+   local key = table.concat(parts, ";")
+
+   local cached = state.return_cache[fn] and state.return_cache[fn][key]
+   if cached then
+      set_union_into(result, cached)
+   else
+      local ret = new_set()
+      local ok, err = pcall(function()
+         for _, r in ipairs(state.returns[fn]) do
+            set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
+         end
+      end)
+      if not ok then
+         state.returning[fn] = nil
+         for i, var in ipairs(formals) do
+            state.arg_binding[var] = saved[i]
+         end
+         error(err)
+      end
+      -- Store a copy so later mutation of result cannot corrupt the cache.
+      local copy = new_set()
+      for _, d in pairs(ret) do copy[d.id] = d end
+      if not state.return_cache[fn] then state.return_cache[fn] = {} end
+      state.return_cache[fn][key] = copy
+      set_union_into(result, ret)
+   end
+
+   state.returning[fn] = nil
+   for i, var in ipairs(formals) do
+      state.arg_binding[var] = saved[i]
+   end
+
+   return result
 end
 
 -- Record taint written into a table constructor or a field assignment.
