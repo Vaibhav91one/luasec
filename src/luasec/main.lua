@@ -1,5 +1,6 @@
 -- CLI entry point.
 local args_parser = require "luasec.cli.args"
+local config_file = require "luasec.cli.config"
 local walk = require "luasec.cli.walk"
 local api = require "luasec.api"
 local baseline = require "luasec.cli.baseline"
@@ -255,6 +256,28 @@ local function run(argv)
          :format(opts.format))
    end
 
+   -- The config file fills in what the command line left unset; a flag always
+   -- wins. A config that cannot be read or checked is an error, not a default.
+   local settings = {}
+   if not opts.no_config then
+      local path = opts.config
+      if not path then
+         local probe = io.open(config_file.DEFAULT_NAME, "rb")
+         if probe then probe:close() path = config_file.DEFAULT_NAME end
+      end
+      if path then
+         local loaded, config_error = config_file.load(path)
+         if not loaded then return fail(config_error) end
+         settings = loaded
+      end
+   end
+   opts.std = opts.std or settings.std
+   opts.fail_on = opts.fail_on or settings.fail_on
+   for _, pattern in ipairs(settings.disable or {}) do
+      opts.ignore = opts.ignore or {}
+      opts.ignore[#opts.ignore + 1] = pattern
+   end
+
    -- `--max-nodes $UNSET_VAR` reached the analysis as the string "abc" and
    -- `max_nodes + 1` raised out of the CLI as a traceback with exit 1, which
    -- this tool defines as "findings": a CI with a typo in a variable gets a
@@ -302,6 +325,11 @@ local function run(argv)
    -- rather than a phrase in the message. Matching on the message text meant
    -- 901 parse failures and 904 skipped analyses were never counted, and
    -- --only 708 deleted the 901 before this code ever saw it.
+   for _, finding in ipairs(report) do
+      local override = settings.severity and settings.severity[finding.code]
+      if override then finding.severity = override end
+   end
+
    local unanalyzed = 0
    for _, finding in ipairs(report) do
       if degraded.is_degraded(finding.code) then
@@ -310,6 +338,8 @@ local function run(argv)
    end
 
    report = apply_rules(report, opts)
+
+   report = config_file.apply_allow(report, settings.allow)
 
    -- Counted above, acted on after the report is written: a run that skipped
    -- part of its input still has to show what it found, and the count is taken

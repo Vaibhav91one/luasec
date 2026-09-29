@@ -4,6 +4,7 @@ local args = {}
 
 local FLAGS_WITH_VALUE = {
    ["--format"] = "format",
+   ["--config"] = "config",
    ["--std"] = "std",
    ["--severity-threshold"] = "severity_threshold",
    ["--min-confidence"] = "min_confidence",
@@ -28,6 +29,7 @@ local BOOLEAN_FLAGS = {
    ["--no-dynamic-sinks"] = "no_dynamic_sinks",
    ["--quiet"] = "quiet",
    ["--ranges"] = "ranges",
+   ["--no-config"] = "no_config",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -137,6 +139,9 @@ selection:
   --min-confidence <c>       lowest confidence to report: certain, high, medium, low
   --baseline <file.json>    report only what is new since that json report
   --fail-on <severity>       exit 1 at or above this severity
+  --config <file>            read settings from this file (default: luasec.config.lua
+                             in the current directory, if present)
+  --no-config                ignore luasec.config.lua
 
 analysis:
   --whole-program            resolve calls across files. Follows require edges
