@@ -221,10 +221,10 @@ the verdict itself are luasec's, and come from the sandbox rather than the paylo
   explicit mode that runs one snippet, in a child process, under the bounds above.
 - No whole-program analysis by default: `--whole-program` resolves calls across
   files, which is slower and needs a real rootfs.
-- No taint through a return value, with or without `--whole-program`. A required
-  module is entered through its parameters, and a function that hands its
-  argument back (`function M.id(x) return x end`) is opaque to the analysis: the
-  flow stops there and no finding is produced. Firmware that pipes request data
-  through such a helper is missed, and that is a known limit rather than a
-  clean bill of health.
+- Taint follows a local function's return value. A `local function` that hands
+  its argument back (`local function id(x) return x end`) is followed, so
+  `os.execute(id(http.formvalue("h")))` is reported. A module field (`M.id`)
+  and a cross-file return are not followed: that flow stops and no finding is
+  produced. Firmware that pipes request data through such a helper is missed,
+  and that is a known limit rather than a clean bill of health.
 - Bytecode is triaged, not decompiled.

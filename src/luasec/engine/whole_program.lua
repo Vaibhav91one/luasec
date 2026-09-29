@@ -16,8 +16,10 @@
 -- Taint crosses the boundary as parameter taint: the descriptors computed at the
 -- call site are unioned into the callee's formal parameters, which is the
 -- mechanism the intra-file interprocedural pass already uses, so everything the
--- taint engine propagates (concatenation, table fields, returns, sanitizers)
--- keeps working inside the other file.
+-- taint engine propagates (concatenation, table fields, sanitizers) keeps
+-- working inside the other file. Returns are followed only within a single
+-- file: a local function's return value is followed, a module field and a
+-- cross-file return are not.
 --
 -- The finding belongs to the file that holds the sink. Every step of its trace
 -- names the file that step is in, so a flow crossing three files says which

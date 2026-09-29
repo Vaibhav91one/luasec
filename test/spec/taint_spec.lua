@@ -333,6 +333,86 @@ return run
       assert_equal(by_code["708"].severity, "high",
          "708 carries the severity of the sink it wraps, because it replaces 701 there")
    end)
+
+   it("follows a tainted argument passed through a local id function (A)", function()
+      local report = api.check_source([[
+local function id(x) return x end
+local v = id(http.formvalue("h"))
+os.execute(v)
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("709", 1, true),
+         "a passing id helper must not hide the flow: " .. table.concat(found, ","))
+      assert_true(table.concat(found, ","):find("708", 1, true) == nil,
+         "no exposure when the source is visible through the return: " .. table.concat(found, ","))
+   end)
+
+   it("follows a tainted argument passed through a local id function inline (B)", function()
+      local report = api.check_source([[
+local function id(x) return x end
+os.execute(id(http.formvalue("h")))
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("709", 1, true),
+         "an inline call through id must not hide the flow: " .. table.concat(found, ","))
+      assert_true(table.concat(found, ","):find("708", 1, true) == nil,
+         "no exposure when the source is visible through the return: " .. table.concat(found, ","))
+   end)
+
+   it("follows a tainted source returned from a local function (C)", function()
+      local report = api.check_source([[
+local function get() return http.formvalue("h") end
+os.execute(get())
+]])
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("709", 1, true),
+         "a local function returning a source must not hide the flow: " .. table.concat(found, ","))
+      assert_true(table.concat(found, ","):find("708", 1, true) == nil,
+         "no exposure when the source is visible through the return: " .. table.concat(found, ","))
+   end)
+
+   it("stays silent when a local id function is only ever called with a constant", function()
+      local report = api.check_source([[
+local function id(x) return x end
+os.execute(id("ls"))
+]])
+      for _, finding in ipairs(report) do
+         assert_true(finding.code ~= "709",
+            "a constant argument through id must not produce 709: " .. finding.code)
+      end
+   end)
+
+   it("terminates on a directly recursive id function fed a source", function()
+      local started = os.clock()
+      api.check_source([[
+local function r(x)
+   if x then return r(x) end
+   return x
+end
+os.execute(r(http.formvalue("h")))
+]])
+      local elapsed = os.clock() - started
+      assert_true(elapsed < 3, ("recursion took %.1fs"):format(elapsed))
+   end)
+
+   it("terminates on a fan-out chain of id functions under 3 s", function()
+      local started = os.clock()
+      local lines = {"local function f0(x) return x end"}
+      for i = 1, 12 do
+         lines[#lines + 1] = ("local function f%d(x) return f%d(x) .. f%d(x) .. f%d(x) .. f%d(x) end"):format(i, i - 1, i - 1, i - 1, i - 1)
+      end
+      lines[#lines + 1] = 'os.execute(f12(http.formvalue("h")))'
+      local report = api.check_source(table.concat(lines, "\n"))
+      local elapsed = os.clock() - started
+      assert_true(elapsed < 3, ("fan-out chain took %.1fs, not linear"):format(elapsed))
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("709", 1, true),
+         "the fan-out chain must still report 709: " .. table.concat(found, ","))
+   end)
 end)
 
 describe("sources beyond HTTP", function()

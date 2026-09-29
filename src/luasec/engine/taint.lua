@@ -6,7 +6,9 @@
 --
 -- Sources introduce taint at a call site. Propagation moves it through
 -- concatenation, assignments, table fields, string/table library calls and
--- function returns. Sinks consume it and produce findings.
+-- the return value of a local function (the function and its returns live in
+-- the same file). A module field (M.id) and a cross-file return are not
+-- followed. Sinks consume it and produce findings.
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
@@ -330,7 +332,12 @@ local function taint_of_var(node, item, state)
       })
    end
 
-   if var and state.param_taint[var] then
+   if var and state.arg_binding and state.arg_binding[var] then
+      -- Taint bound to this formal parameter for the call currently being
+      -- evaluated by taint_of_call. Takes precedence over param_taint, which
+      -- is the context-insensitive merge over all call sites.
+      set_union_into(result, state.arg_binding[var])
+   elseif var and state.param_taint[var] then
       -- Taint bound to a formal parameter by the interprocedural pass. A
       -- parameter has no reaching definition of its own, so this is the only
       -- way an argument's taint reaches the body.
@@ -392,6 +399,9 @@ local function taint_of_call(node, item, state, depth)
    elseif node[1] and node[1].tag == "Index" and node[1][2] and node[1][2].tag == "String" then
       method_name = node[1][2][1]
    end
+   -- Hoisted so the fallback (below the `if path then` block) can read it.
+   local sanitized
+
    if method_name then
       local by_method = platform_api.match_method_source(method_name)
       if by_method then
@@ -434,7 +444,7 @@ local function taint_of_call(node, item, state, depth)
 
       -- A function defined in this file that quotes its argument neutralizes
       -- taint for shell sinks.
-      local sanitized = platform_api.is_sanitizer("shell", path)
+      sanitized = platform_api.is_sanitizer("shell", path)
       if not sanitized and node[1] and node[1].tag == "Id" and node[1].var then
          for _, value in ipairs((item.used_values or {})[node[1].var] or {}) do
             if value.node and value.node.tag == "Function" and looks_like_shell_quote(value.node) then
@@ -456,6 +466,88 @@ local function taint_of_call(node, item, state, depth)
    -- (e.g. `local f = tainted_module`), so include the callee's taint.
    if node.tag ~= "Invoke" then
       set_union_into(result, taint_of_expr(callee, item, state, depth + 1))
+   end
+
+   -- Follow a local function's return value: bind each formal parameter to the
+   -- taint of the matching argument at this call site, then propagate through
+   -- the function's return expressions as context-sensitive bindings. A guard
+   -- on state.returning[fn] prevents unbounded recursion on a function that
+   -- returns its own call.
+   -- ponytail: local functions only; a module field (M.id) and cross-file
+   -- returns are not followed.
+   if not sanitized and node.tag == "Call"
+         and node[1] and node[1].tag == "Id" and node[1].var
+         and item and item.used_values then
+      local fn
+      for _, value in ipairs(item.used_values[node[1].var]) do
+         if value.node and value.node.tag == "Function" then
+            fn = value.node
+            break
+         end
+      end
+      if fn and state.returns and state.returns[fn] and not state.returning[fn] then
+         local arg_nodes = args_of(node)
+         local formals = {}
+         for _, arg in ipairs(fn[1] or {}) do
+            if arg.var then formals[#formals + 1] = arg.var end
+         end
+
+         -- Context-sensitive bindings: each formal -> its argument's taint.
+         local saved = {}
+         local arg_taints = {}
+         for i, var in ipairs(formals) do
+            saved[i] = state.arg_binding[var]
+            local arg = arg_nodes[i]
+            if arg then
+               arg_taints[i] = taint_of_expr(arg, item, state, depth + 1)
+            else
+               arg_taints[i] = new_set()
+            end
+            state.arg_binding[var] = arg_taints[i]
+         end
+         state.returning[fn] = true
+
+         -- Cache key: sorted descriptor ids of each bound argument, joined
+         -- by formals with ";", so the same argument taint rebinds at once.
+         local parts = {}
+         for i, var in ipairs(formals) do
+            local ids = {}
+            for _, d in pairs(arg_taints[i]) do ids[#ids + 1] = d.id end
+            table.sort(ids)
+            parts[i] = table.concat(ids, ",")
+         end
+         local key = table.concat(parts, ";")
+
+         local cached = state.return_cache[fn] and state.return_cache[fn][key]
+         if cached then
+            set_union_into(result, cached)
+         else
+            local ret = new_set()
+            local ok, err = pcall(function()
+               for _, r in ipairs(state.returns[fn]) do
+                  set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
+               end
+            end)
+            if not ok then
+               state.returning[fn] = nil
+               for i, var in ipairs(formals) do
+                  state.arg_binding[var] = saved[i]
+               end
+               error(err)
+            end
+            -- Store a copy so later mutation of result cannot corrupt the cache.
+            local copy = new_set()
+            for _, d in pairs(ret) do copy[d.id] = d end
+            if not state.return_cache[fn] then state.return_cache[fn] = {} end
+            state.return_cache[fn][key] = copy
+            set_union_into(result, ret)
+         end
+
+         state.returning[fn] = nil
+         for i, var in ipairs(formals) do
+            state.arg_binding[var] = saved[i]
+         end
+      end
    end
 
    return result
@@ -721,6 +813,9 @@ end
 local function propagate(chstate, state, opts)
    for _ = 1, MAX_ITERATIONS do
       local changed = false
+      -- Cached return taint is only valid for the current value_taint snapshot:
+      -- taint only grows, so a cached answer computed before growth may be stale.
+      state.return_cache = {}
 
       for _, line in ipairs(chstate.lines) do
          for _, item in ipairs(line.items) do
@@ -815,6 +910,42 @@ function taint.run(chstate, opts, existing_state)
    if existing_state then
       state.approx = false
    end
+
+   -- Index each local function's return expressions once per chstate. run()
+   -- is called more than once with the same state (the interprocedural pass
+   -- re-runs propagation), so build this lazily and cache it on the state.
+   if not state.returns then
+      state.returns = {}
+      for _, line in ipairs(chstate.lines) do
+         if line.node and line.node.tag == "Function" then
+            local exprs = {}
+            for index, item in ipairs(line.items) do
+               if item.tag == "Noop" and type(item.node) == "table"
+                     and item.node.tag == "Return" then
+                  for next_index = index + 1, #line.items do
+                     local following = line.items[next_index]
+                     if following.tag ~= "Eval" then break end
+                     if type(following.node) == "table" then
+                        exprs[#exprs + 1] = {node = following.node, item = following}
+                     end
+                  end
+               end
+            end
+            state.returns[line.node] = exprs
+         end
+      end
+   end
+
+   -- arg_binding: context-sensitive binding for the call currently being
+   -- evaluated by taint_of_call; a map from var -> taint set. nil when none.
+   state.arg_binding = state.arg_binding or {}
+   -- returning[fn] = true while we are mid-evaluation of fn's returns, so a
+   -- recursive call cannot descend into itself.
+   state.returning = state.returning or {}
+   -- return_cache: fn -> { [argkey] = taint_set }, memoising a function's
+   -- return taint for a given binding of its arguments. Cleared every
+   -- propagate iteration so cached answers cannot outlive value_taint growth.
+   state.return_cache = state.return_cache or {}
 
    if state.approx then
       -- One forward pass. No loops, no closures, no reaching definitions: enough

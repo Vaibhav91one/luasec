@@ -77,9 +77,10 @@ this corpus will not notice, which has happened more than once.
 Stated plainly, because a security tool that overstates its coverage is worse
 than one that does not have the feature.
 
-- **Taint does not follow a return value.** A function that hands its argument
-  back — `function M.id(x) return x end` — is opaque. A flow through it is not
-  reported. Firmware that pipes request data through such a helper is missed.
+- **Taint follows a local function's return value, not a module field's.** A
+  local `id` that hands its argument back — `local function id(x) return x end` —
+  is followed, so `os.execute(id(http.formvalue("h")))` is reported. A module
+  field (`M.id`) and a cross-file return are not followed: that flow is missed.
 - **A call that returns a cursor is opaque to the credential rule.** A factory
   named `open_section()` that returns `uci.cursor()` is not recognised as a
   config handle, so a credential written through it is not reported.
