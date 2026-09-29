@@ -2,8 +2,8 @@
 --
 --   check_source(src, opts)      analyze one Lua string, return a report (findings)
 --   analyze(paths, opts)         analyze files, return a report
---   format(report, name)         render a report
---   rules.load(path)             load a custom rules file
+--   format(report, name, opts)   render a report
+--   rules_load(paths)            load custom rules files
 --   validate_payload(src, opts)  run the payload validator, return a verdict
 local parse_context = require "luasec.engine.parse_context"
 local taint_engine = require "luasec.engine.taint"
