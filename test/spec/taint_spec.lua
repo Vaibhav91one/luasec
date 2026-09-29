@@ -397,6 +397,22 @@ os.execute(r(http.formvalue("h")))
       local elapsed = os.clock() - started
       assert_true(elapsed < 3, ("recursion took %.1fs"):format(elapsed))
    end)
+
+   it("terminates on a fan-out chain of id functions under 3 s", function()
+      local started = os.clock()
+      local lines = {"local function f0(x) return x end"}
+      for i = 1, 12 do
+         lines[#lines + 1] = ("local function f%d(x) return f%d(x) .. f%d(x) .. f%d(x) .. f%d(x) end"):format(i, i - 1, i - 1, i - 1, i - 1)
+      end
+      lines[#lines + 1] = 'os.execute(f12(http.formvalue("h")))'
+      local report = api.check_source(table.concat(lines, "\n"))
+      local elapsed = os.clock() - started
+      assert_true(elapsed < 3, ("fan-out chain took %.1fs, not linear"):format(elapsed))
+      local found = {}
+      for _, finding in ipairs(report) do found[#found + 1] = finding.code end
+      assert_true(table.concat(found, ","):find("709", 1, true),
+         "the fan-out chain must still report 709: " .. table.concat(found, ","))
+   end)
 end)
 
 describe("sources beyond HTTP", function()
