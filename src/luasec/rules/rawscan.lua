@@ -424,6 +424,10 @@ function Lexer:next_token()
             last = self.src:byte(self.pos)
             self.pos = self.pos + 1
          until not (is_alnum(last) or last == 46)
+         -- The loop reads one byte past the number to find its end. That byte
+         -- is not part of the token - and when it is a newline, skip_space is
+         -- what has to count it - so it is given back.
+         self.pos = self.pos - 1
          if last == 101 or last == 69 or last == 112 or last == 80 then
             local sign = self.src:byte(self.pos)
             if sign == 43 or sign == 45 then self.pos = self.pos + 1 end
