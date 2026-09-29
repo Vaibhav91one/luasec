@@ -234,6 +234,94 @@ test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reach
 Total: 1 finding (1 critical)
 ```
 
+## Config file
+
+`luasec.config.lua` in the current directory is loaded when it exists.
+`--config <file>` loads that file instead; `--no-config` skips the file.
+A missing `--config` file is an error (exit `2`), never a silent default.
+
+The file is a Lua chunk returning a table, loaded as text in an empty
+environment: data only, no globals, no code. Valid keys are `std` (string),
+`fail_on` (severity), `disable` (list of code patterns, same as `--ignore`),
+`severity` (map of code to severity override), and `allow` (list of
+`{code, file, reason}`; `reason` is required). Any other key, a bad value, or
+an unregistered code exits `2` with a message listing what is valid.
+
+```lua
+return {
+  std = "+openwrt+luci",
+  fail_on = "high",
+  disable = {"705"},
+  severity = {["709"] = "low"},
+  allow = {{code = "709", file = "handler.lua", reason = "reviewed: sanitized upstream"}},
+}
+```
+
+```sh
+bin/luasec --config luasec.config.lua test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec: allowed 1 finding(s) of 709 in handler.lua: reviewed: sanitized upstream
+Total: 0 findings (none)
+```
+
+Exit code is `0` — the allowed finding is removed from the report.
+
+Command-line flags win: `--std` and `--fail-on` override the config, and
+`disable` is added to `--ignore`. Severity overrides apply before thresholds
+and `--fail-on`:
+
+```sh
+bin/luasec --config sev.lua --fail-on high test/fixtures/tainted_exec/handler.lua
+```
+
+where `sev.lua` holds `return {severity = {["709"] = "low"}}`:
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] low: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 low)
+```
+
+Exit code is `0` — the 709 now reports as `low`, below `--fail-on high`.
+
+Each `allow` entry removes findings with that code (and, when `file` is
+given, whose path equals `file` or ends with `"/" .. file`). Every entry
+writes one line to stderr, so nothing is silenced without a trace. An entry
+that matched nothing says so and the run continues:
+
+```sh
+bin/luasec --config stale.lua test/fixtures/tainted_exec/handler.lua
+```
+
+where `stale.lua` holds `return {allow = {{code = "701", reason = "old suppression"}}}`:
+
+```
+luasec: config allow for 701 in any file matched nothing
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
+```
+
+A bad config stops the run with exit `2`:
+
+```sh
+bin/luasec --config bad.lua test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec: cannot use config bad.lua: unknown key 'fail_onn': expected allow, disable, fail_on, severity, std
+```
+
+```sh
+bin/luasec --config /nonexistent/luasec.config.lua test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec: cannot read config /nonexistent/luasec.config.lua: /nonexistent/luasec.config.lua: No such file or directory
+```
+
 ## CI and exit codes
 
 Exit codes from a static scan:
