@@ -35,6 +35,10 @@ Both work on the same parsed program.
   source ──▶ [8] validator  child process, recorders for os/io, bounded
 ```
 
+The health score lives in report/score.lua and the code categories in
+rules/categories.lua. Both are computed from a finding's code, severity and
+confidence and never stored in the finding itself.
+
 ## Why luacheck is the base
 
 Luacheck already solves the parts that are expensive to get right:
