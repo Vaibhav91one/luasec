@@ -211,8 +211,10 @@ executed the analyzer over the corpus.
 ## Status
 
 Beta. It finds real RCE in real firmware, its measurement is reproducible, and
-its known limits are listed above rather than discovered by a user. It has not
-been through an adversarial review by anyone outside the process that wrote it.
+its known limits are listed above rather than discovered by a user. It has had
+adversarial review by independent AI agents, whose findings are fixed (see
+REVIEW.md). It has not been reviewed by a human security researcher outside the
+project.
 
 ## Why firmware
 
