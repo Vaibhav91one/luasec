@@ -387,3 +387,23 @@ describe("raw scan on a file that does not parse", function()
       end
    end)
 end)
+
+describe("line numbers after a parse error", function()
+   it("reports the sink on its own line when earlier lines fail to parse", function()
+      local cases = {
+         {"x = !\na = 1\nb = 2\nio.popen(c)\n", 4},
+         {"if a != 0 then\na = 1\nend\nio.popen(c)\n", 4},
+         {"x = !\nlocal s = \"\\-\"\nb = 2\nc = 3\nio.popen(c)\n", 5},
+         {"local s = \"\\-\"\na = 1\nb = 2\nc = 3\nx = !\nio.popen(c)\n", 6},
+      }
+      for _, case in ipairs(cases) do
+         local source, expected = case[1], case[2]
+         local report = api.check_source(source)
+         local sink = with_code(report, "702")
+         assert_true(sink ~= nil,
+            "expected a 702 finding on line " .. expected .. "; got " .. codes(report))
+         assert_equal(sink.line, expected,
+            "the 702 finding must be on the io.popen line in " .. string.format("%q", source))
+      end
+   end)
+end)
