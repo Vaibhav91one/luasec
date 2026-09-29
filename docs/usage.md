@@ -486,6 +486,40 @@ luasec: cannot load profile /nonexistent: cannot open /nonexistent: No such file
 `--rules` is repeatable. Each file is loaded and merged into the profile set
 before analysis.
 
+## Rules catalogue
+
+`luasec rules` (or `luasec rules list`) prints one line per registered code,
+and `luasec rules explain <code>` prints that code's doc page unchanged:
+
+```sh
+bin/luasec rules list | head -5
+```
+
+```
+012  meta      low       CWE-0    a luasec suppression directive could not be read
+701  exec      high      CWE-78   command execution with a non-constant argument
+702  exec      high      CWE-78   pipe opened with a non-constant command
+703  exec      high      CWE-94   dynamic code evaluation with a non-constant argument
+704  exec      high      CWE-94   code or script loaded from a non-constant path
+```
+
+```sh
+bin/luasec rules explain 709 | head -8
+```
+
+```
+# 709 untrusted data reaches command execution
+
+Severity: critical · Confidence: high · CWE: CWE-78
+
+## What it means
+
+Luasec traced untrusted data, such as an HTTP request parameter, into a command execution sink. This is a proven injection, not just a dynamic argument: the finding names the sink, the source, and the trace between them. In firmware this is remote shell execution off a web handler.
+```
+
+A subcommand is recognised only as the first argument, exactly `rules`, so a
+directory named `rules` is still scanned when passed as a path (`./rules`).
+
 ## `--whole-program`
 
 By default each file is analyzed in isolation. `--whole-program` follows `require`

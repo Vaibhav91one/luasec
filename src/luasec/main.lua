@@ -228,7 +228,21 @@ local function validate(opts)
    return VERDICT_EXIT[verdict.verdict] or EXIT_ERROR
 end
 
+-- Subcommands, recognised only as the first word, exactly, so a path is never
+-- mistaken for one: a directory called rules is scanned as ./rules. Each module
+-- exposes run(argv, root) with the words after the subcommand and the
+-- installation directory, and returns the exit code.
+local SUBCOMMANDS = {
+   rules = "luasec.cli.rules_cmd",
+}
+
 local function run(argv)
+   local subcommand = SUBCOMMANDS[argv[1]]
+   if subcommand then
+      local root = (arg and arg[0] or ""):match("^(.*)/src/luasec/main%.lua$") or "."
+      -- luasec: ignore 705  the module name comes from the SUBCOMMANDS table above, not from input
+      return require(subcommand).run({table.unpack(argv, 2)}, root)
+   end
    local opts, parse_error = args_parser.parse(argv)
    if not opts then return fail(parse_error) end
 
