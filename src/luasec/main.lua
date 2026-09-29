@@ -150,7 +150,13 @@ end
 -- baseline path and the ordinary path must obey the same -o and --quiet
 -- contract, or a report that only appears on one of them is worse than neither.
 local function emit(list, format, opts)
-   local output = render.render(list, format, opts)
+   -- --score answers one question, so it prints one number and nothing else.
+   local output
+   if opts.score then
+      output = tostring(api.score(list).score)
+   else
+      output = render.render(list, format, opts)
+   end
 
    if opts.output then
       local handle, open_error = io.open(opts.output, "wb")
