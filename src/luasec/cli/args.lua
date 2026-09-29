@@ -120,6 +120,7 @@ usage: luasec [options] <file|directory>...
        luasec why <file>:<line> [options]
        luasec fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
        luasec install [--dir <project>] [claude] [cursor] [agents]
+       luasec ci install [--dir <project>] [--force]
 
 input:
   <path>                     Lua file, or directory to scan recursively
@@ -178,6 +179,7 @@ other:
   why <file>:<line>          explain the findings on one line and how to fix them
   fix                        hand the findings to an AI agent (approvals skipped unless --safe)
   install                    write agent guidance: Claude skill, Cursor rule, AGENTS.md
+  ci install                 write a GitHub workflow that runs the luasec action
 
 with --baseline: 0 nothing new, 3 at least one new finding at or above --fail-on.
 A finding already in the baseline is not reported, and one that was in the

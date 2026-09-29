@@ -64,3 +64,17 @@ jobs:
         with:
           sarif_file: luasec.sarif
           category: luasec
+
+  action:
+    # The action this repository publishes, run from this checkout on a clean
+    # file, so a broken action.yml fails here and not in someone else's CI.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: luasec
+        uses: ./
+        with:
+          path: test/fixtures/clean
+          upload-sarif: "false"
+      - name: The action reports a score
+        run: test "${{ steps.luasec.outputs.score }}" = "100"
