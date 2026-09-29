@@ -55,9 +55,7 @@ default), `low` (shape only, no proven flow).
 | Code | Severity | CWE | Meaning |
 | --- | --- | --- | --- |
 | 741 | critical | CWE-94 | obfuscated code loader |
-| 742 | high | CWE-94 | precompiled code dump used to reconstitute a function |
 | 743 | critical | CWE-94 | decoded data fed to an execution sink |
-| 744 | high | CWE-94 | dynamic evaluation wrapped in error suppression |
 | 745 | medium | CWE-693 | anti-analysis or watchdog behaviour |
 | 746 | critical | CWE-506 | embedded machine-code blob |
 | 747 | high | CWE-798 | hardcoded credential |
@@ -124,7 +122,6 @@ embedding it.
 | 801 | medium | - | Lua bytecode file, source cannot be analyzed |
 | 802 | high | CWE-94 | bytecode references an execution sink |
 | 803 | low | - | bytecode format does not match the assumed interpreter |
-| 804 | medium | - | highly obfuscated source |
 | 805 | low | - | file is not parseable Lua despite its name |
 
 ### 8xx notes

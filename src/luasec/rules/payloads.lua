@@ -702,8 +702,8 @@ local function walk_program(ast, visit, max_depth)
 end
 
 -- The APIs a 745 wraps: execution, not dynamic evaluation. A `pcall` around a
--- loader is code 744's statement, and reporting it twice would teach a reader
--- to ignore one of the two.
+-- loader would be redundant with 745, and reporting it twice would teach a
+-- reader to ignore one of the two.
 local suppressible = {
    ["os.execute"] = true,
    ["io.popen"] = true,

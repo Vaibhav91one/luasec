@@ -39,7 +39,7 @@ control flow graph with flow-sensitive reaching definitions. On top of that
 | **Bytecode triage** | identify, parse the header, walk prototypes, and say clearly that it was not decompiled |
 | **Payload validator** | run one snippet in a sandboxed child process and report whether it actually reaches execution |
 
-40 registered rule codes. See [docs/rules.md](docs/rules.md).
+37 registered rule codes. See [docs/rules.md](docs/rules.md).
 
 ## Measured behaviour
 
@@ -197,7 +197,7 @@ executed the analyzer over the corpus.
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | how the pipeline is layered and why |
 | [docs/usage.md](docs/usage.md) | quick-start scan, --std profiles, output formats, CI, --validate |
-| [docs/rules.md](docs/rules.md) | all 40 codes, severity, CWE |
+| [docs/rules.md](docs/rules.md) | all 37 codes, severity, CWE |
 | [docs/precision.md](docs/precision.md) | the measurement, and what it does not cover |
 | [docs/firmware-stds.md](docs/firmware-stds.md) | what each platform profile declares |
 | [docs/sarif.md](docs/sarif.md) | the report contract |
