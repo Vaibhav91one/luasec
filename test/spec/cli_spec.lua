@@ -423,6 +423,47 @@ describe("a symlink in the scanned tree", function()
    end)
 end)
 
+describe("an engine error in one file", function()
+   it("is contained: the failing file is reported and the other file is still analyzed", function()
+      -- One file trips an internal error in the taint engine on main (a nil index
+      -- in taint.lua). The run must not crash: the failing file gets a 901, the
+      -- second file's 709 still comes out, and the exit code is 1.
+      local dir = scratch_dir("spec_engine_error")
+      local crash_path = "/private/tmp/claude-501/-Users-vaibhavtomar-Desktop-luasec/"
+         .. "402a480d-991b-42b3-babb-7d33fa136df9/scratchpad/review-robustness/min/"
+         .. "crash_taint485_min.lua"
+      local ok = os.execute("cp " .. string.format("%q", crash_path) .. " "
+         .. string.format("%q", dir .. "/crash.lua"))
+      -- If the system fixture is absent, fall back to an inline copy of it so the
+      -- test still exercises containment on any machine.
+      if not ok or ok ~= 0 then
+         local f = assert(io.open(dir .. "/crash.lua", "w"))
+         f:write('local cb = {}\nfunction cb.run()\n'
+            .. '  status = cb(function() last_error = nil end)\nend\n')
+         f:close()
+      end
+
+      local sink = assert(io.open(dir .. "/sink.lua", "w"))
+      sink:write('function h(x)\n   os.execute("x" .. http.formvalue(x))\nend\n')
+      sink:close()
+
+      local out, code = harness.cli({ "--std", "+luci", dir })
+      os.execute("rm -rf " .. string.format("%q", dir))
+
+      assert_no_match(out, "stack traceback",
+         "an engine error must not crash the run:\n" .. out)
+      assert_match(out, "901", out)
+      assert_match(out, "sink%.lua", out)
+      assert_match(out, "709", "the second file is still analyzed:\n" .. out)
+      assert_equal(code, 1, out)
+      -- One failure -> one 901 per file: the second pass on an already-failing
+      -- file used to append a duplicate 901 for the same crash.
+      local n901 = select(2, out:gsub("crash%.lua:%d:%d:%s+%[901%]", ""))
+      assert_equal(n901, 1,
+         "expected exactly one 901 for the crash file, got " .. n901 .. ":\n" .. out)
+   end)
+end)
+
 describe("a numeric option that is not a number", function()
    it("is a config error, not a security result", function()
       -- `--max-nodes $UNSET_VAR` arrived as the string "abc" and `max_nodes + 1`

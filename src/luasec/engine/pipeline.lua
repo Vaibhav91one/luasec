@@ -31,6 +31,21 @@ local function sort_findings(findings)
    return findings
 end
 
+--- A 901 that says an engine pass for this file raised an internal error, rather
+-- than letting it escape and kill the rest of the run. `err` is the pcall payload;
+-- `chstate` gives the line/column anchor. Severity and confidence match the other
+-- 901s (low / certain) so a threshold or --only does not silently drop it.
+local function build_analysis_error(err, chstate)
+    return {
+        code = "901", line = 1, column = 1, end_column = 1,
+        severity = codes.get("901").severity,
+        confidence = "certain",
+        cwe = codes.get("901").cwe,
+        name = chstate.path or "analysis error",
+        message = "analysis failed: " .. tostring(err),
+    }
+end
+
 --- The shape a bad configuration is reported in, from every entry point.
 -- The error object, not a message: the entry points return a findings array and
 -- a caller iterates it, so `nil` in its place would turn one clear config error
@@ -153,34 +168,67 @@ local function analyze_source(source, opts)
       return {findings = sort_findings(results), final = true}
    end
 
-   local findings = taint_engine.run(chstate, opts)
+    -- A bug in the engine (or a pathological file that still parses) must not take
+    -- down the whole run: one file's crash used to be a stack traceback from inside
+    -- taint_engine.run or interprocedural.run that escaped analyze_source and
+    -- killed api.analyze for every remaining file. Each pass is now guarded with
+    -- pcall; on failure what was gathered so far is kept and a 901 is appended so
+    -- the file is reported as not-fully-analyzed rather than silently clean. A
+    -- single `failed` flag stops the remaining passes for this file: the second
+    -- pass on an already-failing file raises the same error and would otherwise
+    -- append a duplicate 901, so one failure -> one 901 per file.
+    local failed = false
+    local findings
+    do
+       local ok, result = pcall(taint_engine.run, chstate, opts)
+       if not ok then
+          failed = true
+          findings = {build_analysis_error(result, chstate)}
+       else
+          findings = result or {}
+       end
+    end
 
-   -- The cross-function and exposed-sink passes both visit every call site and
-   -- every named function. On a file with tens of thousands of them that is
-   -- minutes of work for a heuristic, so above this many lines they are skipped
-   -- and 904 says so rather than the report quietly claiming a clean function.
-   local expensive = #chstate.lines > (opts.max_function_lines or 4000)
+    -- The cross-function and exposed-sink passes both visit every call site and
+    -- every named function. On a file with tens of thousands of them that is
+    -- minutes of work for a heuristic, so above this many lines they are skipped
+    -- and 904 says so rather than the report quietly claiming a clean function.
+    local expensive = #chstate.lines > (opts.max_function_lines or 4000)
 
-   -- Taint across function boundaries, unless the file is too large for it.
-   local state
-   if chstate.resolved_locals ~= false and not opts.no_interprocedural and not expensive then
-      state = taint_engine.new_state()
-      taint_engine.run(chstate, opts, state)
-      local seen = {}
-      for _, finding in ipairs(findings) do
-         seen[table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")] = true
-      end
-      interprocedural.run(chstate, state, opts)
-      for _, finding in ipairs(state.findings) do
-         local key = table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")
-         if not seen[key] then
-            seen[key] = true
-            findings[#findings + 1] = finding
-         end
-      end
-   end
+    -- Taint across function boundaries, unless the file is too large for it.
+    local state
+    if not failed and chstate.resolved_locals ~= false
+       and not opts.no_interprocedural and not expensive then
+       state = taint_engine.new_state()
+       do
+          local ok, err = pcall(taint_engine.run, chstate, opts, state)
+          if not ok then
+             failed = true
+             findings[#findings + 1] = build_analysis_error(err, chstate)
+          end
+       end
+       if not failed then
+          local seen = {}
+          for _, finding in ipairs(findings) do
+             seen[table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")] = true
+          end
+          do
+             local ok, err = pcall(interprocedural.run, chstate, state, opts)
+             if not ok then
+                findings[#findings + 1] = build_analysis_error(err, chstate)
+             end
+          end
+          for _, finding in ipairs(state.findings) do
+             local key = table.concat({finding.code, tostring(finding.line), tostring(finding.column)}, "|")
+             if not seen[key] then
+                seen[key] = true
+                findings[#findings + 1] = finding
+             end
+          end
+       end
+    end
 
-   return {findings = findings, chstate = chstate, state = state, expensive = expensive}
+    return {findings = findings, chstate = chstate, state = state, expensive = expensive}
 end
 
 --- Resolve the shape-only findings against the ones that say more, and report
