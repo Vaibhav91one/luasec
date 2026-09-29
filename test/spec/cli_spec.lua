@@ -1,6 +1,7 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match = harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
+local scratch_dir = harness.scratch_dir
 
 describe("luasec command line", function()
    it("prints its version and exits 0", function()
@@ -149,25 +150,13 @@ return 1
    end)
 end)
 
--- A unique directory under /tmp, created eagerly so the path is a directory
--- rather than a name inside one.
-local scratch_serial = 0
-local function scratch_dir(tag)
-   scratch_serial = scratch_serial + 1
-   local dir = os.getenv("TMPDIR") or "/tmp"
-   dir = dir:gsub("/$", "")
-   dir = ("%s/luasec_spec_%s_%d_%d"):format(dir, tag, os.time(), scratch_serial)
-   assert_true(os.remove(dir) == nil or true, "scratch path is free")
-   os.execute("mkdir -p " .. string.format("%q", dir))
-   return dir
-end
 
 describe("a directory the walk cannot read", function()
    it("fails the run instead of reporting a clean tree", function()
       -- macOS and Linux both refuse a 000 directory to the owner. Where the
       -- test runs as a user that bypasses permissions, there is nothing to
       -- assert, so the case is skipped rather than asserted against noise.
-      local dir = scratch_dir("walk")
+      local dir = scratch_dir("spec_walk")
       local locked = dir .. "/locked"
       os.execute("mkdir " .. string.format("%q", locked))
       -- Untrusted input reaching a sink, so this file has a finding of its
@@ -198,7 +187,7 @@ describe("a directory the walk cannot read", function()
    end)
 
    it("reports nothing for a tree it can read completely", function()
-      local dir = scratch_dir("walk_clean")
+      local dir = scratch_dir("spec_walk_clean")
       local f = assert(io.open(dir .. "/ok.lua", "w"))
       f:write("local x = 1\n")
       f:close()
@@ -211,7 +200,7 @@ end)
 
 describe("--fail-on", function()
    it("does not report success for a run that could not read everything", function()
-      local dir = scratch_dir("fail_on")
+      local dir = scratch_dir("spec_fail_on")
       os.execute("mkdir " .. string.format("%q", dir .. "/locked"))
       local f = assert(io.open(dir .. "/quiet.lua", "w"))
       f:write("local x = 1\n")
@@ -237,7 +226,7 @@ end)
 
 describe("asking for one code does not hide ground we did not cover", function()
    it("still reports an unreadable directory under --only", function()
-      local dir = scratch_dir("only_locked")
+      local dir = scratch_dir("spec_only_locked")
       os.execute("mkdir " .. string.format("%q", dir .. "/locked"))
       local f = assert(io.open(dir .. "/a.lua", "w"))
       f:write('os.execute("x")\n')
@@ -263,7 +252,7 @@ describe("asking for one code does not hide ground we did not cover", function()
    end)
 
    it("names every unreadable directory, not only the first", function()
-      local dir = scratch_dir("many_locked")
+      local dir = scratch_dir("spec_many_locked")
       for _, name in ipairs({"l1", "l2", "l3"}) do
          os.execute("mkdir " .. string.format("%q", dir .. "/" .. name))
          os.execute("chmod 000 " .. string.format("%q", dir .. "/" .. name))
@@ -288,7 +277,7 @@ describe("asking for one code does not hide ground we did not cover", function()
    end)
 
    it("fails a run whose file could not be parsed, whatever the threshold", function()
-      local dir = scratch_dir("badparse")
+      local dir = scratch_dir("spec_badparse")
       local f = assert(io.open(dir .. "/broken.lua", "w"))
       f:write('local x = "unterminated\n')
       f:close()
@@ -302,7 +291,7 @@ end)
 
 describe("--rules", function()
    it("fails when the file is missing, rather than analyzing with fewer rules", function()
-      local dir = scratch_dir("rules_missing")
+      local dir = scratch_dir("spec_rules_missing")
       local f = assert(io.open(dir .. "/ok.lua", "w"))
       f:write("local x = 1\n")
       f:close()
@@ -316,7 +305,7 @@ describe("--rules", function()
    end)
 
    it("fails when the file is not a loadable profile", function()
-      local dir = scratch_dir("rules_bad")
+      local dir = scratch_dir("spec_rules_bad")
       local f = assert(io.open(dir .. "/ok.lua", "w"))
       f:write("local x = 1\n")
       f:close()
@@ -329,7 +318,7 @@ describe("--rules", function()
    end)
 
    it("accepts a loadable profile", function()
-      local dir = scratch_dir("rules_ok")
+      local dir = scratch_dir("spec_rules_ok")
       local f = assert(io.open(dir .. "/ok.lua", "w"))
       f:write("local x = 1\n")
       f:close()
@@ -364,7 +353,7 @@ end)
 
 describe("--only", function()
    it("still shows a degraded finding for a different code", function()
-      local dir = scratch_dir("only_degraded")
+      local dir = scratch_dir("spec_only_degraded")
       local f = assert(io.open(dir .. "/broken.lua", "w"))
       f:write('local x = "unterminated\n')
       f:close()
@@ -377,7 +366,7 @@ end)
 
 describe("--only and --ignore take a code pattern", function()
    it("matches a prefix, not only a whole code", function()
-      local dir = scratch_dir("only_prefix")
+      local dir = scratch_dir("spec_only_prefix")
       local f = assert(io.open(dir .. "/h.lua", "w"))
       f:write('local function ping(h)\n   os.execute("ping " .. http.formvalue(h))\nend\nreturn ping\n')
       f:close()
@@ -396,7 +385,7 @@ describe("--only and --ignore take a code pattern", function()
    end)
 
    it("does not crash on a malformed pattern", function()
-      local dir = scratch_dir("only_bad")
+      local dir = scratch_dir("spec_only_bad")
       local f = assert(io.open(dir .. "/h.lua", "w"))
       f:write("os.execute(cmd)\n")
       f:close()
@@ -412,7 +401,7 @@ describe("a symlink in the scanned tree", function()
       -- find's -type f matches a symlink rather than its target, so a
       -- symlinked file and a symlinked directory were both skipped: a file
       -- reachable inside the tree that luasec never read, reported clean.
-      local dir = scratch_dir("symlinks")
+      local dir = scratch_dir("spec_symlinks")
       os.execute("mkdir -p " .. string.format("%q", dir .. "/outside"))
       local hidden = assert(io.open(dir .. "/outside/hidden.lua", "w"))
       hidden:write("os.execute(cmd)\n")

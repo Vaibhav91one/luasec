@@ -514,10 +514,7 @@ describe("a baseline and ground we did not cover", function()
       -- Suppressing a 901 as "already known" printed an empty report and exited
       -- non-zero, which reads as a contradiction. A 901 is the run saying it did
       -- not read something; a previous run's report cannot make that known.
-      local dir = os.getenv("TMPDIR") or "/tmp"
-      dir = dir:gsub("/$", "")
-      local scratch = dir .. "/luasec_spec_baseline_degraded_" .. os.time()
-      os.execute("mkdir -p " .. string.format("%q", scratch))
+      local scratch = harness.scratch_dir("spec_baseline_degraded")
       local f = assert(io.open(scratch .. "/broken.lua", "w"))
       f:write('local x = "unterminated\n')
       f:close()

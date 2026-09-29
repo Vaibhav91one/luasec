@@ -177,6 +177,18 @@ harness.assert_error = assert_error
 harness.run = run
 harness.cli = nil
 
+-- A fresh directory under TMPDIR, unique to this process. Named from the clock
+-- it was not: two runs that started in the same second got the same directory
+-- and deleted each other's files.
+function harness.scratch_dir(tag)
+   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/$", "")
+   local pipe = assert(io.popen(("mktemp -d %q"):format(base .. "/luasec_" .. tag .. ".XXXXXX")))
+   local dir = pipe:read("*l")
+   pipe:close()
+   assert(dir and dir ~= "", "mktemp -d failed for " .. tag)
+   return dir
+end
+
 -- Run the CLI as a subprocess; returns combined output and the exit code.
 function harness.cli(args, opts)
    opts = opts or {}

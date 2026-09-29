@@ -19,17 +19,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match =
    harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
-
-local serial = 0
-
-local function scratch_dir(tag)
-   serial = serial + 1
-   local dir = os.getenv("TMPDIR") or "/tmp"
-   dir = dir:gsub("/$", "")
-   dir = ("%s/luasec_walkbound_%s_%d_%d"):format(dir, tag, os.time(), serial)
-   os.execute("mkdir -p " .. string.format("%q", dir))
-   return dir
-end
+local scratch_dir = harness.scratch_dir
 
 local function write(path, text)
    local handle = assert(io.open(path, "w"))
@@ -79,7 +69,7 @@ describe("a symlink inside the scanned tree", function()
       -- inside the scanned tree that luasec never read, reported as a clean
       -- tree with exit 0. One entry in a firmware image is enough to hide a
       -- file that way, and this is the case that must not regress.
-      local dir = scratch_dir("link_file")
+      local dir = scratch_dir("walkbound_link_file")
       write(dir .. "/hidden.lua", TAINTED)
       link("hidden.lua", dir .. "/via_link.lua")
 
@@ -95,7 +85,7 @@ describe("a symlink inside the scanned tree", function()
    end)
 
    it("is followed to a directory outside the tree", function()
-      local base = scratch_dir("link_dir")
+      local base = scratch_dir("walkbound_link_dir")
       os.execute("mkdir -p " .. string.format("%q", base .. "/outside")
          .. " " .. string.format("%q", base .. "/tree"))
       write(base .. "/outside/x.lua", TAINTED)
@@ -116,7 +106,7 @@ describe("a symlink inside the scanned tree", function()
       -- copy analyzed again. A link that names a directory the walk has already
       -- covered names no ground that is new, so the same file must be reported
       -- once, not once per link that reaches it.
-      local dir = scratch_dir("link_dir_inside")
+      local dir = scratch_dir("walkbound_link_dir_inside")
       os.execute("mkdir " .. string.format("%q", dir .. "/real"))
       write(dir .. "/real/a.lua", TAINTED)
       link("real", dir .. "/alias")
@@ -130,7 +120,7 @@ describe("a symlink inside the scanned tree", function()
    end)
 
    it("is reported when it names nothing that resolves", function()
-      local dir = scratch_dir("link_dangling")
+      local dir = scratch_dir("walkbound_link_dangling")
       write(dir .. "/ok.lua", "local x = 1\n")
       link("nowhere", dir .. "/dangling.lua")
 
@@ -149,7 +139,7 @@ describe("a symlink inside the scanned tree", function()
       -- descend into itself forever. The walk resolves a link to one physical
       -- path and walks each of those once, so this is a directory already
       -- covered rather than an unbounded descent, and the run comes back.
-      local dir = scratch_dir("link_self")
+      local dir = scratch_dir("walkbound_link_self")
       write(dir .. "/a.lua", "local x = 1\n")
       link(".", dir .. "/self")
       link("self", dir .. "/again")
@@ -174,7 +164,7 @@ describe("a tree that resolves past the limit", function()
       -- that costs unbounded time, and a run that stopped reading must not
       -- report the part it did read as a clean tree. Same rule as an unreadable
       -- directory: ground not covered is a 901 and a non-zero exit.
-      local dir = scratch_dir("bound")
+      local dir = scratch_dir("walkbound_bound")
       for i = 1, 5 do write(("%s/f%d.lua"):format(dir, i), "local x = 1\n") end
 
       local out, code = cli("LUASEC_MAX_WALK_PATHS=2", { dir })
@@ -189,7 +179,7 @@ describe("a tree that resolves past the limit", function()
    end)
 
    it("is not tripped by a tree that stays under it", function()
-      local dir = scratch_dir("bound_ok")
+      local dir = scratch_dir("walkbound_bound_ok")
       for i = 1, 3 do write(("%s/f%d.lua"):format(dir, i), "local x = 1\n") end
 
       local out, code = cli("LUASEC_MAX_WALK_PATHS=100", { dir })
@@ -204,7 +194,7 @@ describe("a tree that resolves past the limit", function()
       -- The bound is on what one root may resolve to, so three small roots are
       -- three small scans. A shared budget would report a coverage gap for a
       -- run that covered everything it was asked to cover.
-      local base = scratch_dir("bound_roots")
+      local base = scratch_dir("walkbound_bound_roots")
       local roots = {}
       for i = 1, 3 do
          roots[i] = ("%s/r%d"):format(base, i)
@@ -224,7 +214,7 @@ describe("a tree that resolves past the limit", function()
       -- people spell "no limit". There is no unlimited: a value that is not a
       -- positive integer falls back to the number the tool ships, which is the
       -- direction that still costs the scan something it has to report.
-      local dir = scratch_dir("bound_bad")
+      local dir = scratch_dir("walkbound_bound_bad")
       write(dir .. "/f.lua", "local x = 1\n")
 
       for _, value in ipairs({"0", "-1", "abc", "3.5", ""}) do
@@ -246,7 +236,7 @@ describe("a tree that resolves past the limit", function()
       -- nothing), two links to files that live outside it and so cost the file
       -- pass nothing either, then a link to a directory, whose fourth record is
       -- the one the limit cuts.
-      local base = scratch_dir("bound_mid_record")
+      local base = scratch_dir("walkbound_bound_mid_record")
       os.execute("mkdir -p " .. string.format("%q", base .. "/outside")
          .. " " .. string.format("%q", base .. "/tree/real"))
       write(base .. "/outside/a.lua", "local x = 1\n")
@@ -268,7 +258,7 @@ end)
 
 describe("a tree with no symlinks in it", function()
    it("is unaffected: every finding, no coverage gap", function()
-      local dir = scratch_dir("plain")
+      local dir = scratch_dir("walkbound_plain")
       os.execute("mkdir -p " .. string.format("%q", dir .. "/cgi-bin"))
       write(dir .. "/tainted.lua", TAINTED)
       write(dir .. "/cgi-bin/handler", "local target = arg[1]\nos.execute(\"wget \" .. target)\n")
@@ -302,7 +292,7 @@ describe("a tree with no symlinks in it", function()
       -- files the walk read. A reader that loses its place between chunks keeps
       -- the first buffer and drops the rest, and that is a tree reported
       -- complete with a third of it never read.
-      local dir = scratch_dir("chunks")
+      local dir = scratch_dir("walkbound_chunks")
       -- 250 bytes a name, which is the most a filesystem here allows, so the
       -- tree crosses the reader's chunk with a couple of hundred files.
       local filler = string.rep("n", 246)
@@ -319,7 +309,7 @@ describe("a tree with no symlinks in it", function()
    end)
 
    it("exits 0 with nothing in it", function()
-      local dir = scratch_dir("plain_clean")
+      local dir = scratch_dir("walkbound_plain_clean")
       write(dir .. "/clean.lua", "local x = 1\n")
 
       local out, code = cli(nil, { dir })
@@ -338,7 +328,7 @@ describe("a file that answers to two names in one tree", function()
       -- repeated finding on a rare tree, and the alternative is dropping a path
       -- an operator can see and a finding they cannot otherwise get. The
       -- de-duplication above is of the traversal, not of the files.
-      local dir = scratch_dir("hardlink")
+      local dir = scratch_dir("walkbound_hardlink")
       write(dir .. "/one.lua", TAINTED)
       os.execute("ln " .. string.format("%q", dir .. "/one.lua")
          .. " " .. string.format("%q", dir .. "/two.lua"))

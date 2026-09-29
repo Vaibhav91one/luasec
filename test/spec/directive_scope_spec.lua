@@ -8,6 +8,7 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_no_match = harness.assert_equal, harness.assert_true, harness.assert_no_match
+local scratch_dir = harness.scratch_dir
 
 local api = require "luasec.api"
 
@@ -60,18 +61,6 @@ local function filler(count)
    return out
 end
 
--- A scratch directory under TMPDIR. Nothing in a spec may write inside the repo:
--- a whole-program spec wrote its fixtures to relative paths once and they were
--- committed with the spec.
-local scratch_serial = 0
-local function scratch_dir(tag)
-   scratch_serial = scratch_serial + 1
-   local dir = os.getenv("TMPDIR") or "/tmp"
-   dir = dir:gsub("/$", "")
-   dir = ("%s/luasec_directive_%s_%d_%d"):format(dir, tag, os.time(), scratch_serial)
-   os.execute("mkdir -p " .. string.format("%q", dir))
-   return dir
-end
 
 local function write_file(dir, name, text)
    local path = dir .. "/" .. name
@@ -251,7 +240,7 @@ describe("a malformed directive in one file of a tree", function()
       -- routes: `[708` is rejected while the directive is read, and `70(` passes
       -- every check a reader can make and only reveals itself when the matcher
       -- reaches the unfinished capture. Both have to stay in file A.
-      local dir = scratch_dir("crossfile")
+      local dir = scratch_dir("directive_crossfile")
       local a = write_file(dir, "a.lua", table.concat({
          "-- luasec: ignore [708",   -- 1  unreadable while the directive is read
          "-- luasec: ignore 70(",    -- 2  unreadable only when it is used
@@ -279,7 +268,7 @@ describe("a malformed directive in one file of a tree", function()
          "a file with no directive of its own reports none of them")
 
       -- Same process, a second run: nothing a run learned may reach the next one.
-      local dir2 = scratch_dir("crossfile_again")
+      local dir2 = scratch_dir("directive_crossfile_again")
       local a2 = write_file(dir2, "a.lua", table.concat({
          "-- luasec: ignore [708",
          "-- luasec: ignore 70(",
