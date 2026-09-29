@@ -122,3 +122,15 @@ jobs:
           brew install --formula local/luasec/luasec
           brew test local/luasec/luasec
           luasec rules list | head -3
+
+  npm-launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch the vendored luacheck
+        run: make vendor
+      - name: The launcher runs luasec from a release-shaped tarball
+        run: node npm/test.js
