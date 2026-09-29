@@ -77,9 +77,9 @@ this corpus will not notice, which has happened more than once.
 Stated plainly, because a security tool that overstates its coverage is worse
 than one that does not have the feature.
 
-- **Taint follows a local function's return value, and under `--whole-program` a
-  required module field's return value too.** A local `id` that hands its argument
-  back — `local function id(x) return x end` — is followed, so
+- **Taint follows a function's return value, in one file and, with
+  `--whole-program`, across files.** A local `id` or a module field `M.id` in the
+  same file that hands its argument back is followed, so
   `os.execute(id(http.formvalue("h")))` is reported. With `--whole-program`, the
   return value of a function in a module bound with `local m = require "mod"`
   (e.g. `m.id(x)`) is followed too. A method call (`M:m`), a function passed as a
