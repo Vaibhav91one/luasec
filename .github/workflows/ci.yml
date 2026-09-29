@@ -102,3 +102,23 @@ jobs:
           printf 'os.execute(io.read())\n' > t.lua
           set +e; luasec t.lua; status=$?; set -e
           test "$status" = 1
+
+  homebrew:
+    # The formula, installed from a tarball built from this checkout through a
+    # local tap, the same way `brew install` installs the released one.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make vendor
+      - name: Install the formula from a local tap
+        run: |
+          file=$(scripts/release-tarball.sh)
+          sha=$(shasum -a 256 "$file" | cut -d' ' -f1)
+          version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
+          brew tap-new --no-git local/luasec
+          tap="$(brew --repository)/Library/Taps/local/homebrew-luasec"
+          sed -e "s|https://github.com/Vaibhav91one/luasec/releases/download/v@VERSION@/luasec-@VERSION@.tar.gz|file://$PWD/$file|" \
+              -e "s/@SHA256@/$sha/" -e "s/@VERSION@/$version/g" packaging/homebrew/luasec.rb > "$tap/Formula/luasec.rb"
+          brew install --formula local/luasec/luasec
+          brew test local/luasec/luasec
+          luasec rules list | head -3

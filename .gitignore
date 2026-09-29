@@ -9,3 +9,5 @@ corpus/
 # local
 *.sarif
 .luasecrc
+# release tarballs built by scripts/release-tarball.sh
+/dist

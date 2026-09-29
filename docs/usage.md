@@ -54,6 +54,14 @@ the run. See [Exit codes](#ci-and-exit-codes).
 This example is the fixture at `test/fixtures/tainted_exec/handler.lua`:
 the request parameter `host` flows into `os.execute` with no sanitization.
 
+### Homebrew
+
+```sh
+brew install Vaibhav91one/luasec/luasec
+```
+
+The formula uses Homebrew's Lua, and the tap is updated by the release job.
+
 ## Choosing `--std`
 
 A profile declares the platform API set — sources, sinks, propagators, and

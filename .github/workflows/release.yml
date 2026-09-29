@@ -1,0 +1,95 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha256: ${{ steps.tarball.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: The tag names the version in src/luasec/version.lua
+        run: |
+          version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
+          test "v$version" = "$GITHUB_REF_NAME"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: make vendor
+      - id: tarball
+        name: Build the release tarball
+        run: |
+          file=$(scripts/release-tarball.sh)
+          echo "sha256=$(sha256sum "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "luasec $GITHUB_REF_NAME" --generate-notes
+
+  luarocks:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-luarocks@v4
+      - name: Upload the rockspec
+        if: env.LUAROCKS_API_KEY != ''
+        run: |
+          luarocks install dkjson
+          luarocks upload "luasec-scanner-${{ needs.release.outputs.version }}-1.rockspec" --api-key "$LUAROCKS_API_KEY"
+      - if: env.LUAROCKS_API_KEY == ''
+        run: echo "::notice::LUAROCKS_API_KEY is not set; skipped publishing to LuaRocks"
+
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Publish the launcher
+        if: env.NODE_AUTH_TOKEN != ''
+        working-directory: npm
+        run: |
+          test "$(node -p "require('./package.json').version")" = "${{ needs.release.outputs.version }}"
+          npm publish --access public
+      - if: env.NODE_AUTH_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN is not set; skipped publishing to npm"
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update the tap
+        if: env.TAP_TOKEN != ''
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/Vaibhav91one/homebrew-luasec.git" tap
+          mkdir -p tap/Formula
+          sed -e "s/@VERSION@/${{ needs.release.outputs.version }}/g" \
+              -e "s/@SHA256@/${{ needs.release.outputs.sha256 }}/g" packaging/homebrew/luasec.rb > tap/Formula/luasec.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/luasec.rb
+          git commit -m "luasec ${{ needs.release.outputs.version }}"
+          git push
+      - if: env.TAP_TOKEN == ''
+        run: echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipped updating the Homebrew tap"
