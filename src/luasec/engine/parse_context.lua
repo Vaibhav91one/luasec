@@ -21,27 +21,58 @@ local utils = require "luacheck.utils"
 
 local parse_context = {}
 
+-- The deepest a chain of Function nodes may nest before resolve_locals is
+-- skipped, even if the node budget is not exceeded.
+--
+-- resolve_locals walks a linearized line once per variable defined in it, so its
+-- cost grows quadratically with statements per scope. A Function node inside
+-- another multiplies that per-scope cost, and the node budget alone does not
+-- bound it: a file of 1,000 nested functions is only ~3,000 AST nodes (well under
+-- max_nodes) but the nested scopes make resolve_locals take > 60 s there, where
+-- a nesting depth of 300 (1.3 s) is already near the budget we keep for one file.
+-- 64 is well past any real firmware Lua (which tops out in the single digits)
+-- and keeps resolve_locals cheap on every normal input.
+local MAX_FUNCTION_DEPTH = 64
+
 -- Count expression nodes, giving up once the budget is spent so a pathological
--- input cannot make the counter itself expensive.
-local function count_nodes(node, budget)
-   if budget <= 0 or type(node) ~= "table" then return budget end
+-- input cannot make the counter itself expensive. A single pass also records the
+-- deepest nesting of Function nodes, which the node budget does not bound:
+-- nested functions are super-linear inside resolve_locals even when few nodes
+-- are present. Returns the remaining budget and the deepest Function nesting.
+local function count_nodes(node, budget, depth)
+   if budget <= 0 or type(node) ~= "table" then return budget, depth end
    budget = budget - 1
+   -- `here` is the depth of the current node; it is handed to every child so a
+   -- sibling's depth never leaks into the next sibling's (only the max seen
+   -- so far is carried back up).
+   local here = depth
+   if node.tag == "Function" then
+      here = depth + 1
+      if here > MAX_FUNCTION_DEPTH then
+         return 0, here
+      end
+   end
+   local max_depth = here
    for index = 1, #node do
       local child = node[index]
       if type(child) == "table" then
          if child.tag then
-            budget = count_nodes(child, budget)
+            local child_depth
+            budget, child_depth = count_nodes(child, budget, here)
+            if child_depth > max_depth then max_depth = child_depth end
          else
             for _, sub in ipairs(child) do
                if type(sub) == "table" and sub.tag then
-                  budget = count_nodes(sub, budget)
+                  local child_depth
+                  budget, child_depth = count_nodes(sub, budget, here)
+                  if child_depth > max_depth then max_depth = child_depth end
                end
             end
          end
       end
-      if budget <= 0 then return 0 end
+      if budget <= 0 then return 0, max_depth end
    end
-   return budget
+   return budget, max_depth
 end
 
 --- Build a check state.
@@ -119,9 +150,13 @@ function parse_context.build(source_bytes, options)
          offset = 1, end_offset = 1}
    end
 
-   local remaining = count_nodes(ast, max_nodes + 1)
-   chstate.resolved_locals = remaining > 0
-   chstate.node_count = max_nodes + 1 - remaining
+    local remaining, depth = count_nodes(ast, max_nodes + 1, 0)
+    chstate.node_count = max_nodes + 1 - remaining
+    -- resolve_locals is skipped when either the node budget was spent OR a chain
+    -- of Function nodes nested beyond MAX_FUNCTION_DEPTH was found: the budget
+    -- bounds node counting but not the super-linear cost nested scopes impose
+    -- there. Skipping either way leaves the file approximate, reported as 904.
+    chstate.resolved_locals = remaining > 0 and depth <= MAX_FUNCTION_DEPTH
 
    if chstate.resolved_locals then
       resolve_locals.run(chstate)
