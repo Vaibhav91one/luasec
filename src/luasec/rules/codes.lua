@@ -126,14 +126,8 @@ register {code = "728", severity = "medium", cwe = "CWE-1333",
 register {code = "741", severity = "critical", cwe = "CWE-94",
    message = "obfuscated code loader ({name})"}
 
-register {code = "742", severity = "high", cwe = "CWE-94",
-   message = "precompiled code dump used to reconstitute a function ({name})"}
-
 register {code = "743", severity = "critical", cwe = "CWE-94",
    message = "decoded data fed to an execution sink ({name})"}
-
-register {code = "744", severity = "high", cwe = "CWE-94",
-   message = "dynamic evaluation wrapped in error suppression ({name})"}
 
 register {code = "745", severity = "medium", cwe = "CWE-693",
    message = "anti-analysis or watchdog behaviour ({name})"}
@@ -165,9 +159,6 @@ register {code = "802", severity = "high", cwe = "CWE-94",
 
 register {code = "803", severity = "low", cwe = "CWE-0",
    message = "bytecode format does not match the assumed interpreter ({name})"}
-
-register {code = "804", severity = "medium", cwe = "CWE-0",
-   message = "highly obfuscated source ({name})"}
 
 register {code = "805", severity = "low", cwe = "CWE-0",
    message = "file is not parseable Lua despite its name ({name})"}
