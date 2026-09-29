@@ -48,7 +48,7 @@ hanging, exhausting memory, or executing anything it analyzes. Specifically:
 - Analysis is offline: no network access, no writes outside the requested output.
   The validator writes no temporary files; the payload rides to the child inside
   the child's own command line.
-- Pattern matching is linear time; rules are checked against bounded input.
+- Pattern matching is bounded: in-source suppression patterns are rejected before Lua compiles them if they exceed 64 bytes or contain more than three repetition quantifiers (`-`, `*`, `+`, `?`), keeping backtracking cost on the 127-byte probe bounded to ~127^3 rather than ~127^k for arbitrary k. Rules are checked against bounded input.
 
 ## What the memory bound actually is, measured
 
