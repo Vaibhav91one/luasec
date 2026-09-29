@@ -327,18 +327,7 @@ function directives.allows_all(list, findings, is_suppressed)
                S.enabled = true
             end
          elseif d.action == "only" then
-            -- Capture unreadable FOR THIS KEY only: a pattern like `70(` or
-            -- `701:[bad` raises against some codes/names but not others, so
-            -- `d.unreadable` set by a previous key's match must not leak. We
-            -- clear it before the call so the flag reflects only this match's
-            -- subject, then carry the per-key verdict forward.
-            local prev_unreadable = d.unreadable
-            d.unreadable = nil
-            local selected = matches(d, finding)
-            local key_unreadable = d.unreadable == true
-            d.unreadable = prev_unreadable or key_unreadable
-            S.only[#S.only + 1] = {d = d, selected = selected,
-               unreadable = key_unreadable}
+            S.only[#S.only + 1] = {d = d, selected = matches(d, finding)}
          end
       end
       S.upto = k_
@@ -378,7 +367,9 @@ function directives.allows_all(list, findings, is_suppressed)
 
          local enabled = S.enabled
          for _, o in ipairs(S.only) do
-            if not o.unreadable then
+            -- The flag is the directive's, learned from any subject, and read
+            -- when each finding is decided, as allows() does.
+            if not o.d.unreadable then
                if o.selected then
                   enabled = true
                else

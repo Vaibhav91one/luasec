@@ -384,3 +384,37 @@ t.uci:set("system", "root_password", "R00tPassw0rd-2024")
          "a readable directive is not reported as unreadable: " .. codes(report))
    end)
 end)
+
+describe("an unreadable only-pattern learned from one code reaching another", function()
+   it("does not hide a finding whose code the pattern never raises on", function()
+      -- The pattern `70(` raises when Lua's matcher reaches the unfinished
+      -- capture, which only happens for a code whose text walks up to it -
+      -- `string.match("709", "70(")` raises "unfinished capture", but
+      -- `string.match("723", "70(")` returns nil without ever reaching it.
+      --
+      -- A one-pass allows_all that cached unreadable per (code, name) key
+      -- learned `is unreadable` from the 709 match and `is not unreadable`
+      -- from the 723 match: for the 723, with the only-directive selecting
+      -- nothing and the per-key flag clear, it took the "not selected" branch
+      -- and suppressed the 723. allows() reads the directive's flag, which the
+      -- 709 match set for good, so the 723 is fail-safe too: both the 709 and
+      -- the 723 survive the broken selection, and the 012 that names the
+      -- problem survives alongside them.
+      local report = api.check_source(table.concat({
+         "-- luasec: only 70(",                    -- 1
+         "local function status(host)",             -- 2
+         '   os.execute("ping -c1 " .. http.formvalue(host))', -- 3  709
+         "end",                                     -- 4
+         'local h = io.open("/etc/shadow", "r")',   -- 5  723
+      }, "\n"))
+
+      assert_true(has(report, "012"),
+         "the unreadable directive is reported: " .. codes(report))
+      assert_true(has(report, "709"),
+         "the 70x finding that taught the matcher the pattern was unreadable is reported: "
+         .. codes(report))
+      assert_true(has(report, "723"),
+         "the finding whose code never raised is not hidden by that flag: "
+         .. codes(report))
+   end)
+end)
