@@ -531,3 +531,87 @@ end
       end
    end)
 end)
+
+describe("a sink whose result is used", function()
+   local function codes(report)
+      local out = {}
+      for _, finding in ipairs(report) do out[#out + 1] = finding.code end
+      table.sort(out)
+      return table.concat(out, ",")
+   end
+
+   it("reports 709 when the result of os.execute is assigned to a local", function()
+      local report = api.check_source([[
+local function go(host)
+   local rc = os.execute("ping " .. http.formvalue("host"))
+end
+]])
+      assert_equal(codes(report), "709",
+         "a sink call used in an expression must still fire")
+   end)
+
+   it("reports 709 when the result of os.execute is passed to print", function()
+      local report = api.check_source([[
+local function go(host)
+   print(os.execute("ping " .. http.formvalue("host")))
+end
+]])
+      assert_equal(codes(report), "709",
+         "a sink nested inside another call's arguments must still fire")
+   end)
+
+   it("reports the same code as the bare statement for io.popen assigned to a local under +openwrt+luci", function()
+      local in_expr = api.check_source([[
+local function go(host)
+   local p = io.popen("ping " .. http.formvalue("host"))
+   p:read("*a")
+end
+]], {std = "+openwrt+luci"})
+      local bare = api.check_source([[
+local function go(host)
+   io.popen("ping " .. http.formvalue("host"))
+end
+]], {std = "+openwrt+luci"})
+      assert_equal(codes(in_expr), codes(bare),
+         "io.popen in an expression fires the same code as the bare statement")
+      assert_equal(codes(in_expr), "709",
+         "io.popen with a tainted argument is 709 under openwrt+luci")
+   end)
+
+   it("reports the same code as the bare statement for loadstring assigned to a local", function()
+      local in_expr = api.check_source([[
+local function go(host)
+   local f = loadstring(http.formvalue("cmd"))
+end
+]])
+      local bare = api.check_source([[
+local function go(host)
+   loadstring(http.formvalue("cmd"))
+end
+]])
+      assert_equal(codes(in_expr), codes(bare),
+         "loadstring in an expression fires the same code as the bare statement")
+      assert_equal(codes(in_expr), "710",
+         "loadstring with a tainted argument is 710")
+   end)
+
+   it("reports a sink used as a statement only once, with no duplicate", function()
+      local report = api.check_source([[
+local function go(host)
+   os.execute("ping " .. http.formvalue("host"))
+end
+]])
+      assert_equal(codes(report), "709",
+         "a bare sink statement must not produce a duplicate finding")
+   end)
+
+   it("does not report when the argument is a constant", function()
+      local report = api.check_source([[
+local function go()
+   local rc = os.execute("ls")
+end
+]])
+      assert_equal(codes(report), "",
+         "a constant argument to a sink must stay silent")
+   end)
+end)
