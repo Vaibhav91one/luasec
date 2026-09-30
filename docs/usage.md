@@ -385,6 +385,15 @@ luasec: analyzing 23/23 files (100%)
 luasec: analyzed 23 files in 1s
 ```
 
+### Colour
+
+Colour is for people, not pipes: it is on only when the stream is a
+terminal, never in a pipe, a file, or a CI log, so what a tool parses stays
+plain. `--color` forces it on, `--no-color` forces it off (`--no-color` wins
+when both are given), and `NO_COLOR` set to any non-empty value turns it off.
+On a terminal the progress line is a spinner with a bar instead of the plain
+counter.
+
 ## Config file
 
 `luasec.config.lua` in the current directory is loaded when it exists.
