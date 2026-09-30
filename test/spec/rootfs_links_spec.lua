@@ -157,4 +157,22 @@ describe("absolute symlinks in an extracted rootfs", function()
       assert_equal(code, 1, out)
       assert_match(out, "could not resolve symlink", out)
    end)
+   it("resolves a directory's links in one batch, not one shell per link", function()
+      local dir = tree("rootfs_batch")
+      local shim = dir .. "/shim"
+      local log = dir .. "/xargs.log"
+      os.execute("mkdir -p " .. sq(shim))
+      local handle = assert(io.open(shim .. "/xargs", "wb"))
+      handle:write("#!/bin/sh\necho run >> " .. sq(log) .. "\nexec /usr/bin/xargs \"$@\"\n")
+      handle:close()
+      os.execute("chmod +x " .. sq(shim .. "/xargs"))
+      for i = 1, 30 do
+         os.execute(("ln -s /usr/lib/real%d %s"):format(i, sq(dir .. "/bin/real" .. i)))
+      end
+      harness.cli({dir}, {env = "PATH=" .. sq(shim) .. ":$PATH"})
+      local runs = 0
+      for _ in io.lines(log) do runs = runs + 1 end
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(runs, 1, "one xargs for the one directory holding links")
+   end)
 end)
