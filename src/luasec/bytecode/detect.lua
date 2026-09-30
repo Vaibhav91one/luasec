@@ -70,4 +70,23 @@ function detect.identify(bytes)
    return nil
 end
 
+--- What a file that is not text looks like, or nil for source.
+--
+-- Known container magics are checked first (a gzip or a zip can start without a
+-- NUL), then the rule git uses for "binary": a NUL byte in the first 8 KiB.
+-- Lua source never contains one, so a file that does is not source, and lexing
+-- it only turns its bytes into findings.
+function detect.binary_kind(bytes)
+   local head = bytes:sub(1, 8192)
+   local four = head:sub(1, 4)
+   if four == "hsqs" or four == "sqsh" then return "a squashfs image" end
+   if four == "UBI#" then return "a UBI image" end
+   if four == "\127ELF" then return "an ELF executable" end
+   if four == "PK\3\4" then return "a zip archive" end
+   if head:sub(1, 2) == "\31\139" then return "a gzip archive" end
+   if head:sub(258, 262) == "ustar" then return "a tar archive" end
+   if head:find("\0", 1, true) then return "binary data" end
+   return nil
+end
+
 return detect

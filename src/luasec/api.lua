@@ -296,6 +296,14 @@ function api.analyze(paths, opts)
       if detect.is_bytecode(file.source) then
          result = {path = file.path, findings = bytecode_triage.triage(file.source, opts),
             final = true}
+      elseif detect.binary_kind(file.source) then
+         result = {path = file.path, final = true, findings = {{
+            code = "901", line = 1, column = 1, end_column = 1,
+            severity = "low", confidence = "certain", cwe = "CWE-0",
+            name = file.path,
+            message = ("not analyzed: %s is %s, not Lua source; extract it and scan the files inside")
+               :format(file.path, detect.binary_kind(file.source)),
+         }}}
       else
          result = pipeline.analyze_source(file.source, opts)
          result.path = file.path
