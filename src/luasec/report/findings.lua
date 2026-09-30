@@ -152,7 +152,7 @@ function findings.document(list)
    return {
       reportVersion = REPORT_VERSION,
       luasecVersion = require("luasec.version").luasec,
-      score = {value = s.score, label = s.label, categories = s.categories},
+      score = {value = s.score, label = s.label, coverage_gaps = s.coverage_gaps, categories = s.categories},
       findings = list or {},
    }
 end

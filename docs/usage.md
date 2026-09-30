@@ -279,7 +279,11 @@ Prints only the 0-100 health score, one number and nothing else. The exit
 code is unchanged. The score is 100 minus each finding's severity weight
 (critical 25, high 10, medium 4, low 1) times its confidence (certain/high 1,
 medium 0.6, low 0.3), floored at 0. Labels are good at 90 and above, needs
-work at 60 and above, else critical.
+work at 60 and above, else critical. A coverage gap (any 901, 902, 904, 801,
+803, 805 or 012 finding) turns "good" into "incomplete"; the number itself
+does not change. A gap the baseline marked fixed is not a gap. The plain
+Score line names the count (", 1 coverage gap"), and JSON and SARIF carry
+`coverage_gaps`.
 
 ```sh
 bin/luasec --score test/fixtures/tainted_exec/handler.lua
