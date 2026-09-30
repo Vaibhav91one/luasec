@@ -38,6 +38,19 @@ function term.palette(enabled, fd)
    return paint
 end
 
+--- Single-key mode switches off the signal keys too (-isig), so Ctrl-C arrives
+-- as a byte the reader sees as "quit" and can restore the terminal, instead
+-- of a signal that kills the process with echo still off.
+-- luasec: ignore 708  the stty command is a constant mode switch, never user input
+function term.raw()
+   os.execute("stty -icanon -echo -isig min 1")
+end
+
+-- luasec: ignore 708  the stty command is a constant mode switch, never user input
+function term.cooked()
+   os.execute("stty icanon echo isig")
+end
+
 --- A bar `width` cells wide, `fraction` (0 to 1) full.
 function term.bar(fraction, width)
    local filled = math.max(0, math.min(width, math.floor(fraction * width + 0.5)))

@@ -6,14 +6,16 @@ local why = require "luasec.cli.why_cmd"
 local fix_cmd = require "luasec.cli.fix_cmd"
 local ci_cmd = require "luasec.cli.ci_cmd"
 local install_cmd = require "luasec.cli.install_cmd"
+local review = require "luasec.cli.review"
 local plain = require "luasec.report.plain"
 local render = require "luasec.report.render"
 local codes = require "luasec.rules.codes"
 
 local menu = {}
 
-local KEYS = {"e", "f", "a", "s", "b", "c", "i", "q"}
+local KEYS = {"r", "e", "f", "a", "s", "b", "c", "i", "q"}
 local LABELS = {
+   r = "review findings",
    e = "explain a finding",
    f = "fix with an AI agent",
    a = "show every finding",
@@ -177,7 +179,12 @@ local function do_install(list, context)
    install_cmd.run({}, context.root, context.out, context.err)
 end
 
+local function do_review(list, context)
+   review.run(list, context)
+end
+
 local ACTIONS = {
+   r = do_review,
    e = do_explain,
    f = do_fix,
    a = do_all,
