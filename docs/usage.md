@@ -932,6 +932,13 @@ A method call (`M:m`), a function passed as a value, and a `require(...)` called
 inline inside an expression are not: a function that hands its argument back is
 opaque across files in those shapes.
 
+A call to a function written onto a global table's field path in another file
+(`gui.a.b.set(t)` with `function gui.a.b.set(cfg) ... end` elsewhere, the shape
+CGILua backends use between a page and its component library) is followed too,
+whether the call is a statement or its result is assigned. A dotted name defined in
+two files is never guessed, and a local variable named like the root (`local gui`)
+is not the global.
+
 ```sh
 bin/luasec --whole-program --std +luci test/fixtures/whole_program/cross_file/
 ```

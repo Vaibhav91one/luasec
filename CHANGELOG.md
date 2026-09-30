@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 Found by scanning public router firmware images unpacked to a rootfs.
 
+- Under `--whole-program`, a call to a dotted global function defined in another file (`gui.a.b.set(t)` with `function gui.a.b.set(cfg)` elsewhere) binds its arguments to that function's parameters, for a statement call and for one whose result is assigned. A name defined in two files is not guessed, and a local root is not the global (#179).
 - A file that failed to parse only because a string held an escape Lua 5.1 accepts (`"\/"`, `'\.'`) is parsed again with that escape rewritten to one of the same length, so its flows are analysed instead of falling back to a 901 (#181).
 - A sink entry can carry `filters` (argument position to the characters its callee strips). A flow into a partly filtered argument is still reported, one confidence step lower, and the message names what is removed and what still passes; the cgilua std uses it for `util.runShellCmd` and `util.shellCmdOutput` and now reports a tainted `options` argument at full confidence (#177).
 - Progress on stderr while scanning: the files found, a live counter, and a
