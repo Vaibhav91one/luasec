@@ -1,6 +1,6 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
-local assert_equal, assert_match = harness.assert_equal, harness.assert_match
+local assert_equal, assert_match, assert_true = harness.assert_equal, harness.assert_match, harness.assert_true
 
 local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
@@ -58,5 +58,25 @@ describe("luasec why", function()
       local out = harness.cli({"why", TAINTED .. ":3", "--config", dir .. "/c.lua"})
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_match(out, "nothing reported at", out)
+   end)
+
+   it("shows the code around the finding with the line marked and a caret", function()
+      local out, code = harness.cli({"why", TAINTED .. ":3"})
+      assert_equal(code, 0, out)
+      assert_match(out, "\n  > 3 | ", out)
+      assert_match(out, "\n    %s | +%^", out)
+      assert_match(out, "\n    2 | ", out)
+   end)
+
+   it("shows the frame at the start of the file for a finding on line 1", function()
+      local dir = harness.scratch_dir("why_frame")
+      local handle = assert(io.open(dir .. "/a.lua", "w"))
+      handle:write("os.execute(arg[1])\nlocal x = 1\nlocal y = 2\nlocal z = 3\n")
+      handle:close()
+      local out = harness.cli({"why", dir .. "/a.lua:1"})
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_match(out, "\n  > 1 | os%.execute%(arg%[1%]%)", out)
+      assert_match(out, "\n    3 | local y = 2", out)
+      assert_true(not out:find("\n    0 | ", 1, true), "no line 0: " .. out)
    end)
 end)
