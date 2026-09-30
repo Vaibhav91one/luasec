@@ -10,6 +10,8 @@ local degraded = require "luasec.rules.degraded"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
 local summary = require "luasec.report.summary"
+local doctor = require "luasec.report.doctor"
+local term = require "luasec.cli.term"
 local report_contract = require "luasec.report.findings"
 local render = require "luasec.report.render"
 local validate_report = require "luasec.validate.report"
@@ -67,6 +69,15 @@ end
 -- renderer renders it as given, so the per-finding status a baseline carries
 -- is not dropped by re-normalizing.
 
+-- The digest is for a person at a terminal. Everything a tool might read (a file,
+-- a pipe, another format, --summary, --score, --baseline) keeps the flat list.
+local function use_doctor_view(format, opts)
+   if format ~= "plain" or opts.output or opts.summary or opts.score or opts.baseline then return false end
+   if opts.view == "list" then return false end
+   if opts.view == "doctor" then return true end
+   return term.is_tty(1)
+end
+
 -- Write the report where the caller asked for it. Kept in one place because the
 -- baseline path and the ordinary path must obey the same -o and --quiet
 -- contract, or a report that only appears on one of them is worse than neither.
@@ -76,6 +87,9 @@ local function emit(list, format, opts)
    if opts.score then
       output = tostring(api.score(list).score)
    elseif opts.summary then output = summary.render(list)
+   elseif use_doctor_view(format, opts) then
+      output = doctor.render(list, {paint = term.palette(term.choice(opts), 1),
+         title = table.concat(opts.paths, ", "), verbose = opts.verbose})
    else
       output = render.render(list, format, opts)
    end
@@ -204,6 +218,9 @@ local function run(argv)
    end
    if opts.summary and opts.format and opts.format ~= "plain" then
       return fail("--summary works with the plain format")
+   end
+   if opts.view and opts.view ~= "list" and opts.view ~= "doctor" then
+      return fail("--view expects list or doctor")
    end
 
    local settings, settings_error = selection.settings(opts)

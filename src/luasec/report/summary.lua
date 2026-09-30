@@ -25,6 +25,8 @@ local function tally(list, field, order)
    return table.concat(parts, ", ")
 end
 
+summary.tally = tally
+
 --- Render the overview of a normalized findings list.
 function summary.render(list)
    local by_code, by_file, files = {}, {}, 0

@@ -16,6 +16,7 @@ local FLAGS_WITH_VALUE = {
    ["--jobs"] = "jobs",
    ["--max-nodes"] = "max_nodes",
    ["--validate-timeout"] = "validate_timeout",
+   ["--view"] = "view",
 }
 
 local BOOLEAN_FLAGS = {
@@ -36,6 +37,7 @@ local BOOLEAN_FLAGS = {
    ["--no-progress"] = "no_progress",
    ["--color"] = "color",
    ["--no-color"] = "no_color",
+   ["--verbose"] = "verbose",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -137,6 +139,8 @@ output:
   --quiet                    print nothing when there are no findings
   --score                    print only the 0-100 health score (exit code unchanged)
   --summary                  print counts and the files with the most findings, not every finding
+  --view <list|doctor>       doctor: findings grouped by code with the score (default on a terminal)
+  --verbose                  with the doctor view: every code and every location
   --progress                 show progress on stderr (default: only on a terminal)
   --no-progress              never show progress
   --color                    force colour (default: only on a terminal, never with NO_COLOR)
