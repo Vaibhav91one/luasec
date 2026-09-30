@@ -215,14 +215,16 @@ Next: luasec why <file>:<line>  ·  luasec rules explain <code>  ·  luasec fix 
 
 After the report, when stdin and stdout are both terminals, the format is
 plain, none of `-o`, `--summary`, `--score`, `--quiet`, `--baseline` applies,
-and there is at least one finding, luasec offers a menu. It changes nothing
-about the scan: the report and the exit code are already decided. A letter
-runs its item, Up/Down move the mark and Enter runs the marked one, and `q`,
-Esc, Ctrl-D, EOF, or Enter on `q` quits. `--interactive` forces the menu,
-`--no-interactive` never shows it.
+and there is at least one finding, luasec offers a selector. It changes nothing
+about the scan: the report and the exit code are already decided. A letter runs
+its item, Up/Down (or `k`/`j`) move the mark and Enter runs the marked one, Esc
+goes back, and `q`, Ctrl-C, Ctrl-D or EOF quit. The item marked (Recommended) is
+`r` when any finding is critical or high, otherwise `s`. `--interactive` forces
+it, `--no-interactive` never shows it.
 
+- `r` review findings: a list grouped by category, worst first, with a detail pane (why, flow, code frame, fix, reference). Enter shows the full detail, Esc returns.
 - `e` explain a finding: pick one of up to 15, worst first, and print what `luasec why` prints for it.
-- `f` fix with an AI agent: build the `luasec fix` prompt for the scanned paths.
+- `f` fix with an AI agent: a submenu with Claude Code, Codex, Cursor, Copy prompt and Show prompt. Copy uses `pbcopy`, `wl-copy`, `xclip` or `xsel`, and falls back to the terminal's OSC 52.
 - `a` show every finding: print the flat plain report again.
 - `s` save a report: write json, sarif, or html to the named file.
 - `b` save a baseline: write the JSON report to use with `--baseline` next time.
@@ -230,9 +232,10 @@ Esc, Ctrl-D, EOF, or Enter on `q` quits. `--interactive` forces the menu,
 - `i` install agent guidance: run `luasec install`.
 - `q` quit.
 
-Nothing is launched or written without choosing it: the agent launches only
-on an explicit `launch` answer (the default prints the prompt), and a report
-or baseline is written only after naming its file.
+Nothing is launched or written without choosing it: an agent is launched only
+after you answer `y` and always with its approval prompts on (any other answer
+prints the prompt), and a report or baseline is written only after naming its
+file.
 
 ### JSON
 

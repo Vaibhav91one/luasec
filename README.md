@@ -194,24 +194,37 @@ luasec reported 709 (untrusted data reaches command execution) at test/fixtures/
 
 ### In the terminal
 
-After a scan with findings on a terminal there is a menu: `e` explain (the
-`why` output above), `f` fix with an AI agent (default: print the prompt;
-approvals stay on unless answered `y`), `a` all, `s` save report, `b` save
-baseline, `c` CI, `i` install guidance, `q` quit; arrows and Enter also work.
-`--interactive` forces it, `--no-interactive` turns it off. It never changes
-the exit code. Colour follows the terminal (`NO_COLOR`, `--color`,
-`--no-color`); progress on a terminal is a spinner with a bar and the current
-file, otherwise plain lines every 10% with `--progress`:
+After a scan with findings on a terminal there is a selector: `r` review
+findings, `e` explain one, `f` fix with an AI agent, `a` all, `s` save a report,
+`b` save a baseline, `c` CI, `i` install guidance, `q` quit. Move with the arrow
+keys and press Enter, or type an item's letter; Esc goes back. One item is
+marked (Recommended): review when anything is critical or high, otherwise save a
+report. `--interactive` forces it, `--no-interactive` turns it off. It never
+changes the exit code. Colour follows the terminal (`NO_COLOR`, `--color`,
+`--no-color`); progress on a terminal is a spinner with the phase, a bar and the
+current file, ending in `✔ Scanned N files in Xs`; otherwise plain lines every
+10% with `--progress`.
+
+`r` opens a findings browser: findings grouped by category, worst first, with a
+detail pane showing why, the source-to-sink flow, a code frame and the fix.
+`f` opens a hand-off submenu: Claude Code, Codex, Cursor, copy the prompt, or
+show it. Agents are launched with their approval prompts on, and only after you
+answer `y`; anything else prints the prompt.
 
 ```sh
 bin/luasec --view doctor --no-color test/fixtures/tainted_exec/handler.lua
 ```
 
 ```
-luasec  test/fixtures/tainted_exec/handler.lua
-Score 75/100  needs work  [###############-----]
-1 finding in 1 file: critical 1
-exec 1
+┌────────────────────────────────────────────┐
+│ luasec  test/fixtures/tainted_exec/handler…│
+│                                            │
+│ 75 / 100  needs work                       │
+│ ███████████████░░░░░                       │
+│                                            │
+│ 1 finding in 1 file: critical 1            │
+│ exec 1                                     │
+└────────────────────────────────────────────┘
 
 ✖ 709  untrusted data reaches command execution  critical · certain
     test/fixtures/tainted_exec/handler.lua:3
