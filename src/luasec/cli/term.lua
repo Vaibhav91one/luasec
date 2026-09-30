@@ -176,7 +176,9 @@ function term.wrap(text, width)
    local indent = text:match("^(%s*)") or ""
    local room = math.max(1, width - dlen(indent))
    local words = {}
-   for word in text:gmatch("%S+") do
+   for token in text:gmatch("%S+") do
+      -- A loop variable is read-only from Lua 5.5, so the fitted copy is a new local.
+      local word = token
       if dlen(word) > room then word = term.fit_path(word, room) end
       words[#words + 1] = word
    end
