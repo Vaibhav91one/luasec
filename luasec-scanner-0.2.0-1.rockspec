@@ -62,6 +62,7 @@ build = {
       ["luasec.report.render"] = "src/luasec/report/render.lua",
       ["luasec.report.sarif"] = "src/luasec/report/sarif.lua",
       ["luasec.report.score"] = "src/luasec/report/score.lua",
+      ["luasec.report.summary"] = "src/luasec/report/summary.lua",
       ["luasec.rules.categories"] = "src/luasec/rules/categories.lua",
       ["luasec.rules.codes"] = "src/luasec/rules/codes.lua",
       ["luasec.rules.context"] = "src/luasec/rules/context.lua",

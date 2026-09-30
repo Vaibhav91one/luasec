@@ -47,6 +47,14 @@ function codes.render(spec, finding)
    end))
 end
 
+--- A code's message with its `({field})` placeholder groups removed: what the
+-- code means, without the names of one finding's fields.
+function codes.meaning(code)
+   local spec = registry[code]
+   if not spec then return "" end
+   return (spec.message:gsub("%s*%({%w+}%)", ""):gsub("%s*{%w+}", ""))
+end
+
 -- ---------------------------------------------------------------- 7xx exec
 
 register {code = "701", severity = "high", cwe = "CWE-78",

@@ -307,6 +307,50 @@ the new ones; a finding the baseline marks fixed costs nothing — so a tree
 whose only findings are already in the baseline scores 100. Use the plain score
 for the state of the whole tree.
 
+### Summary
+
+`--summary` prints an overview instead of one line per finding: the finding
+and file counts, the non-zero severity and confidence tallies, one line per
+code with its meaning, the ten files with the most findings, and the same
+Score line the plain report prints. Exit codes are unchanged. It works only
+with the plain format: with `--format json|sarif|html` the run exits `2`
+with `luasec: --summary works with the plain format`. When the plain report
+prints more than 100 findings it ends with a closing hint naming the
+`--min-confidence` filter and `--summary`.
+
+```sh
+bin/luasec --summary test/fixtures/firmware
+```
+
+```
+Summary: 42 findings in 13 files
+Severity: high 24, medium 18
+Confidence: high 6, medium 29, low 7
+Codes:
+  726  7  self-modifying or destructive operation
+  708  6  execution sink in an exported function that nothing in this file feeds
+  724  6  function containing an execution sink is exposed as an RPC handler
+  728  6  untrusted data used as a search pattern
+  725  5  sandbox or global environment manipulated
+  721  4  write to flash or firmware configuration with untrusted data
+  723  3  sensitive file read by path literal
+  727  2  unbounded string growth can exhaust memory
+  749  2  persistence installed by the script
+  703  1  dynamic code evaluation with a non-constant argument
+Files with the most findings:
+  6  test/fixtures/firmware/destructive.lua
+  6  test/fixtures/firmware/dynamic_pattern.lua
+  6  test/fixtures/firmware/sandbox_escape.lua
+  5  test/fixtures/firmware/self_modify.lua
+  4  test/fixtures/firmware/ubus_method.lua
+  3  test/fixtures/firmware/sensitive_read.lua
+  3  test/fixtures/firmware/ubus_two_sinks.lua
+  2  test/fixtures/firmware/flash_write.lua
+  2  test/fixtures/firmware/unbounded_growth.lua
+  2  test/fixtures/firmware/unregistered_helper.lua
+Score: 0/100 (critical) - exec 7, firmware 33, payload 2
+```
+
 ### Progress
 
 A scan of a real firmware tree takes seconds to minutes. Progress reports

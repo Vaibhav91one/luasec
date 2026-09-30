@@ -17,6 +17,23 @@ local function location(finding, opts)
    return location
 end
 
+--- The closing "Score: ..." line for a findings list.
+function plain.score_line(report)
+   -- The health score, computed from the same findings the total counts. A
+   -- category with nothing in it is left out, so the line stays short.
+   local summary = score.summarize(report)
+   local counted = {}
+   for _, id in ipairs(categories.order()) do
+      if summary.categories[id] > 0 then
+         counted[#counted + 1] = id .. " " .. summary.categories[id]
+      end
+   end
+   local note = summary.coverage_gaps > 0
+      and (", %d coverage gap%s"):format(summary.coverage_gaps, summary.coverage_gaps == 1 and "" or "s") or ""
+   return string.format("Score: %d/100 (%s%s)%s", summary.score, summary.label, note,
+      #counted > 0 and (" - " .. table.concat(counted, ", ")) or "")
+end
+
 function plain.render(report, opts)
    opts = opts or {}
    local buffer = {}
@@ -61,19 +78,15 @@ function plain.render(report, opts)
    buffer[#buffer + 1] = string.format("Total: %d finding%s (%s)",
       #report, #report == 1 and "" or "s", #parts > 0 and table.concat(parts, ", ") or "none")
 
-   -- The health score, computed from the same findings the total counts. A
-   -- category with nothing in it is left out, so the line stays short.
-   local summary = score.summarize(report)
-   local counted = {}
-   for _, id in ipairs(categories.order()) do
-      if summary.categories[id] > 0 then
-         counted[#counted + 1] = id .. " " .. summary.categories[id]
+   buffer[#buffer + 1] = plain.score_line(report)
+
+   if #report > 100 then
+      local low = 0
+      for _, finding in ipairs(report) do
+         if finding.confidence == "low" then low = low + 1 end
       end
+      buffer[#buffer + 1] = ("Hint: %d findings, %d at low confidence; --min-confidence medium hides those, --summary shows an overview."):format(#report, low)
    end
-   local note = summary.coverage_gaps > 0
-      and (", %d coverage gap%s"):format(summary.coverage_gaps, summary.coverage_gaps == 1 and "" or "s") or ""
-   buffer[#buffer + 1] = string.format("Score: %d/100 (%s%s)%s", summary.score, summary.label, note,
-      #counted > 0 and (" - " .. table.concat(counted, ", ")) or "")
 
    return table.concat(buffer, "\n")
 end
