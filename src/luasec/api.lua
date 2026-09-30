@@ -316,9 +316,9 @@ function api.analyze(paths, opts)
          -- A template page is scanned by its Lua blocks, blanked to the page's
          -- own lines and columns; a page with no block is skipped, not parsed.
          local analysed, skipped = file.source, false
-         if template.is_template_path(file.path) then
-            if template.has_lua(file.source) then
-               analysed = template.extract(file.source)
+          if template.is_template_path(file.path) then
+             if template.has_lua(file.source, file.path) then
+                analysed = template.extract(file.source, file.path)
             else
                skipped = true
             end

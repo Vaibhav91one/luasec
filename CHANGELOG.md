@@ -58,9 +58,11 @@ Found by scanning public router firmware images unpacked to a rootfs.
   (middle-ellipsis, `file:line` tail kept for paths) and wrap detail text at
   word boundaries, so narrow terminals no longer wrap rows and drift the
   redraws (#174).
-- CGILua pages (`.html`, `.htm`, `.lp`) are scanned by their Lua blocks
-  (`<?lua` ... `?>`, `<%` ... `%>`, `<%=` ... `%>`): the HTML is blanked but
-  the lines and columns are kept, so a finding lands on the page's own line;
+- CGILua pages are scanned by their Lua blocks: `.html`/`.htm` by `<?lua`
+  ... `?>` (a walk collects a page that holds one), `.lp` by those forms and
+  by `<%` ... `%>` / `<%=` ... `%>` when named explicitly (LuCI's `<%:`
+  dialect pages hold no block and are skipped). The HTML is blanked but the
+  lines and columns are kept, so a finding lands on the page's own line;
   a page with no block is skipped (#175).
 
 ## 0.2.0 - 2026-09-30

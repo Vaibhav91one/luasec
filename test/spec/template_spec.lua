@@ -1,6 +1,7 @@
--- CGILua pages: Lua inside <?lua ?> / <% %> / <%= %> blocks in .html
--- (.htm, .lp) files is scanned with its HTML blanked but its lines and
--- columns kept, so a finding lands on the page's own line.
+-- CGILua pages: Lua inside <?lua ?> blocks in .html/.htm files, and inside
+-- <?lua ?> / <% %> / <%= %> blocks in .lp files, is scanned with its HTML
+-- blanked but its lines and columns kept, so a finding lands on the page's
+-- own line. LuCI's <%: %> / <%+ %> / <%# %> dialect is not Lua and is skipped.
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match =
@@ -49,10 +50,42 @@ describe("template pages", function()
       assert_equal(report[1].column, want, "the column matches the page, not the extraction")
    end)
 
-   it("analyses a <%= expression block", function()
-      local report = api.analyze({T .. "expr.html"})
+   it("analyses a <%= expression block in a .lp page", function()
+      local report = api.analyze({T .. "expr.lp"})
       assert_equal(codes(report), "709", "the expression block is Lua, not text")
-      assert_equal(report[1].file, T .. "expr.html", "the finding names the page")
+      assert_equal(report[1].line, 4, "the sink is on line 4 of the page")
+      assert_equal(report[1].file, T .. "expr.lp", "the finding names the page")
+   end)
+
+   it("analyses a <% statement block in a .lp page", function()
+      local report = api.analyze({T .. "stmt.lp"})
+      assert_equal(codes(report), "709", "the statement block is Lua, not text")
+      assert_equal(report[1].line, 4, "the sink is on line 4 of the page")
+      assert_equal(report[1].file, T .. "stmt.lp", "the finding names the page")
+   end)
+
+   it("skips a LuCI-dialect .htm page: <%: %> is translation, not Lua", function()
+      local report = api.analyze({T .. "luci.htm"})
+      assert_equal(#report, 0, "no block luasec reads means nothing analysed, no 901")
+      local dir = harness.scratch_dir("template_luci_walk")
+      write(dir .. "/view.htm", read(T .. "luci.htm"))
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_equal(code, 0, out)
+      assert_no_match(out, "901", "a skipped page is not a coverage gap: " .. out)
+      assert_true(not out:find("view.htm", 1, true), "the page is not scanned: " .. out)
+   end)
+
+   it("leaves .lp pages to explicit paths: a walk never collects them", function()
+      -- The precision denominator counts what the walk collects; .lp pages are
+      -- analysed when named (see above) but never gathered from a directory.
+      local dir = harness.scratch_dir("template_lp_walk")
+      write(dir .. "/page.lp", read(T .. "stmt.lp"))
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. string.format("%q", dir))
+      assert_equal(code, 0, out)
+      assert_no_match(out, "901", "a skipped page is not a coverage gap: " .. out)
+      assert_true(not out:find("page.lp", 1, true), "the page is not scanned: " .. out)
    end)
 
    it("never analyses text outside blocks", function()

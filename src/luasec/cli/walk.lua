@@ -1,19 +1,20 @@
 -- Input collection: files given on the command line, or directories walked
 -- recursively. Deliberately conservative about what counts as a Lua file in
--- firmware: `.lua` plus extensionless files under cgi-bin, CGILua pages whose
--- Lua blocks template.lua finds, and files whose first line looks like a Lua
--- shebang or a Lua comment.
+-- firmware: `.lua` plus extensionless files under cgi-bin, `.html`/`.htm`
+-- pages with a `<?lua` block (template.lua), and files whose first line looks
+-- like a Lua shebang or a Lua comment. (`.lp` pages are analysed only when
+-- named explicitly, never collected by a walk.)
 local walk = {}
 
 local template = require "luasec.cli.template"
 
-local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec", ".lp"}
+local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec"}
 
 -- Extensions that are definitely not Lua. A firmware tree is mostly web assets
 -- and translations, and scanning them produced hundreds of findings that were
 -- all noise.
 local NOT_LUA_EXTENSIONS = {
-   ".js", ".uc", ".json", ".po", ".pot", ".css", ".xml", ".svg",
+   ".js", ".uc", ".json", ".po", ".pot", ".css", ".lp", ".xml", ".svg",
    ".png", ".jpg", ".gif", ".woff", ".woff2", ".ttf", ".map", ".conf", ".sh",
    ".py", ".md", ".txt", ".ucode", ".patch", ".diff", ".pem", ".cer", ".p8",
    ".luadoc", ".awk", ".h", ".hpp", ".c", ".pl", ".dts", ".yml", ".yaml",
@@ -80,7 +81,7 @@ local function template_file_has_lua(path)
    local text = handle:read("*a")
    handle:close()
    if not text then return false end
-   return template.has_lua(text)
+   return template.has_lua(text, path)
 end
 
 -- Is this file Lua? An extension decides it when it is one we know. Otherwise
@@ -93,7 +94,7 @@ local function looks_like_lua(path)
       return false
    end
 
-   if template.is_template_path(path) then
+   if template.is_template_path(path) and path:lower():sub(-3) ~= ".lp" then
       return template_file_has_lua(path)
    end
 
