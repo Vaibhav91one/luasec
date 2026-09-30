@@ -51,6 +51,7 @@ coverage gap because the target is analyzed at its real path already. A target
 that climbs with `..` is never re-rooted, a dangling link named like a library
 or archive is not a gap either, and every other link that resolves to nothing
 is reported as one `901` per scan root with a count, not one finding per link.
+An absolute link to a file that has a copy under the scanned root is not read from the host either.
 
 ```sh
 bin/luasec --std +openwrt+luci rootfs/

@@ -545,8 +545,12 @@ local function expand_root(root)
          if link.kind == "f" then
             -- Read under the name the tree gives the link, so the finding lands
             -- where an operator looks for it; opening it follows the link, so the
-            -- bytes analyzed are the target's.
-            files[#files + 1] = link.path
+            -- bytes analyzed are the target's. An absolute link whose target has a
+            -- copy under the scan root names that copy, which is analysed at its
+            -- real path, so following it here would read the HOST's file instead.
+            if not rerooted(link.path, anchor) then
+               files[#files + 1] = link.path
+            end
          elseif link.kind == "d" then
             local covered = link.dir == anchor
                or link.dir:sub(1, #inside_prefix) == inside_prefix
