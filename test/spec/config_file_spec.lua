@@ -100,5 +100,40 @@ describe("config file", function()
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_no_match(auto, "%[709%]", auto)
       assert_match(skipped, "%[709%]", skipped)
+      assert_match(auto, "luasec: using luasec%.config%.lua from the current directory", auto)
+   end)
+
+   it("never runs the file: a statement in it is refused, not executed", function()
+      -- A bounded loop, so a build that still runs the file fails this spec
+      -- instead of hanging on it.
+      local out, code = with_config("cfg_loop", "for i = 1, 3 do end return {}", {TAINTED})
+      assert_equal(code, 2, out)
+      assert_match(out, "cannot use config", out)
+   end)
+
+   it("refuses a computed value", function()
+      local out, code = with_config("cfg_calc", "return {fail_on = ('hi'):rep(1) .. 'gh'}", {TAINTED})
+      assert_equal(code, 2, out)
+      assert_match(out, "only literal", out)
+   end)
+
+   it("refuses a severity key that is a number, not a quoted code", function()
+      local out, code = with_config("cfg_numkey", "return {severity = {[709] = 'low'}}", {TAINTED})
+      assert_equal(code, 2, out)
+      assert_match(out, "quoted", out)
+   end)
+
+   it("still reads every documented key", function()
+      local out, code = with_config("cfg_full", [[
+return {
+  std = "+openwrt+luci",
+  fail_on = "critical",
+  disable = {"705"},
+  severity = {["709"] = "high"},
+  allow = {{code = "701", file = "x.lua", reason = "reviewed"}},
+}
+]], {TAINTED})
+      assert_equal(code, 0, out)
+      assert_match(out, "%[709%] high", out)
    end)
 end)

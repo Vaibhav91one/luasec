@@ -49,6 +49,7 @@ hanging, exhausting memory, or executing anything it analyzes. Specifically:
   The validator writes no temporary files; the payload rides to the child inside
   the child's own command line.
 - Pattern matching is bounded: in-source suppression patterns are rejected before Lua compiles them if they exceed 64 bytes or contain more than three repetition quantifiers (`-`, `*`, `+`, `?`), keeping backtracking cost on the 127-byte probe bounded to ~127^3 rather than ~127^k for arbitrary k. Rules are checked against bounded input.
+- A `luasec.config.lua` in the working directory is trusted to select and allow findings: it is parsed, never executed, but its `allow` entries still apply. When scanning a tree you do not trust, run from outside it or pass `--no-config`.
 
 ## What the memory bound actually is, measured
 

@@ -288,7 +288,11 @@ local function run(argv)
       local path = opts.config
       if not path then
          local probe = io.open(config_file.DEFAULT_NAME, "rb")
-         if probe then probe:close() path = config_file.DEFAULT_NAME end
+         if probe then
+            probe:close()
+            path = config_file.DEFAULT_NAME
+            io.stderr:write("luasec: using luasec.config.lua from the current directory (--no-config to skip)\n")
+         end
       end
       if path then
          local loaded, config_error = config_file.load(path)

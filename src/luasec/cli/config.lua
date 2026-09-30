@@ -40,6 +40,9 @@ function config.check(value, path)
    if value.severity ~= nil then
       if type(value.severity) ~= "table" then return bad("severity must map a code to a severity") end
       for code, severity in pairs(value.severity) do
+         if type(code) ~= "string" then
+            return bad(("severity keys are quoted codes, e.g. ['709'], not %s"):format(tostring(code)))
+         end
          if not codes.exists(tostring(code)) then
             return bad(("severity: '%s' is not a luasec code"):format(tostring(code)))
          end
@@ -71,6 +74,55 @@ function config.check(value, path)
    return value
 end
 
+local decoder = require "luacheck.decoder"
+local parser = require "luacheck.parser"
+
+-- A literal: a string, number, boolean, or a table of literals. Anything else
+-- (a call, an operator, a variable) is refused, so the file is data.
+local function literal(node)
+   local tag = node.tag
+   if tag == "String" then return node[1] end
+   if tag == "Number" then return tonumber(node[1]) end
+   if tag == "True" then return true end
+   if tag == "False" then return false end
+   if tag == "Table" then
+      local value, count = {}, 0
+      for _, item in ipairs(node) do
+         if item.tag == "Pair" then
+            local key, key_error = literal(item[1])
+            if key == nil then return nil, key_error end
+            local field, field_error = literal(item[2])
+            if field == nil then return nil, field_error end
+            value[key] = field
+         else
+            local field, field_error = literal(item)
+            if field == nil then return nil, field_error end
+            count = count + 1
+            value[count] = field
+         end
+      end
+      return value
+   end
+   return nil, ("line %s: only literal strings, numbers, booleans and tables are allowed"):format(
+      tostring(node.line or "?"))
+end
+
+--- Read a config text as data: it must be exactly `return { ... }` of
+-- literals. It is parsed, never run, so a config in a tree being scanned
+-- cannot execute anything, loop, or allocate its way into the run.
+function config.read_data(text)
+   local ok, ast = pcall(parser.parse, decoder.decode(text))
+   if not ok then
+      local message = type(ast) == "table" and (ast.msg or ast.message) or ast
+      return nil, "not valid Lua: " .. tostring(message)
+   end
+   if #ast ~= 1 or ast[1].tag ~= "Return" or #ast[1] ~= 1 or ast[1][1].tag ~= "Table" then
+      return nil, "it must be a single `return { ... }` table; only literal strings, numbers, "
+         .. "booleans and tables are allowed"
+   end
+   return literal(ast[1][1])
+end
+
 --- Load and check a config file. Returns the table, or nil plus a message.
 function config.load(path)
    local handle, open_error = io.open(path, "rb")
@@ -79,14 +131,8 @@ function config.load(path)
    end
    local text = handle:read("*a")
    handle:close()
-   -- luasec: ignore 710  the config text is the operator's own file, loaded as data in an empty environment
-   local chunk, parse_error = load(text, "@" .. path, "t", {})
-   if not chunk then return nil, "cannot use config " .. path .. ": " .. tostring(parse_error) end
-   local ok, value = pcall(chunk)
-   if not ok then return nil, "cannot use config " .. path .. ": " .. tostring(value) end
-   if type(value) ~= "table" then
-      return nil, "cannot use config " .. path .. ": it must return a table"
-   end
+   local value, read_error = config.read_data(text)
+   if value == nil then return nil, "cannot use config " .. path .. ": " .. read_error end
    return config.check(value, path)
 end
 
