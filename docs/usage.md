@@ -714,6 +714,12 @@ bin/luasec why test/fixtures/tainted_exec/handler.lua:3
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
   source  http.formvalue  test/fixtures/tainted_exec/handler.lua:3
   sink    os.execute  test/fixtures/tainted_exec/handler.lua:3
+    1 | -- Fixture: untrusted input reaches a command execution sink.
+    2 | local function ping(host)
+  > 3 |    os.execute("ping -c1 " .. http.formvalue(host))
+      |    ^
+    4 | end
+    5 | 
   how to fix:
     Do not build a shell command from request data; pass fixed arguments, validate against an allowlist, or use an API that does not go through the shell. If a shell is unavoidable, quote every untrusted part with a shell-quoting helper before concatenation.
   more: luasec rules explain 709

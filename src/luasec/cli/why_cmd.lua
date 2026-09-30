@@ -22,6 +22,28 @@ local function how_to_fix(root, code)
    return section and section:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- A few lines of the file around `line`, the offending one marked with > and a
+-- caret under its column, like a diff hunk. Tabs become one space so the caret
+-- stays under the column luasec reports. nil when the file cannot be read.
+local function code_frame(file, line, column)
+   local handle = io.open(file, "rb")
+   if not handle then return nil end
+   local lines = {}
+   for text in handle:lines() do lines[#lines + 1] = (text:gsub("\t", " ")) end
+   handle:close()
+   if line < 1 or line > #lines then return nil end
+   local first, last = math.max(1, line - 2), math.min(#lines, line + 2)
+   local width = #tostring(last)
+   local out = {}
+   for number = first, last do
+      out[#out + 1] = ("  %s %" .. width .. "d | %s"):format(number == line and ">" or " ", number, lines[number])
+      if number == line then
+         out[#out + 1] = ("    %s | %s^"):format(string.rep(" ", width), string.rep(" ", math.max(0, (column or 1) - 1)))
+      end
+   end
+   return table.concat(out, "\n")
+end
+
 function why.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local file, line = (argv[1] or ""):match("^(.+):(%d+)$")
@@ -77,6 +99,8 @@ function why.run(argv, root, out, err)
       else
          out:write(NO_FLOW)
       end
+      local frame = code_frame(finding.file, finding.line, finding.column)
+      if frame then out:write(frame, "\n") end
       local fix = how_to_fix(root, finding.code)
       if fix then
          out:write("  how to fix:\n")
