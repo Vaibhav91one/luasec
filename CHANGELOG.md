@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 Found by scanning public router firmware images unpacked to a rootfs.
 
 - A file that failed to parse only because a string held an escape Lua 5.1 accepts (`"\/"`, `'\.'`) is parsed again with that escape rewritten to one of the same length, so its flows are analysed instead of falling back to a 901 (#181).
+- A sink entry can carry `filters` (argument position to the characters its callee strips). A flow into a partly filtered argument is still reported, one confidence step lower, and the message names what is removed and what still passes; the cgilua std uses it for `util.runShellCmd` and `util.shellCmdOutput` and now reports a tainted `options` argument at full confidence (#177).
 - Progress on stderr while scanning: the files found, a live counter, and a
   closing count with the time. On by default only in a terminal; `--progress`
   and `--no-progress` override it, `--quiet` turns it off (#135).

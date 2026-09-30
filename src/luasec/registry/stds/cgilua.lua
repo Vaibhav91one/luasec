@@ -2,7 +2,7 @@
 -- (`cgi["name"]`, `cgi.action`), through `web.cgiToLuaTable(cgi)`, and through
 -- the globals `RowId`, `DBTable`, `NextPage` split off a button name; it
 -- reaches a shell through the vendor wrappers `util.runShellCmd` and
--- `util.shellCmdOutput`, modelled here as full exec sinks.
+-- `util.shellCmdOutput`, modelled here as exec sinks whose command argument is a partial filter.
 return {
    name = "cgilua",
    global_sources = {
@@ -20,8 +20,12 @@ return {
       {pattern = "cgilua.cookies.get", id = "cgilua.cookies.get", name = "CGILua cookie", confidence = "medium"},
    },
    sinks = {
-      {pattern = "util.runShellCmd", code = "701", kind = "exec", arg = {1}},
-      {pattern = "util.shellCmdOutput", code = "701", kind = "exec", arg = {1}},
+      -- Both wrappers strip ; ` $ & | < > from the command, not from `options`,
+      -- and leave ( ) and newline: position 1 is a partial filter, options is not.
+      {pattern = "util.runShellCmd", code = "701", kind = "exec", arg = {1, 4},
+         filters = {[1] = ";`$&|<>"}},
+      {pattern = "util.shellCmdOutput", code = "701", kind = "exec", arg = {1, 2},
+         filters = {[1] = ";`$&|<>"}},
    },
    propagators = {},
    sanitizers = {shell = {}, dyncode = {}, path = {}},

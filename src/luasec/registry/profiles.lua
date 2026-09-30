@@ -81,6 +81,18 @@ local function validate(name, declaration)
             assert(type(entry.confidence) == "string",
                "every " .. name .. "." .. key .. " entry needs confidence as a string")
          end
+         if entry.filters ~= nil then
+            assert(type(entry.filters) == "table",
+               "every " .. name .. "." .. key .. " entry needs filters as a table of position to string")
+            local positions = {}
+            for _, position in ipairs(entry.arg or {}) do positions[position] = true end
+            for position, chars in pairs(entry.filters) do
+               assert(type(position) == "number" and type(chars) == "string",
+                  "every " .. name .. "." .. key .. " filters entry maps a position number to a string")
+               assert(positions[position],
+                  "every " .. name .. "." .. key .. " filters position must also be in arg")
+            end
+         end
       end
    end
 

@@ -224,6 +224,10 @@ The `cgilua` profile declares global sources (`cgi` at certain confidence,
 `RowId`, `DBTable`, `NextPage` at high), call sources (`web.cgiToLuaTable` at
 certain, `web.cgiSearch`, `web.cgiFindButton`, `web.cgiFindToken` and
 `SAPI.Request.servervariable` at high, `cgilua.cookies.get` at medium), and the
-vendor wrappers `util.runShellCmd` and `util.shellCmdOutput` as full exec
-sinks on their first argument. The wrappers are modelled as full sinks: a
-partial filter inside them is not modelled yet.
+vendor wrappers `util.runShellCmd` and `util.shellCmdOutput` as exec sinks. Both strip
+`; ` $ & | < >` from the command but not from their `options` argument and leave `(`, `)`
+and newline, so the command argument carries `filters = {[1] = ";`$&|<>"}`: a flow into it is still
+reported, one confidence step lower, with a message naming what the filter removes and what still
+passes. A tainted `options` argument is reported at full confidence. A sink entry in a `--rules`
+profile may carry the same `filters` field (a table of argument position to the characters the
+callee strips; each position must also be in `arg`).

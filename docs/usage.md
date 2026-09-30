@@ -143,7 +143,9 @@ CGILua web backends. Sources are the global request table (`cgi`), the
 `RowId`, `DBTable` and `NextPage` globals split off a button name, and
 `web.cgiToLuaTable` with its `web.cgiSearch`, `web.cgiFindButton` and
 `web.cgiFindToken` helpers; sinks are the vendor shell wrappers
-`util.runShellCmd` and `util.shellCmdOutput`.
+`util.runShellCmd` and `util.shellCmdOutput`. The wrappers strip some shell
+metacharacters from the command, so a flow into it is reported one confidence step
+lower and names the characters that still pass.
 
 ```sh
 bin/luasec --std +cgilua page.lua
