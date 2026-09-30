@@ -287,6 +287,11 @@ bin/luasec --score test/fixtures/tainted_exec/handler.lua
 75
 ```
 
+Under `--baseline` the score is computed from the findings the run reports —
+the new ones; a finding the baseline marks fixed costs nothing — so a tree
+whose only findings are already in the baseline scores 100. Use the plain score
+for the state of the whole tree.
+
 ## Config file
 
 `luasec.config.lua` in the current directory is loaded when it exists.

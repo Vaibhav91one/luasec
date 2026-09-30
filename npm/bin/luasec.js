@@ -64,7 +64,13 @@ async function install() {
     const built = spawnSync('make', ['lua'], { cwd: path.join(staging, name), stdio: ['ignore', 2, 2] });
     if (built.status !== 0) fail('building Lua failed; install Lua 5.3+ or a C compiler and try again');
   }
-  fs.renameSync(path.join(staging, name), root);
+  try {
+    fs.renameSync(path.join(staging, name), root);
+  } catch (error) {
+    // Another first run finished installing the same version while this one
+    // was extracting: use its copy.
+    if (!fs.existsSync(entry)) throw error;
+  }
   fs.rmSync(staging, { recursive: true, force: true });
 }
 
