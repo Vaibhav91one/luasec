@@ -231,3 +231,24 @@ reported, one confidence step lower, with a message naming what the filter remov
 passes. A tainted `options` argument is reported at full confidence. A sink entry in a `--rules`
 profile may carry the same `filters` field (a table of argument position to the characters the
 callee strips; each position must also be in `arg`).
+
+## Entry points
+
+A profile may declare functions that are called with request data, for a web
+server whose route table the analysis cannot follow:
+
+```lua
+return {
+   name = "myvendor",
+   entry_points = {
+      {pattern = "handle_*", arg = {1}, confidence = "medium"},
+   },
+}
+```
+
+`pattern` is matched against a function's full name (`M.on_request`) and then its
+short name (`on_request`), with the same `*` and `?` wildcards as sources and sinks.
+`arg` lists the parameter positions that start tainted (default `{1}`). A sink
+reached from such a parameter is a 709 with the entry point as its source, so the
+708 "exposed sink nothing feeds" at that site is dropped. The cgilua std declares
+`*Handler` with argument 1 for the mesh JSON-RPC handlers.
