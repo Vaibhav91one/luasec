@@ -43,6 +43,15 @@ trust to be the tree you want read.
 
 luasec scans Lua source: a firmware image (tar, squashfs, UBI) has to be extracted first, and naming one on the command line reports a 901 that says so instead of reading it as Lua.
 
+When the tree is an extracted firmware image, absolute symlinks are tried
+against the image root wherever it sits under the scanned directory: a link
+naming `/usr/sbin/foo` is looked up under each ancestor of the link up to the
+scan root and never above it, and when that copy exists the link is not a
+coverage gap because the target is analyzed at its real path already. A target
+that climbs with `..` is never re-rooted, a dangling link named like a library
+or archive is not a gap either, and every other link that resolves to nothing
+is reported as one `901` per scan root with a count, not one finding per link.
+
 ```sh
 bin/luasec --std +openwrt+luci rootfs/
 ```
