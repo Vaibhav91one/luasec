@@ -53,7 +53,7 @@ local BOOLEAN_FLAGS = {
 -- --rules file that did not exist, or did not parse, was accepted silently: the
 -- operator's declarations never loaded and the report was quietly narrower.
 local LIST_OPTIONS = {only = "only", ignore = "ignore", enable = "enable",
-   rules = "rules"}
+   category = "category", rules = "rules"}
 
 local function add_list(target, name, value)
    target[name] = target[name] or {}
@@ -133,6 +133,7 @@ usage: luasec [options] <file|directory>...
        luasec why <file>:<line> [options]
        luasec fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
       luasec install [--dir <project>] [--force] [--hook] [claude] [cursor] [agents]
+      luasec install [--dir <project>] [--force] [claude] [cursor] [agents]
        luasec ci install [--dir <project>] [--force]
 
 input:
@@ -159,6 +160,7 @@ selection:
   --only <patterns>          report only matching codes
   --ignore <patterns>        suppress matching codes
   --enable <patterns>        force matching codes on
+  --category <names>         only these families: exec, firmware, payload, artifact, meta
   --rules <file>             load extra sink/source declarations. The file is a
                             Lua module returning a table, same shape as a
                             profile; a missing or unparseable one is an error,
@@ -202,6 +204,7 @@ other:
   -h, --help                 this message
   --version                  print version and exit
   rules list | explain <code>  the rule catalogue, and one code's doc page
+  rules set|enable|disable <code>  tune what this project reports (edits luasec.config.lua)
   why <file>:<line>          explain the findings on one line and how to fix them
   fix                        hand the findings to an AI agent (approvals skipped unless --safe)
   install                    write agent guidance: Claude skill, Cursor rule, AGENTS.md

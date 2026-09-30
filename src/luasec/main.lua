@@ -234,6 +234,11 @@ local function run(argv)
    if opts.view and opts.view ~= "list" and opts.view ~= "doctor" then
       return fail("--view expects list or doctor")
    end
+   for _, name in ipairs(opts.category or {}) do
+      if not ({exec = true, firmware = true, payload = true, artifact = true, meta = true})[name] then
+         return fail("--category expects one of exec, firmware, payload, artifact, meta")
+      end
+   end
 
    local settings, settings_error = selection.settings(opts)
    if not settings then return fail(settings_error) end

@@ -540,6 +540,62 @@ bin/luasec --config /nonexistent/luasec.config.lua test/fixtures/tainted_exec/ha
 luasec: cannot read config /nonexistent/luasec.config.lua: /nonexistent/luasec.config.lua: No such file or directory
 ```
 
+### Tuning a rule
+
+`luasec rules set <code> <off|low|medium|high|critical>`,
+`luasec rules disable <code>` and `luasec rules enable <code>` edit the
+project config (`./luasec.config.lua`, or the file given with
+`--config <file>`; created when missing). `set 709 off` is `disable 709`,
+`set 709 low` writes `severity["709"] = "low"` and drops `709` from `disable`,
+`disable` adds the code to `disable` once, and `enable` drops it from both.
+The next scan honours the file.
+
+```sh
+bin/luasec rules set 709 low --config ./tmp-docs-tuning/luasec.config.lua
+```
+
+```
+wrote ./tmp-docs-tuning/luasec.config.lua: 709 -> low
+```
+
+```sh
+bin/luasec --config ./tmp-docs-tuning/luasec.config.lua test/fixtures/tainted_exec/handler.lua
+```
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] low: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 low)
+Score: 99/100 (good) - exec 1
+```
+
+```sh
+bin/luasec rules disable 709 --config ./tmp-docs-tuning/luasec.config.lua
+bin/luasec rules enable 709 --config ./tmp-docs-tuning/luasec.config.lua
+```
+
+```
+wrote ./tmp-docs-tuning/luasec.config.lua: 709 -> off
+wrote ./tmp-docs-tuning/luasec.config.lua: 709 -> default
+```
+
+The config file is data, and writing it back is a canonical rewrite. When the
+existing file contains a Lua comment (a `--`), the rewrite would lose it, so
+the command refuses and says what to add by hand instead, leaving the file
+untouched:
+
+```sh
+bin/luasec rules set 709 low --config ./tmp-docs-tuning/luasec.config.lua
+```
+
+```
+luasec: ./tmp-docs-tuning/luasec.config.lua has comments that a rewrite would lose; add this by hand instead: severity = {["709"] = "low"},
+```
+
+Exit code is `2`. An unknown code (`luasec: unknown code '799': run
+'luasec rules list' to see them`) and a bad severity (`luasec: expected off,
+low, medium, high or critical`) also exit `2` and write nothing.
+
 ## CI and exit codes
 
 Exit codes from a static scan:
@@ -640,6 +696,37 @@ are Lua patterns, so `--ignore 70[1-9]` suppresses 701 through 709.
 
 ```sh
 bin/luasec --only 709 test/fixtures/tainted_exec/handler.lua
+```
+
+### Choosing a family
+
+`--category` keeps only one or more code families: `exec`, `firmware`,
+`payload`, `artifact`, `meta`. It is repeatable and comma separated, like
+`--only`. A file that was not analysed (`901`–`904`, `801`, `803`, `805`,
+`012`) is always kept, so a filter can never turn a coverage gap into a clean
+run. `why` and `fix` honour it too. An unknown family exits `2`.
+
+```sh
+bin/luasec --category exec test/fixtures/tainted_exec/handler.lua
+```
+
+```
+test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
+
+Total: 1 finding (1 critical)
+Score: 75/100 (needs work) - exec 1
+```
+
+Exit code is `1`. The same file under `--category firmware` reports nothing
+and exits `0`:
+
+```sh
+bin/luasec --category firmware test/fixtures/tainted_exec/handler.lua
+```
+
+```
+Total: 0 findings (none)
+Score: 100/100 (good)
 ```
 
 ### SARIF upload in CI
