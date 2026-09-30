@@ -48,6 +48,7 @@ build = {
       ["luasec.engine.callgraph"] = "src/luasec/engine/callgraph.lua",
       ["luasec.engine.inline_directives"] = "src/luasec/engine/inline_directives.lua",
       ["luasec.engine.interprocedural"] = "src/luasec/engine/interprocedural.lua",
+      ["luasec.engine.escapes"] = "src/luasec/engine/escapes.lua",
       ["luasec.engine.parse_context"] = "src/luasec/engine/parse_context.lua",
       ["luasec.engine.pipeline"] = "src/luasec/engine/pipeline.lua",
       ["luasec.engine.taint"] = "src/luasec/engine/taint.lua",
