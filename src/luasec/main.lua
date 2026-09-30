@@ -163,7 +163,7 @@ local function emit(list, format, opts)
       if not handle then return fail("cannot write " .. opts.output .. ": " .. tostring(open_error)) end
       handle:write(output, "\n")
       handle:close()
-   elseif not opts.quiet or #list > 0 then
+   elseif not opts.quiet or #list > 0 or opts.score then
       io.stdout:write(output, "\n")
    end
 
