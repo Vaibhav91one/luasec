@@ -26,7 +26,7 @@ local builtin = {
 
 local function validate(name, declaration)
    assert(type(declaration) == "table", "profile " .. name .. " must return a table")
-   for _, key in ipairs({"sources", "sinks", "propagators", "shapes"}) do
+   for _, key in ipairs({"sources", "sinks", "propagators", "shapes", "entry_points"}) do
       if declaration[key] ~= nil then
          assert(type(declaration[key]) == "table", "profile " .. name .. "." .. key .. " must be a list")
          for _, entry in ipairs(declaration[key]) do
@@ -62,7 +62,7 @@ local function validate(name, declaration)
    -- how a vendor describes their own API, so a declaration that loads and does
    -- nothing is the worst way for it to fail - a JSON habit, `"1"` for `{1}`,
    -- silently removes a declared sink.
-   for _, key in ipairs({"sources", "sinks", "propagators", "shapes"}) do
+   for _, key in ipairs({"sources", "sinks", "propagators", "shapes", "entry_points"}) do
       for _, entry in ipairs(declaration[key] or {}) do
          if entry.code ~= nil then
             assert(type(entry.code) == "string",

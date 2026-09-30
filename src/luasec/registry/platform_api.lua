@@ -44,6 +44,10 @@ local default_method_sources = {
 -- Sources that arrive from embedded platforms; merged in by registry/stds/*.
 local platform_sources = {}
 
+-- Functions a profile declares as called with request data: their named
+-- arguments are tainted at entry. Merged in by profiles; cleared by reset().
+local entry_points = {}
+
 -- Globals whose read is itself untrusted input (CGILua `cgi`); merged in by
 -- registry/stds/*. Exact name match, never a local of the same name.
 local global_sources = {}
@@ -117,6 +121,7 @@ function platform_api.reset()
    for i = #default_shapes, base_counts.shapes + 1, -1 do default_shapes[i] = nil end
    for i = #platform_sources, 0, -1 do platform_sources[i] = nil end
    for i = #global_sources, 0, -1 do global_sources[i] = nil end
+   for i = #entry_points, 0, -1 do entry_points[i] = nil end
    for kind, set in pairs(sanitizers) do
       for pattern in pairs(set) do set[pattern] = nil end
    end
@@ -131,6 +136,9 @@ function platform_api.apply_profile(declaration)
    end
    for _, source in ipairs(declaration.global_sources or {}) do
       global_sources[#global_sources + 1] = source
+   end
+   for _, entry in ipairs(declaration.entry_points or {}) do
+      entry_points[#entry_points + 1] = entry
    end
    for _, sink in ipairs(declaration.sinks or {}) do
       default_sinks[#default_sinks + 1] = sink
@@ -239,6 +247,12 @@ end
 -- is.
 function platform_api.match_method_source(method)
    return best_match(default_method_sources, method)
+end
+
+-- The entry-point declaration a function name matches, or nil. The caller tries
+-- the full name and then the short name after the last `.` or `:`.
+function platform_api.match_entry_point(name)
+   return best_match(entry_points, name)
 end
 
 -- A global read is a source only on an exact name match.

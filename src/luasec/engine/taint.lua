@@ -1053,6 +1053,37 @@ function taint.run(chstate, opts, existing_state)
       state.approx = false
    end
 
+   -- A function a profile declares as an entry point is called with request data:
+   -- its named arguments start tainted. Seeded once per state, because run() is
+   -- called again for the same state by the interprocedural pass.
+   if not state.entries_seeded then
+      state.entries_seeded = true
+      for _, line in ipairs(chstate.lines) do
+         local function_node = line.node
+         if function_node and function_node.tag == "Function" and type(function_node.name) == "string" then
+            local name = function_node.name
+            local entry = platform_api.match_entry_point(name)
+               or platform_api.match_entry_point(name:match("[^.:]+$") or name)
+            if entry then
+               local vars = taint.formals_of(function_node)
+               for _, position in ipairs(entry.arg or {1}) do
+                  local var = vars[position]
+                  if var then
+                     local existing = state.param_taint[var] or {}
+                     state.param_taint[var] = existing
+                     set_add(existing, {
+                        id = "entry:" .. name .. ":" .. position,
+                        name = "entry-point argument " .. position .. " of " .. name,
+                        line = function_node.line,
+                        confidence = entry.confidence or "medium",
+                     })
+                  end
+               end
+            end
+         end
+      end
+   end
+
    -- Index each local function's return expressions once per chstate. run()
    -- is called more than once with the same state (the interprocedural pass
    -- re-runs propagation), so build this lazily and cache it on the state.

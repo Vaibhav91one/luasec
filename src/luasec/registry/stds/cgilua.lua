@@ -27,6 +27,11 @@ return {
       {pattern = "util.shellCmdOutput", code = "701", kind = "exec", arg = {1, 2},
          filters = {[1] = ";`$&|<>"}},
    },
+   -- The mesh JSON-RPC handlers are called as `handler(methodObj, method)` from a
+   -- route table the analysis does not follow; methodObj is the decoded request.
+   entry_points = {
+      {pattern = "*Handler", arg = {1}, id = "methodObj", name = "mesh request object", confidence = "medium"},
+   },
    propagators = {},
    sanitizers = {shell = {}, dyncode = {}, path = {}},
 }
