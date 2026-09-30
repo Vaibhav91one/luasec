@@ -297,11 +297,16 @@ for the state of the whole tree.
 `luasec.config.lua` in the current directory is loaded when it exists.
 `--config <file>` loads that file instead; `--no-config` skips the file.
 A missing `--config` file is an error (exit `2`), never a silent default.
+When the file is picked up automatically from the current directory, the run
+says so on stderr (`luasec: using luasec.config.lua from the current directory
+(--no-config to skip)`).
 
-The file is a Lua chunk returning a table, loaded as text in an empty
-environment: data only, no globals, no code. Valid keys are `std` (string),
+The file is read as data, never executed: it must be a single
+`return { ... }` table of literal strings, numbers, booleans and tables.
+Calls, operators and variables are refused. Valid keys are `std` (string),
 `fail_on` (severity), `disable` (list of code patterns, same as `--ignore`),
-`severity` (map of code to severity override), and `allow` (list of
+`severity` (map of code to severity override; each key must be a quoted code
+such as `["709"]`, not a bare number), and `allow` (list of
 `{code, file, reason}`; `reason` is required). Any other key, a bad value, or
 an unregistered code exits `2` with a message listing what is valid.
 
