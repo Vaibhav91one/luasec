@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+Found by scanning public router firmware images unpacked to a rootfs.
+
+- Progress on stderr while scanning: the files found, a live counter, and a
+  closing count with the time. On by default only in a terminal; `--progress`
+  and `--no-progress` override it, `--quiet` turns it off (#135).
+- `--summary` prints counts by severity, confidence and code and the ten files
+  with the most findings; a plain report of more than 100 findings ends with a
+  hint that names it (#140).
+- A raw firmware image or archive given as a file is one coverage finding that
+  says what it looks like and to extract it first, not a lexical scan of its
+  bytes that produced hundreds of bogus findings (#134).
+- The score says `incomplete`, with the number of coverage gaps, instead of
+  `good` when part of the input could not be analysed; JSON and SARIF carry
+  `coverage_gaps` (#136).
+- An extracted image's absolute symlinks are resolved against the image root
+  instead of the machine running luasec; links to libraries and archives are not
+  gaps, and the rest become one finding per scan root with a count. On one router
+  image the coverage warnings fell from 238 to 19 (#137).
+
 ## 0.2.0 - 2026-09-30
 
 - Health score and finding categories (#92).
