@@ -23,6 +23,24 @@ local MAX_ITERATIONS = 20
 -- unquoted. Reported by 712 so an operator can see the class of the bug.
 local SHELL_METACHARS = "; | & $ ` ( ) < > newline"
 
+-- The metacharacters SHELL_METACHARS names, one token each, in its order. A sink
+-- entry's `filters[position]` string lists the ones its callee strips.
+local METACHAR_TOKENS = {";", "|", "&", "$", "`", "(", ")", "<", ">", "newline"}
+local CONFIDENCE_DOWN = {certain = "high", high = "medium", medium = "low", low = "low"}
+
+-- What a partial filter removes and what still passes, or nil when the filter
+-- covers every metacharacter (nothing survives, so the sink is a plain one).
+local function filter_split(filtered)
+   local removed, survivors = {}, {}
+   for _, token in ipairs(METACHAR_TOKENS) do
+      local stripped = (token == "newline") and filtered:find("\n", 1, true)
+         or (token ~= "newline" and filtered:find(token, 1, true))
+      if stripped then removed[#removed + 1] = token else survivors[#survivors + 1] = token end
+   end
+   if #survivors == 0 or #removed == 0 then return nil end
+   return removed, survivors
+end
+
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
 local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint
@@ -840,15 +858,26 @@ local function check_sink(node, item, state, chstate, opts)
          kind = kind,
          pattern = sink.pattern,
       }
-      emit(state, taint_spec, node, chstate, {
+      -- A callee that strips some metacharacters from this argument still passes
+      -- the rest: reported, one confidence step lower, with both lists named.
+      local removed, survivors
+      local filtered = kind == "exec" and sink.filters and sink.filters[tainted_arg.index]
+      if type(filtered) == "string" then removed, survivors = filter_split(filtered) end
+      local confidence = source.confidence or code_confidence(taint_spec.code)
+      if removed then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local finding = emit(state, taint_spec, node, chstate, {
          name = path,
-         confidence = source.confidence or code_confidence(taint_spec.code),
+         confidence = confidence,
          source = source.display_id or source.id,
          sources = sources,
          trace = build_trace(tainted_arg.node, sources),
          snippet = snippet_at(chstate, tainted_arg.node),
          sanitizer = (not any_unquoted(sources)) and "shell-quoted" or nil,
       })
+      if finding and removed then
+         finding.message = finding.message .. (" (a partial filter removes %s; %s still pass)")
+            :format(table.concat(removed, " "), table.concat(survivors, " "))
+      end
 
       -- 712 is the partially quoted case: some of the untrusted data was passed
       -- through a quoting helper and some was not. That is where an operator
