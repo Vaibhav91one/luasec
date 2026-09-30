@@ -17,6 +17,8 @@ local FLAGS_WITH_VALUE = {
    ["--max-nodes"] = "max_nodes",
    ["--validate-timeout"] = "validate_timeout",
    ["--view"] = "view",
+   ["--scope"] = "scope",
+   ["--base"] = "base",
 }
 
 local BOOLEAN_FLAGS = {
@@ -38,6 +40,8 @@ local BOOLEAN_FLAGS = {
    ["--color"] = "color",
    ["--no-color"] = "no_color",
    ["--verbose"] = "verbose",
+   ["--staged"] = "staged",
+   ["--include-untracked"] = "include_untracked",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -163,6 +167,10 @@ selection:
   --config <file>            read settings from this file (default: luasec.config.lua
                              in the current directory, if present)
   --no-config                ignore luasec.config.lua
+  --scope <full|changed>     changed: only files changed since --base (default: main); full is the default
+  --base <ref>               with --scope changed: the ref to compare with
+  --include-untracked        with --scope changed: also scan new, untracked files
+  --staged                   only files staged in git (for a pre-commit hook)
 
 analysis:
   --whole-program            resolve calls across files. Follows require edges

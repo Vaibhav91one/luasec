@@ -579,6 +579,24 @@ EXIT: 0
 Exit code is `3` when there is at least one new finding at or above
 `--fail-on`.
 
+### Scanning only what changed
+
+`--scope changed --base <ref>` scans only the Lua files changed relative to
+the base, `--staged` scans only the files staged in git, and `--scope full`
+(the default) scans everything. `--include-untracked` also scans new,
+untracked files with `--scope changed`.
+
+```sh
+bin/luasec --scope changed --base main src/
+bin/luasec --staged
+```
+
+`--scope` and `--staged` need a git repository. As a pre-commit hook:
+
+```sh
+bin/luasec --staged --fail-on high
+```
+
 ### `--severity-threshold` and `--min-confidence`
 
 `--severity-threshold` filters below the given severity (`low` is the default,

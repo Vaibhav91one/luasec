@@ -699,4 +699,6 @@ function walk.collect(paths)
    return files, errors
 end
 
+walk.looks_like_lua = looks_like_lua
+
 return walk
