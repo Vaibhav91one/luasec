@@ -5,6 +5,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+# A push or a label change starts a newer run for the same pull request; the
+# older one is stale (the first run of a PR opened with a label sees no label),
+# so it is cancelled. Runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write
