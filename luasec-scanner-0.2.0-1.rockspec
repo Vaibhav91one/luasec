@@ -56,6 +56,7 @@ build = {
       ["luasec.registry.stds.openresty"] = "src/luasec/registry/stds/openresty.lua",
       ["luasec.registry.stds.openwrt"] = "src/luasec/registry/stds/openwrt.lua",
       ["luasec.registry.stds.signatures"] = "src/luasec/registry/stds/signatures.lua",
+      ["luasec.report.doctor"] = "src/luasec/report/doctor.lua",
       ["luasec.report.findings"] = "src/luasec/report/findings.lua",
       ["luasec.report.html"] = "src/luasec/report/html.lua",
       ["luasec.report.json"] = "src/luasec/report/json.lua",

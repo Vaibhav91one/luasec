@@ -182,6 +182,33 @@ Score: 75/100 (needs work) - exec 1
 Fields are: `file:line:column:` then `[code] severity: message (sink) (CWE-78)
 [source: source-name]`. The trailing `Total:` line is the summary.
 
+### The terminal view
+
+On a terminal the default report is a grouped, coloured digest instead of the
+flat list: a header with the score, the finding and file counts, then the
+findings grouped by code, worst first, with the first three locations each.
+`--view doctor` forces the digest, `--view list` forces the flat list, and any
+other value exits `2`. `--verbose` lists every code and every location in the
+digest and changes nothing in the flat list. Anything that is not a person at
+a terminal keeps the flat report: a pipe, `-o`, `--format json|sarif|html`,
+`--summary`, `--score`, and `--baseline`.
+
+```sh
+bin/luasec --view doctor test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec  test/fixtures/tainted_exec/handler.lua
+Score 75/100  needs work  [###############-----]
+1 finding in 1 file: critical 1
+exec 1
+
+✖ 709  untrusted data reaches command execution  critical · certain
+    test/fixtures/tainted_exec/handler.lua:3
+
+Next: luasec why <file>:<line>  ·  luasec rules explain <code>  ·  luasec fix <path>  ·  luasec --summary
+```
+
 ### JSON
 
 ```sh
