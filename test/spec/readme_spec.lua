@@ -98,4 +98,11 @@ describe("the README", function()
             "the README does not document " .. flag)
       end
    end)
+   it("describes the interactive selector, the findings browser and the hand-off", function()
+      local text = read("README.md")
+      for _, phrase in ipairs({"(Recommended)", "findings browser", "hand-off submenu", "Scanned N files"}) do
+         assert_true(text:find(phrase, 1, true) ~= nil,
+            "the README does not mention " .. phrase)
+      end
+   end)
 end)
