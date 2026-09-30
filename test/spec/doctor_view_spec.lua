@@ -13,8 +13,9 @@ describe("the doctor view", function()
       local out, code = harness.cli({"--view", "doctor", TAINTED})
       assert_equal(code, 1, out)
       assert_match(out, "luasec", out)
-      assert_match(out, "Score 75/100  needs work  %[", out)
-      assert_match(out, "1 finding in 1 file: critical 1\n", out)
+       assert_match(out, "75 / 100", out)
+       assert_match(out, "needs work", out)
+       assert_match(out, "1 finding in 1 file: critical 1", out)
       assert_match(out, "exec 1", out)
       assert_match(out, "✖ 709  untrusted data reaches command execution  critical · certain\n", out)
       assert_match(out, "\n    test/fixtures/tainted_exec/handler%.lua:3\n", out)
@@ -49,7 +50,8 @@ describe("the doctor view", function()
       local out, code = harness.cli({"--view", "doctor", "test/fixtures/clean/report.lua"})
       assert_equal(code, 0, out)
       assert_match(out, "✔ No findings", out)
-      assert_match(out, "Score 100/100  good", out)
+       assert_match(out, "100 / 100", out)
+       assert_match(out, "good", out)
    end)
 
    it("uses colour only when asked or on a terminal", function()
@@ -73,6 +75,61 @@ describe("the doctor view", function()
       local out, code = harness.cli({"--view", "fancy", TAINTED})
       assert_equal(code, 2, out)
       assert_match(out, "%-%-view expects list or doctor", out)
+   end)
+
+   it("draws the score header as a box 44 columns wide", function()
+      local out = harness.cli({"--view", "doctor", TAINTED})
+      local box = {}
+      for line in (out .. "\n"):gmatch("([^\n]*)\n") do
+         if line:match("^┌") or line:match("^│") or line:match("^└") then
+            box[#box + 1] = line
+         else
+            break
+         end
+      end
+      assert_true(#box >= 8, "box header lines: " .. out)
+      for _, line in ipairs(box) do
+         assert_equal(utf8.len(line), 46, "box line width: " .. line)
+      end
+      assert_match(out, "75 / 100", out)
+      assert_match(out, "needs work", out)
+      assert_match(out, "1 finding in 1 file: critical 1", out)
+      assert_match(out, "█+░+", out)
+   end)
+
+   it("truncates a long title with … and keeps the box width", function()
+      local dir = harness.scratch_dir("doctor_long_title_abcdefghijklmnopqrstuvwxyz0123456789")
+      local handle = assert(io.open(dir .. "/a.lua", "w"))
+      handle:write("os.execute(arg[1])\n")
+      handle:close()
+      local out = harness.cli({"--view", "doctor", dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_match(out, "…", out)
+      local first = out:match("^[^\n]*")
+      assert_equal(utf8.len(first), 46, "title line width: " .. first)
+   end)
+
+   it("keeps the same visible width with colour on", function()
+      local plain = harness.cli({"--view", "doctor", TAINTED})
+      local coloured = harness.cli({"--view", "doctor", "--color", TAINTED})
+      local function box_of(s)
+         local lines = {}
+         for line in (s .. "\n"):gmatch("([^\n]*)\n") do
+            line = line:gsub("\27%[[0-9;]*m", "")
+            if line:match("^┌") or line:match("^│") or line:match("^└") then
+               lines[#lines + 1] = line
+            else
+               break
+            end
+         end
+         return lines
+      end
+      local a, b = box_of(plain), box_of(coloured)
+      assert_true(#a >= 8, "box header lines with colour: " .. coloured)
+      assert_equal(#a, #b, "same box lines plain and coloured")
+      for i, line in ipairs(a) do
+         assert_equal(utf8.len(line), utf8.len(b[i]), "visible width line " .. i)
+      end
    end)
 
    it("lists a place once when two findings share a line", function()

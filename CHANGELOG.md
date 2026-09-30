@@ -40,6 +40,9 @@ Found by scanning public router firmware images unpacked to a rootfs.
   `luasec rules set|enable|disable <code>` edits `luasec.config.lua` (#162).
 - `luasec install --hook` writes a pre-commit hook that blocks on high
   severity at medium confidence or above (#161).
+- The doctor score header is a boxed panel with the score, a block bar and the
+  counts, and progress names the file-finding and report-building phases; the
+  closing progress line says `Scanned` (#166).
 
 ## 0.2.0 - 2026-09-30
 
