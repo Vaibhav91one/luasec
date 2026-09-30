@@ -49,12 +49,23 @@ function review.model(list)
    return {rows = rows, cursors = cursors}
 end
 
-local function row_text(row)
-   if row.kind == "header" then
-      return ("-- %s (%d)"):format(row.label, row.count)
+local function header_text(row)
+   return ("-- %s (%d)"):format(row.label, row.count)
+end
+
+-- A finding row from its parts: marker + code + place + message. The place
+-- (file:line) has priority and is fitted with fit_path, so its tail always
+-- survives; the message is added only when at least 12 columns remain for
+-- it, fitted to what remains, else dropped.
+local function finding_row(finding, mark, width)
+   local head = mark .. finding.code
+   local place = term.fit_path(finding.file .. ":" .. finding.line, width - #head - 2)
+   local line = head .. "  " .. place
+   local rest = width - term.len(line) - 2
+   if rest >= 12 then
+      line = line .. "  " .. term.fit(codes.meaning(finding.code), rest)
    end
-   local finding = row.finding
-   return ("%s  %s:%d  %s"):format(finding.code, finding.file, finding.line, codes.meaning(finding.code))
+   return line
 end
 
 --- The detail pane for one finding, as a list of lines: the title, the
@@ -132,32 +143,42 @@ local function flush(out)
 end
 
 -- The list window, scrolled so the selected row is always shown, then a rule
--- line and the detail of the selected finding.
+-- line and the detail of the selected finding. Every line is fitted to the
+-- width minus 1 (the last column auto-wraps on many terminals); list rows are
+-- fitted, detail body text is wrapped, so no physical line exceeds the width.
 local function draw_list(context, model, selected)
    local out = context.out
+   -- Read once per screen draw (cheap enough); cached nowhere so a resize is
+   -- seen on the next draw.
+   local width = math.max(1, term.width() - 1)
    local current = model.cursors[selected]
    local first = math.max(1, math.min(current - 3, math.max(1, #model.rows - LIST_ROWS + 1)))
    local last = math.min(#model.rows, first + LIST_ROWS - 1)
    for index = first, last do
       local row = model.rows[index]
       if row.kind == "header" then
-         out:write("  " .. row_text(row) .. "\n")
+         out:write(term.fit("  " .. header_text(row), width) .. "\n")
       else
-         out:write(((index == current) and "> " or "  ") .. row_text(row) .. "\n")
+         out:write(finding_row(row.finding, (index == current) and "> " or "  ", width) .. "\n")
       end
    end
    out:write("---\n")
    for _, line in ipairs(review.detail(model.rows[current].finding, context.root)) do
-      out:write(line, "\n")
+      for _, piece in ipairs(term.wrap(line, width)) do
+         out:write(piece, "\n")
+      end
    end
    flush(out)
 end
 
 local function draw_full(context, model, selected)
    local out = context.out
+   local width = math.max(1, term.width() - 1)
    local row = model.rows[model.cursors[selected]]
    for _, line in ipairs(review.detail(row.finding, context.root)) do
-      out:write(line, "\n")
+      for _, piece in ipairs(term.wrap(line, width)) do
+         out:write(piece, "\n")
+      end
    end
    flush(out)
 end
