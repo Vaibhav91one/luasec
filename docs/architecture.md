@@ -230,7 +230,8 @@ the verdict itself are luasec's, and come from the sandbox rather than the paylo
   (`local function id(x) return x end`, or `function M.id(x) return x end`) is
   followed, so `os.execute(id(http.formvalue("h")))` is reported. Under
   `--whole-program`, the return value of a function in a module bound with
-  `local m = require "mod"` is also followed (`m.id(x)`). A method call
+  `local m = require "mod"` is also followed (`m.id(x)`). Also under `--whole-program`, a call to a dotted global function defined in
+  another file (`gui.a.b.set(t)`) binds its arguments to that function's parameters. A method call
   (`M:m`), a function passed as a value, and a `require(...)` called inline
   inside an expression are not followed: that flow stops and no finding is
   produced. Firmware that pipes request data through such a helper is missed,

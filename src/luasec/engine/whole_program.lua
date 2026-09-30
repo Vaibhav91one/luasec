@@ -301,6 +301,7 @@ local function scan(file)
    file.field_reads = {}
    file.preloads = {}
    file.functions = {}
+   file.dotted = {}
    file.module_fields = {}
    file.sole_functions = {}
    file.sole_tables = {}
@@ -312,6 +313,18 @@ local function scan(file)
 
    for _, line in ipairs(chstate.lines) do
       file.items_scanned = (file.items_scanned or 0) + #line.items
+
+      if line.node and line.node.tag == "Function"
+            and type(line.node.name) == "string"
+            and line.node.name:find(".", 1, true)
+            and not line.node.name:find(":", 1, true) then
+         -- `function gui.a.b.set(x)`: a function written onto a global table's
+         -- field path, which another file reaches by the same dotted spelling.
+         -- ponytail: a local of the same name in this file is indexed as a global
+         -- too; a caller is only matched through a global root, so the cost is a
+         -- wrong edge only when two files disagree about what `gui` is.
+         add_field(file.dotted, line.node.name, line.node)
+      end
 
       if line.node and line.node.tag == "Function"
             and type(line.node.name) == "string"
@@ -642,6 +655,52 @@ local function reaches_sink(file, function_node)
    return false
 end
 
+-- The dotted global functions of every file, by full name. A name two files
+-- both define is false: binding to either would be a guess.
+local function build_dotted(files)
+   local dotted = {}
+   for _, file in ipairs(files) do
+      for name, function_node in pairs(file.dotted or {}) do
+         local existing = dotted[name]
+         if existing == nil then
+            dotted[name] = function_node and {file = file, node = function_node} or false
+         elseif existing ~= false then
+            dotted[name] = false
+         end
+      end
+   end
+   return dotted
+end
+
+-- `gui.a.b.set` for a callee written as a chain of string keys off a global,
+-- or nil. A root that is a local variable is not the global, so a page that
+-- defines its own `gui` does not resolve through the index.
+local function dotted_name(callee)
+   local keys = {}
+   local node = callee
+   while type(node) == "table" and node.tag == "Index" do
+      local key = node[2]
+      if type(key) ~= "table" or key.tag ~= "String" or type(key[1]) ~= "string" then
+         return nil
+      end
+      table.insert(keys, 1, key[1])
+      node = node[1]
+   end
+   if type(node) ~= "table" or node.tag ~= "Id" or node.var or type(node[1]) ~= "string" then
+      return nil
+   end
+   if #keys == 0 then return nil end
+   return node[1] .. "." .. table.concat(keys, ".")
+end
+
+-- The function a dotted callee names in another file, or nil.
+local function dotted_target(file, callee, index)
+   local name = dotted_name(callee)
+   local found = name and index.dotted and index.dotted[name]
+   if not found or found.file == file then return nil end
+   return found
+end
+
 -- The cross-file call sites of one file, resolved once and cached. A site is
 -- {callee = file, function_node, args, item}.
 local function sites_of(file, index, max_sites, oracle)
@@ -651,12 +710,19 @@ local function sites_of(file, index, max_sites, oracle)
 
    local function add(node, item)
       local resolved = member_of(file, node[1])
-      if not resolved then return end
-      local entry = resolved.entry
-         or (resolved.module and entry_for(index, resolved.module))
-      if not entry or entry.file == file then return end
-
-      local function_node = function_for(entry, resolved.member)
+      local entry, function_node
+      if resolved then
+         entry = resolved.entry
+            or (resolved.module and entry_for(index, resolved.module))
+         if not entry or entry.file == file then return end
+         function_node = function_for(entry, resolved.member)
+      else
+         local target = dotted_target(file, node[1], index)
+         if not target then return end
+         resolved = {member = dotted_name(node[1])}
+         entry = {file = target.file, kind = "path"}
+         function_node = target.node
+      end
       if not function_node then return end
       if not taint_engine.line_of_function(entry.file.chstate, function_node) then return end
 
@@ -692,6 +758,15 @@ local function sites_of(file, index, max_sites, oracle)
                and item.node.tag == "Call" then
             add(item.node, item)
             if file.sites_truncated then return file.sites end
+         elseif item.tag == "Local" or item.tag == "Set" or item.tag == "OpSet" then
+            -- `errorFlag, code = gui.a.b.set(t)`: the value is used, but the
+            -- arguments still reach the callee's parameters.
+            for _, written in ipairs(item.rhs or {}) do
+               if type(written) == "table" and written.tag == "Call" then
+                  add(written, item)
+                  if file.sites_truncated then return file.sites end
+               end
+            end
          end
       end
    end
@@ -972,6 +1047,7 @@ function whole_program.analyze(states, opts)
    if #files < 2 then return {}, diagnostics end
 
    local index = build_index(files, opts)
+   index.dotted = build_dotted(files)
    diagnostics.modules = count(index.modules)
    diagnostics.ambiguous_modules = count(index.ambiguous)
    for _, file in ipairs(files) do
