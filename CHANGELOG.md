@@ -45,6 +45,11 @@ Found by scanning public router firmware images unpacked to a rootfs.
   closing progress line says `Scanned` (#166).
 - The interactive menu opens with a findings browser: a cursor list grouped
   by category with a detail pane per finding (why, evidence, fix) (#167).
+- The menu is an arrow-key picker that marks one state-aware recommendation
+  (review for critical or high findings, saving a report otherwise), and `f`
+  hands the findings to an agent submenu: pick an installed agent (approvals
+  always on), copy the fix prompt (pbcopy, wl-copy, xclip, xsel, else OSC 52)
+  or show it (#168).
 
 ## 0.2.0 - 2026-09-30
 

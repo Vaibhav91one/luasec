@@ -32,7 +32,7 @@ describe("the interactive menu", function()
       assert_true(not out:find("What next?", 1, true), out)
       local forced, forced_code = drive("q", "--interactive " .. TAINTED)
       assert_equal(forced_code, 1, "the exit code is the scan's: " .. forced)
-      assert_match(forced, "What next%?\n> r  review findings\n", forced)
+      assert_match(forced, "What next%?\n> r  review findings %(Recommended%)\n", forced)
       assert_match(forced, "\n  q  quit", forced)
    end)
 
@@ -85,17 +85,30 @@ describe("the interactive menu", function()
       assert_equal(code, 0, "nothing is new against its own baseline: " .. again)
    end)
 
-   it("prints the fix prompt by default and launches nothing", function()
-      local out = drive("f\n\n\nq", "--interactive " .. TAINTED)
-      assert_match(out, "Agent %[claude/codex/cursor%] %(claude%): ", out)
+   it("hands findings to the agent submenu, which prints the prompt by default", function()
+      -- f opens the hand-off submenu, w shows the prompt, q leaves the
+      -- submenu, q quits the menu.
+      local out = drive("fwqq", "--interactive " .. TAINTED)
+      assert_match(out, "Hand these findings to an agent", out)
       assert_match(out, "You are fixing security findings that luasec", out)
       assert_true(not out:find("launching", 1, true), "nothing was launched: " .. out)
+      assert_true(not out:find("Agent [claude", 1, true), "the old agent prompt is gone: " .. out)
+   end)
+
+   it("recommends review for critical or high findings, saving otherwise", function()
+      local menu = require "luasec.cli.menu"
+      assert_equal(menu.recommended({
+         {severity = "critical"}, {severity = "low"},
+      }), "r", "critical recommends review")
+      assert_equal(menu.recommended({{severity = "high"}}), "r", "high recommends review")
+      assert_equal(menu.recommended({{severity = "low"}}), "s", "only low recommends saving a report")
+      assert_equal(menu.recommended({}), nil, "nothing recommends nothing")
    end)
 
    it("sets up CI and installs guidance in the directory it runs from", function()
       local dir = harness.scratch_dir("menu_setup")
       local root = io.popen("pwd"):read("*l")
-      drive("c\ni\nq", "--interactive " .. q(root .. "/" .. TAINTED), dir)
+      drive("ciq", "--interactive " .. q(root .. "/" .. TAINTED), dir)
       local workflow = io.open(dir .. "/.github/workflows/luasec.yml", "rb")
       local skill = io.open(dir .. "/.claude/skills/luasec/SKILL.md", "rb")
       local made = {workflow ~= nil, skill ~= nil}
