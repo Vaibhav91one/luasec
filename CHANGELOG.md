@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 Found by scanning public router firmware images unpacked to a rootfs.
 
+- A file that failed to parse only because a string held an escape Lua 5.1 accepts (`"\/"`, `'\.'`) is parsed again with that escape rewritten to one of the same length, so its flows are analysed instead of falling back to a 901 (#181).
 - Progress on stderr while scanning: the files found, a live counter, and a
   closing count with the time. On by default only in a terminal; `--progress`
   and `--no-progress` override it, `--quiet` turns it off (#135).

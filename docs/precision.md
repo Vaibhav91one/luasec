@@ -31,7 +31,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-231 findings over 566 files, 103 of them carrying at least one (18%), after six
+229 findings over 566 files, 101 of them carrying at least one (18%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
@@ -49,18 +49,18 @@ Hand-audited sample by code:
 
 | Code | Count | Assessment |
 | --- | --- | --- |
-| 724 RPC handler | 27 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
+| 724 RPC handler | 28 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
 | 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed |
 | 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
-| 901 parse failure | 14 | true: real Lua using gettext escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. A dialect gap, honestly reported |
-| 727 unbounded growth | 12 | true after narrowing: string accumulation in a loop with no visible ceiling |
+| 901 parse failure | 10 | true: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed |
+| 727 unbounded growth | 14 | true after narrowing: string accumulation in a loop with no visible ceiling |
 | 707 FFI escape | 9 | true: LuaJIT source |
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
 | 709 injection | 5 | true, and the one that matters. Two are new with #58, both previously missed only because the sink's result was assigned: `luci-app-cshark/controller/cshark.lua:73`, `local res = os.execute("kill -TERM " .. pid)` where `pid` is read from the world-writable `/tmp/cshark-luci.pid`; and `luci-app-wol/model/cbi/wol.lua:85`, `local p = io.popen(cmd .. " 2>&1")` where `cmd` carries form input (with a 712 beside it: part of it is quoted, part is not) |
 | 701 shape-only | 25 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked |
 | 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
-| 702 env manipulation | 22 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
+| 702 env manipulation | 21 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
 | 704 unencrypted transport | 17 | true: a request body over plain HTTP, including loadfile/load calls whose result is used |
 | 705 dynamic require | 19 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment |
 | 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
@@ -199,9 +199,11 @@ corpus. Naming the value in a qualifying name gets the report either way.
 - **903 is true but mislabelled.** All 20 findings are the 5.3 bitwise
   operators under `--std luajit`, and the message calls an operator an API. The
   findings are honest about the file; the sentence about it is not.
-- **901 is a dialect gap, not a defect in the code.** 14 files use gettext
-  escapes (`"\$"`, `"\+"`) that a 5.4 parser rejects. Reported rather than
-  guessed at, which is the right behaviour, but it is 14 findings an operator
-  has to learn to read.
+- **901 is a dialect gap, not a defect in the code.** 10 files still fail to
+  parse. Four more used gettext escapes (`"\$"`, `"\+"`) that Lua 5.1
+  accepts and the parser rejected; since #181 they are parsed again with the
+  escape rewritten to one of the same length and analysed. The rest are
+  reported rather than guessed at, which is the right behaviour, but it is 10
+  findings an operator has to learn to read.
 - **708 is 36 findings and "mostly true" is not a number.** The claim has not
   been re-audited since the review fix.

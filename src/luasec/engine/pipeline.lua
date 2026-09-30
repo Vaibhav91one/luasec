@@ -3,6 +3,7 @@
 -- luasec.api owns the public entry points and option checking; this module is
 -- what they call.
 local parse_context = require "luasec.engine.parse_context"
+local escapes = require "luasec.engine.escapes"
 local taint_engine = require "luasec.engine.taint"
 local codes = require "luasec.rules.codes"
 local platform_api = require "luasec.registry.platform_api"
@@ -133,6 +134,22 @@ local function analyze_source(source, opts)
    end
 
    local chstate, syntax_error = parse_context.build(source, {max_nodes = opts.max_nodes})
+
+   -- Lua 5.1 accepts an unknown escape in a string that the vendored lexer rejects.
+   -- Only a file that failed for that reason is parsed again, with the escape
+   -- rewritten to one of the same length, so a file that parses today is untouched.
+   if not chstate and type(source) == "string" and syntax_error
+         and type(syntax_error.msg) == "string"
+         and syntax_error.msg:find("invalid escape sequence", 1, true) then
+      local normalised = escapes.normalise(source)
+      if normalised ~= source then
+         local retried = parse_context.build(normalised, {max_nodes = opts.max_nodes})
+         if retried then
+            chstate, syntax_error = retried, nil
+            source = normalised
+         end
+      end
+   end
 
    if not chstate then
       local finding = {
