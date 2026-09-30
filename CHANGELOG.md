@@ -54,6 +54,10 @@ Found by scanning public router firmware images unpacked to a rootfs.
   `RowId`, `DBTable` and `NextPage`, `web.cgiToLuaTable` and its helpers as
   sources, and the vendor wrappers `util.runShellCmd` and
   `util.shellCmdOutput` as exec sinks (#176).
+- The findings browser and the picker fit every row to the terminal width
+  (middle-ellipsis, `file:line` tail kept for paths) and wrap detail text at
+  word boundaries, so narrow terminals no longer wrap rows and drift the
+  redraws (#174).
 
 ## 0.2.0 - 2026-09-30
 

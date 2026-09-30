@@ -17,35 +17,46 @@ local function flush(out)
    if out.flush then out:flush() end
 end
 
-local function row(context, item, mark, index)
-   local line = ((index == mark) and "> " or "  ") .. item.key .. "  " .. item.label
+local function row(context, item, mark, index, width)
+   local head = ((index == mark) and "> " or "  ") .. item.key .. "  " .. item.label
    if item.recommended then
-      line = line .. " (Recommended)"
+      head = head .. " (Recommended)"
    end
-   if item.note then
-      line = line .. "  " .. dim(item.note)
+   if not item.note then
+      context.out:write(term.fit(head, width) .. "\n")
+      return
    end
-   context.out:write(line .. "\n")
+   local visible = head .. "  " .. item.note
+   if term.fit(visible, width) == visible then
+      context.out:write(head .. "  " .. dim(item.note) .. "\n")
+   else
+      context.out:write(term.fit(visible, width) .. "\n")
+   end
 end
 
 local function show(context, title, items, mark)
-   context.out:write(title .. "\n")
+   -- Read once per screen draw (cheap enough); cached nowhere so a resize is
+   -- seen on the next draw. Every row is fitted to one physical line, so the
+   -- cursor-up count in redraw stays exact.
+   local width = math.max(1, term.width() - 1)
+   context.out:write(term.fit(title, width) .. "\n")
    for index, item in ipairs(items) do
-      row(context, item, mark, index)
+      row(context, item, mark, index, width)
    end
-   context.out:write(dim(HINT) .. "\n")
+   context.out:write(dim(term.fit(HINT, width)) .. "\n")
    flush(context.out)
 end
 
 local function redraw(context, title, items, mark)
    local out = context.out
+   local width = math.max(1, term.width() - 1)
    out:write(("\27[%dA"):format(#items + 2))
-   out:write("\27[K" .. title .. "\n")
+   out:write("\27[K" .. term.fit(title, width) .. "\n")
    for index, item in ipairs(items) do
       out:write("\27[K")
-      row(context, item, mark, index)
+      row(context, item, mark, index, width)
    end
-   out:write("\27[K" .. dim(HINT) .. "\n")
+   out:write("\27[K" .. dim(term.fit(HINT, width)) .. "\n")
    flush(out)
 end
 
