@@ -40,7 +40,7 @@ describe("luasec rules", function()
       assert_match(out, "needs a code", out)
       out, code = harness.cli({"rules", "show"})
       assert_equal(code, 2, out)
-      assert_match(out, "expected list or explain", out)
+      assert_match(out, "expected list, explain, set, enable or disable", out)
    end)
 
    it("still scans a directory named rules when given as a path", function()

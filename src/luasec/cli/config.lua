@@ -123,6 +123,46 @@ function config.read_data(text)
    return literal(ast[1][1])
 end
 
+--- The config as text, in one canonical layout so the file stays a plain literal
+-- table that read_data accepts. Keys come out in a fixed order.
+function config.serialize(value)
+   local function quote(text)
+      return '"' .. tostring(text):gsub('[%c"\\]', function(char)
+         if char == '"' then return '\\"' end
+         if char == "\\" then return "\\\\" end
+         return ("\\%03d"):format(char:byte())
+      end) .. '"'
+   end
+   local out = {"return {"}
+   if value.std then out[#out + 1] = ("  std = %s,"):format(quote(value.std)) end
+   if value.fail_on then out[#out + 1] = ("  fail_on = %s,"):format(quote(value.fail_on)) end
+   if value.disable and #value.disable > 0 then
+      local items = {}
+      for _, pattern in ipairs(value.disable) do items[#items + 1] = quote(pattern) end
+      out[#out + 1] = ("  disable = {%s},"):format(table.concat(items, ", "))
+   end
+   if value.severity and next(value.severity) then
+      local codes_list = {}
+      for code in pairs(value.severity) do codes_list[#codes_list + 1] = code end
+      table.sort(codes_list)
+      local items = {}
+      for _, code in ipairs(codes_list) do items[#items + 1] = ("[%s] = %s"):format(quote(code), quote(value.severity[code])) end
+      out[#out + 1] = ("  severity = {%s},"):format(table.concat(items, ", "))
+   end
+   if value.allow and #value.allow > 0 then
+      out[#out + 1] = "  allow = {"
+      for _, entry in ipairs(value.allow) do
+         local parts = {("code = %s"):format(quote(entry.code))}
+         if entry.file then parts[#parts + 1] = ("file = %s"):format(quote(entry.file)) end
+         parts[#parts + 1] = ("reason = %s"):format(quote(entry.reason))
+         out[#out + 1] = ("    {%s},"):format(table.concat(parts, ", "))
+      end
+      out[#out + 1] = "  },"
+   end
+   out[#out + 1] = "}"
+   return table.concat(out, "\n") .. "\n"
+end
+
 --- Load and check a config file. Returns the table, or nil plus a message.
 function config.load(path)
    local handle, open_error = io.open(path, "rb")

@@ -4,6 +4,7 @@
 -- the scan, `luasec why` and `luasec fix` report the same findings for the
 -- same flags.
 local degraded = require "luasec.rules.degraded"
+local categories = require "luasec.rules.categories"
 local config_file = require "luasec.cli.config"
 
 local selection = {}
@@ -50,6 +51,11 @@ end
 
 local function apply_rules(findings, opts)
    local result = {}
+   local wanted = nil
+   if opts.category then
+      wanted = {}
+      for _, name in ipairs(opts.category) do wanted[name] = true end
+   end
 
    for _, finding in ipairs(findings) do
       local keep = true
@@ -72,6 +78,10 @@ local function apply_rules(findings, opts)
          for _, pattern in ipairs(opts.only) do
             if pattern_matches(pattern, finding) then keep = true break end
          end
+      end
+
+      if keep and wanted and not degraded.is_degraded(finding.code) then
+         keep = wanted[categories.of(finding.code)] or false
       end
 
       if keep and opts.severity_threshold and not INCOHERENT[finding.code] then
