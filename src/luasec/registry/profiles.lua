@@ -17,6 +17,7 @@ local profiles = {}
 local builtin = {
    openwrt = "luasec.registry.stds.openwrt",
    luci = "luasec.registry.stds.luci",
+   cgilua = "luasec.registry.stds.cgilua",
    luajit = "luasec.registry.stds.luajit",
    openresty = "luasec.registry.stds.openresty",
    hisi = "luasec.registry.stds.hisi",
@@ -39,6 +40,16 @@ local function validate(name, declaration)
    end
    if declaration.modules ~= nil then
       assert(type(declaration.modules) == "table", "profile " .. name .. ".modules must be a table")
+   end
+   if declaration.global_sources ~= nil then
+      assert(type(declaration.global_sources) == "table", "profile " .. name .. ".global_sources must be a list")
+      for _, entry in ipairs(declaration.global_sources) do
+         assert(type(entry) == "table",
+            "every " .. name .. ".global_sources entry must be a table, got "
+               .. type(entry))
+         assert(type(entry.global) == "string",
+            "every " .. name .. ".global_sources entry needs a global")
+      end
    end
    for kind, list in pairs(declaration.sanitizers or {}) do
       assert(type(list) == "table", "profile " .. name .. ".sanitizers." .. kind .. " must be a list")

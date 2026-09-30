@@ -44,6 +44,10 @@ local default_method_sources = {
 -- Sources that arrive from embedded platforms; merged in by registry/stds/*.
 local platform_sources = {}
 
+-- Globals whose read is itself untrusted input (CGILua `cgi`); merged in by
+-- registry/stds/*. Exact name match, never a local of the same name.
+local global_sources = {}
+
 -- Sinks that execute a command. `arg` lists which argument indices matter.
 local default_sinks = {
    {pattern = "os.execute", code = "701", kind = "exec", arg = {1}},
@@ -112,6 +116,7 @@ function platform_api.reset()
    for i = #default_method_sources, base_counts.method_sources + 1, -1 do default_method_sources[i] = nil end
    for i = #default_shapes, base_counts.shapes + 1, -1 do default_shapes[i] = nil end
    for i = #platform_sources, 0, -1 do platform_sources[i] = nil end
+   for i = #global_sources, 0, -1 do global_sources[i] = nil end
    for kind, set in pairs(sanitizers) do
       for pattern in pairs(set) do set[pattern] = nil end
    end
@@ -123,6 +128,9 @@ function platform_api.apply_profile(declaration)
    end
    for _, source in ipairs(declaration.method_sources or {}) do
       default_method_sources[#default_method_sources + 1] = source
+   end
+   for _, source in ipairs(declaration.global_sources or {}) do
+      global_sources[#global_sources + 1] = source
    end
    for _, sink in ipairs(declaration.sinks or {}) do
       default_sinks[#default_sinks + 1] = sink
@@ -231,6 +239,14 @@ end
 -- is.
 function platform_api.match_method_source(method)
    return best_match(default_method_sources, method)
+end
+
+-- A global read is a source only on an exact name match.
+function platform_api.match_global_source(name)
+   for _, entry in ipairs(global_sources) do
+      if entry.global == name then return entry end
+   end
+   return nil
 end
 
 function platform_api.match_sink(path)

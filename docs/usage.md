@@ -135,6 +135,18 @@ checks; this profile only attaches the security meaning.
 bin/luasec --std +openresty app/
 ```
 
+### cgilua
+
+CGILua web backends. Sources are the global request table (`cgi`), the
+`RowId`, `DBTable` and `NextPage` globals split off a button name, and
+`web.cgiToLuaTable` with its `web.cgiSearch`, `web.cgiFindButton` and
+`web.cgiFindToken` helpers; sinks are the vendor shell wrappers
+`util.runShellCmd` and `util.shellCmdOutput`.
+
+```sh
+bin/luasec --std +cgilua page.lua
+```
+
 ### espressif
 
 ESP8266/ESP32 NodeMCU firmware. Sources are `node.getArgument` and `httpServerRequest`,

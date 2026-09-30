@@ -50,6 +50,10 @@ Found by scanning public router firmware images unpacked to a rootfs.
   hands the findings to an agent submenu: pick an installed agent (approvals
   always on), copy the fix prompt (pbcopy, wl-copy, xclip, xsel, else OSC 52)
   or show it (#168).
+- `--std cgilua` for CGILua web backends: the global `cgi` request table,
+  `RowId`, `DBTable` and `NextPage`, `web.cgiToLuaTable` and its helpers as
+  sources, and the vendor wrappers `util.runShellCmd` and
+  `util.shellCmdOutput` as exec sinks (#176).
 
 ## 0.2.0 - 2026-09-30
 
