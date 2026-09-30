@@ -55,6 +55,22 @@ local function commonest(counts)
    return best
 end
 
+-- The score panel is a box 44 columns wide. Widths count characters, not
+-- bytes, because the corners and the bar are multibyte.
+local BOX_WIDTH, BAR_CELLS = 44, 20
+
+local function pad(text, width)
+   local len = utf8.len(text) or #text
+   if len >= width then return text end
+   return text .. string.rep(" ", width - len)
+end
+
+-- A line too long for the box keeps its head, with … marking the cut.
+local function fit(text, width)
+   if (utf8.len(text) or #text) <= width then return text end
+   return text:sub(1, utf8.offset(text, width) - 1) .. "…"
+end
+
 --- Render a normalized findings list. `opts.paint` is a term palette, `opts.title`
 -- names what was scanned, `opts.verbose` shows every code and every location.
 function doctor.render(list, opts)
@@ -67,23 +83,45 @@ function doctor.render(list, opts)
    end
 
    local out = {}
-   out[#out + 1] = paint.bold("luasec") .. (opts.title and ("  " .. paint.dim(opts.title)) or "")
    local tone = ({good = paint.green, critical = paint.red})[result.label] or paint.yellow
    local label = result.label
    if result.coverage_gaps > 0 then label = label .. ", " .. plural(result.coverage_gaps, "coverage gap") end
-   out[#out + 1] = ("Score %d/100  %s  [%s]"):format(result.score, tone(label), term.bar(result.score / 100, 20))
+   -- Only the label and the filled blocks carry colour. The padding is counted
+   -- on the uncoloured text, so the box stays aligned with colour on or off.
+   local head = " luasec"
+   if opts.title then head = head .. "  " .. fit(opts.title, BOX_WIDTH - 9) end
+   local numbers = (" %d / 100  "):format(result.score)
+   local numbers_len = utf8.len(numbers .. label) or #numbers
+   local cells = math.max(0, math.min(BAR_CELLS, math.floor(result.score / 100 * BAR_CELLS + 0.5)))
+   local filled, empty = string.rep("█", cells), string.rep("░", BAR_CELLS - cells)
+   if cells > 0 then filled = tone(filled) end
    local counts = plural(#list, "finding") .. " in " .. plural(file_count, "file")
    if #list > 0 then counts = counts .. ": " .. summary.tally(list, "severity", SEVERITIES) end
-   out[#out + 1] = counts
    local families = {}
    for _, id in ipairs(categories.order()) do
       if result.categories[id] > 0 then families[#families + 1] = id .. " " .. result.categories[id] end
    end
-   if #families > 0 then out[#out + 1] = table.concat(families, " · ") end
+   out[#out + 1] = "┌" .. string.rep("─", BOX_WIDTH) .. "┐"
+   out[#out + 1] = "│" .. pad(head, BOX_WIDTH) .. "│"
+   out[#out + 1] = "│" .. string.rep(" ", BOX_WIDTH) .. "│"
+   out[#out + 1] = "│" .. numbers .. tone(label)
+      .. string.rep(" ", BOX_WIDTH - numbers_len) .. "│"
+   out[#out + 1] = "│ " .. filled .. empty
+      .. string.rep(" ", BOX_WIDTH - 1 - BAR_CELLS) .. "│"
+   out[#out + 1] = "│" .. string.rep(" ", BOX_WIDTH) .. "│"
+   if #list == 0 then
+      local clean = " ✔ No findings"
+      out[#out + 1] = "│ " .. paint.green("✔ No findings")
+         .. string.rep(" ", BOX_WIDTH - (utf8.len(clean) or #clean)) .. "│"
+   else
+      out[#out + 1] = "│" .. pad(fit(" " .. counts, BOX_WIDTH), BOX_WIDTH) .. "│"
+      if #families > 0 then
+         out[#out + 1] = "│" .. pad(fit(" " .. table.concat(families, " · "), BOX_WIDTH), BOX_WIDTH) .. "│"
+      end
+   end
+   out[#out + 1] = "└" .. string.rep("─", BOX_WIDTH) .. "┘"
 
    if #list == 0 then
-      out[#out + 1] = ""
-      out[#out + 1] = paint.green("✔ No findings")
       return table.concat(out, "\n")
    end
 

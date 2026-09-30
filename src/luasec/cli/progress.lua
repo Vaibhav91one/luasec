@@ -5,6 +5,8 @@
 local term = require "luasec.cli.term"
 local progress = {}
 
+local SPINNER = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 local Progress = {}
 Progress.__index = Progress
 
@@ -52,12 +54,26 @@ function Progress:say(text)
    io.stderr:write(self.paint.dim("luasec:"), " ", text, "\n")
 end
 
+--- What the run is doing between counters, e.g. finding files or building
+-- the report. On a terminal it holds the spinner line; otherwise it is one
+-- permanent line, exactly like say.
+function Progress:phase(text)
+   if not self.enabled then return end
+   if not self.live then
+      self:say(text)
+      return
+   end
+   self:clear()
+   self.frame = self.frame % #SPINNER + 1
+   io.stderr:write("\r\27[K", self.paint.cyan(SPINNER[self.frame]), " ", text, "  ")
+   self.line_open = true
+end
+
 local function tail(path, width)
    if #path <= width then return path end
    return "..." .. path:sub(-(width - 3))
 end
 
-local SPINNER = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 --- File number `done` of `total` is about to be analyzed.
 function Progress:file(done, total, path)
@@ -88,11 +104,11 @@ function Progress:finish(count)
    self:clear()
    if self.live then
       io.stderr:write(self.paint.green("✔"),
-         (" analyzed %d file%s in %ds\n")
+         (" Scanned %d file%s in %ds\n")
          :format(count, count == 1 and "" or "s", os.time() - self.started))
    else
       io.stderr:write(self.paint.dim("luasec:"),
-         (" analyzed %d file%s in %ds\n")
+         (" Scanned %d file%s in %ds\n")
          :format(count, count == 1 and "" or "s", os.time() - self.started))
    end
 end

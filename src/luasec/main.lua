@@ -272,6 +272,7 @@ local function run(argv)
    opts.on_file = function(done, total, path) bar:file(done, total, path) end
    opts.on_phase = function(text) bar:say(text) end
    bar:say("listing files under " .. table.concat(opts.paths, ", "))
+   bar:phase("finding Lua files")
 
    local files, walk_errors
    if opts.staged or opts.scope == "changed" then
@@ -304,6 +305,7 @@ local function run(argv)
    for _, finding in ipairs(api.analyze(files, opts)) do
       report[#report + 1] = finding
    end
+   bar:phase("building the report")
    bar:finish(#files)
 
    -- Ground we did not cover, counted before any filtering is applied. A file

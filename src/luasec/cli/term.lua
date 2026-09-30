@@ -44,6 +44,12 @@ function term.bar(fraction, width)
    return string.rep("#", filled) .. string.rep("-", width - filled)
 end
 
+--- The same shape in block glyphs, for the doctor score panel.
+function term.blocks(fraction, width)
+   local filled = math.max(0, math.min(width, math.floor(fraction * width + 0.5)))
+   return string.rep("█", filled) .. string.rep("░", width - filled)
+end
+
 --- The colour choice from the parsed options: false for --no-color, true for
 -- --color, nil to decide from the stream (--no-color wins when both are given).
 function term.choice(opts)
