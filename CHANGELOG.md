@@ -43,6 +43,8 @@ Found by scanning public router firmware images unpacked to a rootfs.
 - The doctor score header is a boxed panel with the score, a block bar and the
   counts, and progress names the file-finding and report-building phases; the
   closing progress line says `Scanned` (#166).
+- The interactive menu opens with a findings browser: a cursor list grouped
+  by category with a detail pane per finding (why, evidence, fix) (#167).
 
 ## 0.2.0 - 2026-09-30
 

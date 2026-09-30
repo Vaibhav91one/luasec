@@ -44,26 +44,43 @@ local function code_frame(file, line, column)
    return table.concat(out, "\n")
 end
 
-function why.explain(finding, root, out)
-   out = out or io.stdout
-   out:write((plain.render({finding}):match("^[^\n]*")), "\n")
+-- The lines `explain` prints, built first so the findings browser can reuse
+-- the flow, the frame and the fix text without re-reading them.
+function why.lines(finding, root)
+   local lines = {}
+   lines[#lines + 1] = (plain.render({finding}):match("^[^\n]*"))
    if finding.trace then
       for _, step in ipairs(finding.trace) do
-         out:write(("  %-6s  %s  %s:%d\n"):format(step.kind, step.name, step.file, step.line))
+         lines[#lines + 1] = ("  %-6s  %s  %s:%d"):format(step.kind, step.name, step.file, step.line)
       end
    else
-      out:write(NO_FLOW)
+      lines[#lines + 1] = NO_FLOW:gsub("\n$", "")
    end
    local frame = code_frame(finding.file, finding.line, finding.column)
-   if frame then out:write(frame, "\n") end
-   local fix = how_to_fix(root, finding.code)
-   if fix then
-      out:write("  how to fix:\n")
-      for text in (fix .. "\n"):gmatch("([^\n]*)\n") do
-         out:write(text == "" and "\n" or ("    " .. text .. "\n"))
+   if frame then
+      for text in (frame .. "\n"):gmatch("([^\n]*)\n") do
+         lines[#lines + 1] = text
       end
    end
-   out:write("  more: luasec rules explain ", finding.code, "\n")
+   local fix = how_to_fix(root, finding.code)
+   if fix then
+      lines[#lines + 1] = "  how to fix:"
+      for text in (fix .. "\n"):gmatch("([^\n]*)\n") do
+         lines[#lines + 1] = text == "" and "" or ("    " .. text)
+      end
+   end
+   lines[#lines + 1] = "  more: luasec rules explain " .. finding.code
+   return lines
+end
+
+why.code_frame = code_frame
+why.how_to_fix = how_to_fix
+
+function why.explain(finding, root, out)
+   out = out or io.stdout
+   for _, line in ipairs(why.lines(finding, root)) do
+      out:write(line, "\n")
+   end
 end
 
 function why.run(argv, root, out, err)

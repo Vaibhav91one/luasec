@@ -32,7 +32,7 @@ describe("the interactive menu", function()
       assert_true(not out:find("What next?", 1, true), out)
       local forced, forced_code = drive("q", "--interactive " .. TAINTED)
       assert_equal(forced_code, 1, "the exit code is the scan's: " .. forced)
-      assert_match(forced, "What next%?\n> e  explain a finding\n", forced)
+      assert_match(forced, "What next%?\n> r  review findings\n", forced)
       assert_match(forced, "\n  q  quit", forced)
    end)
 
@@ -58,9 +58,9 @@ describe("the interactive menu", function()
       assert_equal(menus, 2, "the menu comes back after an action: " .. out)
    end)
 
-   it("moves the mark with the arrow keys and runs it on Enter", function()
-      -- Down, Down: the third item, `a  show every finding`.
-      local out = drive("\27[B\27[B\rq", "--interactive " .. TAINTED)
+    it("moves the mark with the arrow keys and runs it on Enter", function()
+       -- Down, Down, Down: the fourth item, `a  show every finding`.
+       local out = drive("\27[B\27[B\27[B\rq", "--interactive " .. TAINTED)
       local _, shown = out:gsub("%[709%] critical:", "")
       assert_equal(shown, 2, out)
    end)
