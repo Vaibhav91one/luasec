@@ -72,7 +72,9 @@ function scope.files(opts)
       if not merge_base then return nil, "--base " .. base .. " is not a ref git knows" end
       names = lines(run("git diff --name-only --diff-filter=ACMR " .. quote(merge_base)))
       if opts.include_untracked then
-         for _, name in ipairs(lines(run("git ls-files --others --exclude-standard"))) do
+         -- --full-name: ls-files prints paths relative to the current directory by default,
+         -- while diff prints them relative to the repository top; both must use the top.
+         for _, name in ipairs(lines(run("git ls-files --others --exclude-standard --full-name"))) do
             names[#names + 1] = name
          end
       end
@@ -87,7 +89,8 @@ function scope.files(opts)
          if rel then rel = rel:sub(#prefix + 1) end
       end
       if rel and under(rel, opts.paths) and walk.looks_like_lua(top .. "/" .. name) then
-         files[#files + 1] = top .. "/" .. name
+         -- Reported the way a full scan reports it, relative to where luasec was run.
+         files[#files + 1] = rel
       end
    end
    table.sort(files)
