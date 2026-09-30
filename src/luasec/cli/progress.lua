@@ -2,15 +2,16 @@
 -- and used to say nothing, which looks the same as a hang. This module only
 -- writes to stderr and only when asked or when stderr is a terminal, so the
 -- report on stdout, a --score, and a CI log are never touched.
+local term = require "luasec.cli.term"
 local progress = {}
 
 local Progress = {}
 Progress.__index = Progress
 
 -- Is stderr a terminal? `test -t 2` inherits this process's stderr, so it
--- answers for the real one. The command is a constant.
+-- answers for the real one. See term.is_tty.
 local function stderr_is_terminal()
-   return os.execute("test -t 2") == true
+   return term.is_tty(2)
 end
 
 --- A progress reporter for a run. `opts.progress` is true for --progress and
@@ -31,6 +32,8 @@ function progress.new(opts)
       started = os.time(),
       last_step = -1,
       line_open = false,
+      frame = 0,
+      paint = term.palette(term.choice(opts), 2),
    }, Progress)
 end
 
@@ -46,13 +49,15 @@ end
 function Progress:say(text)
    if not self.enabled then return end
    self:clear()
-   io.stderr:write("luasec: ", text, "\n")
+   io.stderr:write(self.paint.dim("luasec:"), " ", text, "\n")
 end
 
 local function tail(path, width)
    if #path <= width then return path end
    return "..." .. path:sub(-(width - 3))
 end
+
+local SPINNER = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 --- File number `done` of `total` is about to be analyzed.
 function Progress:file(done, total, path)
@@ -63,14 +68,17 @@ function Progress:file(done, total, path)
       -- spend its time drawing.
       local every = math.max(1, math.floor(total / 200))
       if done ~= 1 and done ~= total and done % every ~= 0 then return end
-      io.stderr:write(("\r\27[Kluasec: analyzing %d/%d (%d%%) %s")
-         :format(done, total, percent, tail(path, 60)))
+      self.frame = self.frame % #SPINNER + 1
+      io.stderr:write("\r\27[K", self.paint.cyan(SPINNER[self.frame]),
+         (" analyzing %d/%d %s %d%%  "):format(done, total, term.bar(done / total, 20), percent),
+         self.paint.dim(tail(path, 40)))
       self.line_open = true
    else
       local step = math.floor(percent / 10)
       if done ~= total and step == self.last_step then return end
       self.last_step = step
-      io.stderr:write(("luasec: analyzing %d/%d files (%d%%)\n"):format(done, total, percent))
+      io.stderr:write(self.paint.dim("luasec:"),
+         (" analyzing %d/%d files (%d%%)\n"):format(done, total, percent))
    end
 end
 
@@ -78,8 +86,15 @@ end
 function Progress:finish(count)
    if not self.enabled then return end
    self:clear()
-   io.stderr:write(("luasec: analyzed %d file%s in %ds\n")
-      :format(count, count == 1 and "" or "s", os.time() - self.started))
+   if self.live then
+      io.stderr:write(self.paint.green("✔"),
+         (" analyzed %d file%s in %ds\n")
+         :format(count, count == 1 and "" or "s", os.time() - self.started))
+   else
+      io.stderr:write(self.paint.dim("luasec:"),
+         (" analyzed %d file%s in %ds\n")
+         :format(count, count == 1 and "" or "s", os.time() - self.started))
+   end
 end
 
 return progress

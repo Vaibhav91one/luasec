@@ -34,6 +34,8 @@ local BOOLEAN_FLAGS = {
    ["--no-config"] = "no_config",
    ["--progress"] = "progress",
    ["--no-progress"] = "no_progress",
+   ["--color"] = "color",
+   ["--no-color"] = "no_color",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -137,6 +139,8 @@ output:
   --summary                  print counts and the files with the most findings, not every finding
   --progress                 show progress on stderr (default: only on a terminal)
   --no-progress              never show progress
+  --color                    force colour (default: only on a terminal, never with NO_COLOR)
+  --no-color                 never use colour
 
 selection:
   --std <names>              platform API sets, '+' separated, e.g. +openwrt+luci

@@ -36,6 +36,7 @@ build = {
       ["luasec.cli.progress"] = "src/luasec/cli/progress.lua",
       ["luasec.cli.rules_cmd"] = "src/luasec/cli/rules_cmd.lua",
       ["luasec.cli.selection"] = "src/luasec/cli/selection.lua",
+      ["luasec.cli.term"] = "src/luasec/cli/term.lua",
       ["luasec.cli.walk"] = "src/luasec/cli/walk.lua",
       ["luasec.cli.why_cmd"] = "src/luasec/cli/why_cmd.lua",
       ["luasec.engine.callgraph"] = "src/luasec/engine/callgraph.lua",
