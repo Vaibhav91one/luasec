@@ -126,6 +126,42 @@ local function popen_with_path(command, path)
    return io.popen(command_text, "r"), tmp
 end
 
+-- An absolute link in an extracted image names its target as the device saw it:
+-- /usr/sbin/foo means <image root>/usr/sbin/foo, and the image root may sit
+-- anywhere under the scanned directory. Returns whether some ancestor of the link,
+-- up to the scan root and never past it, holds that target, plus the target as
+-- written. A target with a `..` component is never re-rooted, so a link cannot
+-- point outside the tree.
+local function rerooted(path, anchor)
+   -- One shell per link. Line 1 is the target, and line 2 is "yes" when some
+   -- ancestor of the link, up to and never past the scan root, holds that target.
+   -- The scan root's length is a number, so no path is spliced into the script.
+   local script = table.concat({
+      "export LC_ALL=C",
+      't=$(readlink -- "$p") || exit 0',
+      'printf "%s\\n" "$t"',
+      'case "$t" in /*) ;; *) exit 0 ;; esac',
+      'case "$t" in */../*|*/..) exit 0 ;; esac',
+      'd=$(dirname -- "$p")',
+      -- The walk spells this directory as the operator spelled the scan root
+      -- while the bound below is the physical root, and the two differ in
+      -- length on macOS (/var against /private/var), which would end the loop
+      -- before it climbs at all. Resolve it once so both share one spelling.
+      'd=$(cd -P -- "$d" 2>/dev/null && printf "%s" "$PWD") || exit 0',
+      "while :; do",
+      '  if test -e "$d$t"; then echo yes; exit 0; fi',
+      ("  if test ${#d} -le %d; then exit 0; fi"):format(#anchor),
+      '  d=$(dirname -- "$d")',
+      "done",
+   }, "\n")
+   local pipe, tmp = popen_with_path(script, path)
+   if not pipe then return false, nil end
+   local target, answer = pipe:read("*l"), pipe:read("*l")
+   pipe:close()
+   os.remove(tmp)
+   return answer == "yes", target
+end
+
 -- How much one scan root is allowed to resolve to, and the environment variable
 -- that moves the number.
 --
@@ -439,6 +475,23 @@ local function physical_dir(path)
    return answer
 end
 
+-- Names that cannot be Lua source: a shared library, an object, an archive or an image.
+local BINARY_LINK_SUFFIXES = {".so", ".a", ".ko", ".o", ".bin", ".img", ".gz", ".xz",
+   ".bz2", ".lzma", ".zip", ".tar", ".ubi", ".dtb"}
+
+-- A link that names something that cannot be Lua by its own name: an extension
+-- the walk never treats as Lua, or a binary suffix (libfoo.so, libfoo.so.1.2).
+-- A dangling link has no content to look at, so the name is all there is.
+local function cannot_be_lua(path)
+   local lower = path:lower()
+   if is_lua_extension(lower) == false then return true end
+   if lower:find("%.so%.[%d%.]+$") then return true end
+   for _, suffix in ipairs(BINARY_LINK_SUFFIXES) do
+      if lower:sub(-#suffix) == suffix then return true end
+   end
+   return false
+end
+
 -- Everything one scan root resolves to: the files under it, plus the ground its
 -- symlinks name that the walk has not already covered.
 --
@@ -458,7 +511,7 @@ end
 local function expand_root(root)
    local limit = walk_limit()
    local state = {left = limit, limit = limit, over = false}
-   local files, problems = {}, {}
+   local files, problems, dangling = {}, {}, {}
 
    local anchor = physical_dir(root)
    if not anchor then
@@ -497,6 +550,14 @@ local function expand_root(root)
          elseif link.kind == "d" then
             local covered = link.dir == anchor
                or link.dir:sub(1, #inside_prefix) == inside_prefix
+            if not covered then
+               -- An absolute link in an extracted image may still name ground
+               -- inside the root: the pass above resolved it against this
+               -- machine instead. When that copy exists under the root it is
+               -- analyzed at its real path already, so this names no new
+               -- ground and is not walked a second time.
+               if rerooted(link.path, anchor) then covered = true end
+            end
             if not covered and not walked[link.dir] then
                walked[link.dir] = true
                if charge(state, 1) then break end
@@ -505,12 +566,38 @@ local function expand_root(root)
          elseif link.kind == "x" then
             -- A link that resolves to nothing, and a link that resolves to
             -- itself are the same report: we could not read what this names.
-            problems[#problems + 1] = {
-               message = ("could not resolve symlink %s"):format(link.path),
-               path = link.path,
-            }
+            dangling[#dangling + 1] = link.path
          end
       end
+   end
+
+   -- An absolute link in an extracted image names its target as the device saw
+   -- it, so each dangling link is read against the scan root before it is
+   -- called a gap: when that copy exists the target is analyzed at its real
+   -- path already. What is still missing is one finding per scan root, not one
+   -- per link.
+   local missing = {}
+   for _, path in ipairs(dangling) do
+      if not cannot_be_lua(path) then
+         local inside, target = rerooted(path, anchor)
+         if not inside then missing[#missing + 1] = {path = path, target = target} end
+      end
+   end
+   if #missing == 1 then
+      problems[#problems + 1] = {
+         message = ("could not resolve symlink %s"):format(missing[1].path),
+         path = missing[1].path,
+      }
+   elseif #missing > 1 then
+      local first = missing[1]
+      local also = {}
+      for index = 2, math.min(#missing, 4) do also[#also + 1] = missing[index].path end
+      local message = ("could not resolve symlink %s and %d more (each names a target "
+         .. "that is missing, or an absolute path with no copy under the scanned root; "
+         .. "for example %s -> %s)"):format(first.path, #missing - 1, first.path,
+            first.target or "?")
+      if #also > 0 then message = message .. "; also " .. table.concat(also, ", ") end
+      problems[#problems + 1] = {message = message, path = root}
    end
 
    if state.over then
