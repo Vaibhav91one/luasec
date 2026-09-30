@@ -36,6 +36,12 @@ function why.run(argv, root, out, err)
       err:write("luasec: why takes one <file>:<line>, not more paths\n")
       return 2
    end
+   local probe, open_error = io.open(file, "rb")
+   if not probe then
+      err:write(("luasec: cannot read %s: %s\n"):format(file, tostring(open_error)))
+      return 2
+   end
+   probe:close()
    local ok, options_error = api.validate_options(opts)
    if not ok then
       err:write("luasec: " .. options_error .. "\n")
