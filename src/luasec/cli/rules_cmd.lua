@@ -2,12 +2,9 @@
 -- line per code and `explain` prints a code's doc page. The pages live in
 -- docs/rules/ beside the installation, the same files the repository renders.
 local api = require "luasec.api"
+local codes = require "luasec.rules.codes"
 
 local rules_cmd = {}
-
-local function meaning(message)
-   return (message:gsub("%s*%({%w+}%)", ""):gsub("%s*{%w+}", ""))
-end
 
 local function pad(text, width)
    text = tostring(text or "")
@@ -17,7 +14,7 @@ end
 local function list(out)
    for _, rule in ipairs(api.rule_catalogue()) do
       out:write(rule.code, "  ", pad(rule.category, 8), "  ", pad(rule.severity, 8), "  ",
-         pad(rule.cwe, 7), "  ", meaning(rule.message), "\n")
+         pad(rule.cwe, 7), "  ", codes.meaning(rule.code), "\n")
    end
    return 0
 end

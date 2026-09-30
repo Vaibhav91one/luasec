@@ -29,6 +29,7 @@ local BOOLEAN_FLAGS = {
    ["--no-dynamic-sinks"] = "no_dynamic_sinks",
    ["--quiet"] = "quiet",
    ["--score"] = "score",
+   ["--summary"] = "summary",
    ["--ranges"] = "ranges",
    ["--no-config"] = "no_config",
    ["--progress"] = "progress",
@@ -133,6 +134,7 @@ output:
   --ranges                   include the end column of each finding
   --quiet                    print nothing when there are no findings
   --score                    print only the 0-100 health score (exit code unchanged)
+  --summary                  print counts and the files with the most findings, not every finding
   --progress                 show progress on stderr (default: only on a terminal)
   --no-progress              never show progress
 

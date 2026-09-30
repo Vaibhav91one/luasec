@@ -9,6 +9,7 @@ local codes = require "luasec.rules.codes"
 local degraded = require "luasec.rules.degraded"
 local json = require "luasec.report.json"
 local plain = require "luasec.report.plain"
+local summary = require "luasec.report.summary"
 local report_contract = require "luasec.report.findings"
 local render = require "luasec.report.render"
 local validate_report = require "luasec.validate.report"
@@ -74,6 +75,7 @@ local function emit(list, format, opts)
    local output
    if opts.score then
       output = tostring(api.score(list).score)
+   elseif opts.summary then output = summary.render(list)
    else
       output = render.render(list, format, opts)
    end
@@ -199,6 +201,9 @@ local function run(argv)
    if opts.format and not FORMAT_NAMES[opts.format] then
       return fail(("unknown format '%s': expected plain, json, sarif or html")
          :format(opts.format))
+   end
+   if opts.summary and opts.format and opts.format ~= "plain" then
+      return fail("--summary works with the plain format")
    end
 
    local settings, settings_error = selection.settings(opts)
