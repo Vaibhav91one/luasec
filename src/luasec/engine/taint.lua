@@ -352,6 +352,13 @@ local function taint_of_var(node, item, state)
       end
    elseif not var then
       set_union_into(result, state.global_taint[node[1]] or new_set())
+      local global_source = platform_api.match_global_source(node[1])
+      if global_source then
+         set_add(result, {
+            id = global_source.id, name = global_source.name,
+            line = node.line, confidence = global_source.confidence,
+         })
+      end
    end
 
    return result

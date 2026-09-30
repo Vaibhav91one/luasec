@@ -54,6 +54,7 @@ build = {
       ["luasec.main"] = "src/luasec/main.lua",
       ["luasec.registry.platform_api"] = "src/luasec/registry/platform_api.lua",
       ["luasec.registry.profiles"] = "src/luasec/registry/profiles.lua",
+      ["luasec.registry.stds.cgilua"] = "src/luasec/registry/stds/cgilua.lua",
       ["luasec.registry.stds.espressif"] = "src/luasec/registry/stds/espressif.lua",
       ["luasec.registry.stds.hisi"] = "src/luasec/registry/stds/hisi.lua",
       ["luasec.registry.stds.luajit"] = "src/luasec/registry/stds/luajit.lua",

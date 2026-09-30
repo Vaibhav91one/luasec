@@ -217,3 +217,13 @@ at most once per call, both are capped at depth 16 (so an alias chain of 40 name
 ends in silence rather than a guess), and `source_of` additionally caps itself at
 2000 steps. A file written to be expensive therefore loses a `source` field, not
 the run.
+
+## CGILua profile
+
+The `cgilua` profile declares global sources (`cgi` at certain confidence,
+`RowId`, `DBTable`, `NextPage` at high), call sources (`web.cgiToLuaTable` at
+certain, `web.cgiSearch`, `web.cgiFindButton`, `web.cgiFindToken` and
+`SAPI.Request.servervariable` at high, `cgilua.cookies.get` at medium), and the
+vendor wrappers `util.runShellCmd` and `util.shellCmdOutput` as full exec
+sinks on their first argument. The wrappers are modelled as full sinks: a
+partial filter inside them is not modelled yet.
