@@ -92,4 +92,18 @@ describe("luasec fix", function()
       assert_equal(code, 0, out)
       assert_match(out, "nothing to fix", out)
    end)
+
+   it("exposes the --print prompt byte-identically through prompt_for", function()
+      local fix = require "luasec.cli.fix_cmd"
+      local out, code = harness.cli({"fix", "--print", TAINTED})
+      assert_equal(code, 0, out)
+      local prompt, message = fix.prompt_for({TAINTED}, ".")
+      assert_true(prompt ~= nil, "a prompt is returned: " .. tostring(message))
+      -- harness.cli leaves the printf's own newline on the output, so strip
+      -- exactly that one before the byte-identical comparison.
+      assert_equal(out:gsub("\n$", ""), prompt .. "\n", "prompt_for shares the --print path")
+      local empty, why = fix.prompt_for({"test/fixtures/clean/report.lua"}, ".")
+      assert_equal(empty, nil, "nothing to fix is nil")
+      assert_equal(why, "nothing to fix", "with the reason")
+   end)
 end)

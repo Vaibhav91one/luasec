@@ -54,6 +54,46 @@ local function build_prompt(root, list, rerun)
    return table.concat(parts, "\n")
 end
 
+local function collect(rest)
+   local opts, parse_error = args.parse(rest)
+   if not opts then
+      return nil, parse_error
+   end
+   if #opts.paths == 0 then
+      return nil, "fix needs a file or directory"
+   end
+   local settings, settings_error = selection.settings(opts)
+   if not settings then
+      return nil, settings_error
+   end
+   local ok, options_error = api.validate_options(opts)
+   if not ok then
+      return nil, options_error
+   end
+   local files, walk_errors = walk.collect(opts.paths)
+   if not files then
+      return nil, tostring(walk_errors)
+   end
+   local raw = api.analyze(files, opts)
+   selection.override(raw, settings)
+   raw = config.apply_allow(selection.filter(raw, opts), settings.allow)
+   return findings.normalize(raw)
+end
+
+--- The fix prompt for the scan `argv` (paths and filters, no --agent or
+-- --print), or nil plus the reason. Shares the scan with the --print path.
+function fix.prompt_for(argv, root)
+   local list, failure = collect(argv)
+   if not list then
+      return nil, failure
+   end
+   if #list == 0 then
+      return nil, "nothing to fix"
+   end
+   local rerun = "luasec " .. table.concat(argv, " ")
+   return build_prompt(root, list, rerun)
+end
+
 function fix.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local agent_name, safe, print_only, rest = "claude", false, false, {}
@@ -76,41 +116,15 @@ function fix.run(argv, root, out, err)
       return 2
    end
 
-   local opts, parse_error = args.parse(rest)
-   if not opts then
-      err:write("luasec: " .. parse_error .. "\n")
+   local prompt, prompt_error = fix.prompt_for(rest, root)
+   if not prompt then
+      if prompt_error == "nothing to fix" then
+         out:write("luasec: nothing to fix\n")
+         return 0
+      end
+      err:write("luasec: " .. prompt_error .. "\n")
       return 2
    end
-   if #opts.paths == 0 then
-      err:write("luasec: fix needs a file or directory\n")
-      return 2
-   end
-   local settings, settings_error = selection.settings(opts)
-   if not settings then
-      err:write("luasec: " .. settings_error .. "\n")
-      return 2
-   end
-   local ok, options_error = api.validate_options(opts)
-   if not ok then
-      err:write("luasec: " .. options_error .. "\n")
-      return 2
-   end
-   local files, walk_errors = walk.collect(opts.paths)
-   if not files then
-      err:write("luasec: " .. tostring(walk_errors) .. "\n")
-      return 2
-   end
-
-   local raw = api.analyze(files, opts)
-   selection.override(raw, settings)
-   raw = config.apply_allow(selection.filter(raw, opts), settings.allow)
-   local list = findings.normalize(raw)
-   if #list == 0 then
-      out:write("luasec: nothing to fix\n")
-      return 0
-   end
-   local rerun = "luasec " .. table.concat(rest, " ")
-   local prompt = build_prompt(root, list, rerun)
    if print_only then
       out:write(prompt, "\n")
       return 0

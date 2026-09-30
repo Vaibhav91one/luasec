@@ -3,10 +3,11 @@
 -- code. Nothing is launched or written without the person choosing it.
 local term = require "luasec.cli.term"
 local why = require "luasec.cli.why_cmd"
-local fix_cmd = require "luasec.cli.fix_cmd"
 local ci_cmd = require "luasec.cli.ci_cmd"
 local install_cmd = require "luasec.cli.install_cmd"
 local review = require "luasec.cli.review"
+local selector = require "luasec.cli.selector"
+local handoff = require "luasec.cli.handoff"
 local plain = require "luasec.report.plain"
 local render = require "luasec.report.render"
 local codes = require "luasec.rules.codes"
@@ -47,23 +48,16 @@ local function flush(out)
    if out.flush then out:flush() end
 end
 
-local function show(context, mark)
-   local out = context.out
-   out:write("What next?\n")
-   for index, key in ipairs(KEYS) do
-      out:write(((index == mark) and "> " or "  ") .. key .. "  " .. LABELS[key] .. "\n")
+--- The one recommended next step: review when anything is critical or high,
+-- save a report when there is any finding at all, nothing on a clean tree.
+function menu.recommended(list)
+   if #list == 0 then return nil end
+   for _, finding in ipairs(list) do
+      if finding.severity == "critical" or finding.severity == "high" then
+         return "r"
+      end
    end
-   flush(out)
-end
-
-local function redraw(context, mark)
-   local out = context.out
-   out:write(("\27[%dA"):format(#KEYS + 1))
-   out:write("\27[KWhat next?\n")
-   for index, key in ipairs(KEYS) do
-      out:write("\27[K" .. ((index == mark) and "> " or "  ") .. key .. "  " .. LABELS[key] .. "\n")
-   end
-   flush(out)
+   return "s"
 end
 
 -- luasec: ignore 708  the stty commands are constant mode switches, never user input
@@ -107,20 +101,8 @@ local function do_explain(list, context, tty)
    why.explain(ordered[pick], context.root, context.out)
 end
 
-local function do_fix(list, context, tty)
-   local agent = read_line(context, tty, "Agent [claude/codex/cursor] (claude): ")
-   if agent == nil then return end
-   agent = trim(agent)
-   if agent == "" then agent = "claude" end
-   local skip = read_line(context, tty, "Skip the agent's approval prompts? [y/N]: ")
-   if skip == nil then return end
-   local launch = read_line(context, tty, "Launch the agent, or just print the prompt? [launch/print] (print): ")
-   if launch == nil then return end
-   local fargv = {"--agent", agent}
-   if trim(skip) ~= "y" then fargv[#fargv + 1] = "--safe" end
-   if trim(launch) ~= "launch" then fargv[#fargv + 1] = "--print" end
-   for _, token in ipairs(context.argv) do fargv[#fargv + 1] = token end
-   fix_cmd.run(fargv, context.root, context.out, context.err)
+local function do_handoff(list, context, tty)
+   handoff.run(list, context, tty)
 end
 
 local function do_all(list, context)
@@ -186,31 +168,13 @@ end
 local ACTIONS = {
    r = do_review,
    e = do_explain,
-   f = do_fix,
+   f = do_handoff,
    a = do_all,
    s = do_save,
    b = do_baseline,
    c = do_ci,
    i = do_install,
 }
-
-local function read_key()
-   local first = io.read(1)
-   if first == nil then return "quit" end
-   if first == "\4" or first == "\3" then return "quit" end
-   if first == "\27" then
-      local second = io.read(1)
-      if second == nil then return "quit" end
-      if second ~= "[" then return "quit" end
-      local third = io.read(1)
-      if third == nil then return "quit" end
-      if third == "A" then return "up" end
-      if third == "B" then return "down" end
-      return "ignore"
-   end
-   if first == "\r" or first == "\n" then return "enter" end
-   return first
-end
 
 function menu.run(list, context)
    context.out = context.out or io.stdout
@@ -219,35 +183,21 @@ function menu.run(list, context)
    -- luasec: ignore 708  the stty command is a constant mode switch, never user input
    if tty then os.execute(STTY_RAW) end
    local function loop()
-      local mark = 1
-      show(context, mark)
       while true do
-         local key = read_key()
-         if key == "quit" then
-            break
-         elseif key == "up" then
-            mark = mark - 1
-            if mark < 1 then mark = #KEYS end
-            if tty then redraw(context, mark) end
-         elseif key == "down" then
-            mark = mark + 1
-            if mark > #KEYS then mark = 1 end
-            if tty then redraw(context, mark) end
-         elseif key == "enter" then
-            local picked = KEYS[mark]
-            if picked == "q" then break end
-            ACTIONS[picked](list, context, tty)
-            show(context, mark)
-         elseif key == "ignore" then
-            -- unknown escape: stay on the menu
-         elseif ACTIONS[key] then
-            if key == "q" then break end
-            for index, name in ipairs(KEYS) do
-               if name == key then mark = index end
-            end
-            ACTIONS[key](list, context, tty)
-            show(context, mark)
+         local advised = menu.recommended(list)
+         local items = {}
+         for _, key in ipairs(KEYS) do
+            items[#items + 1] = {key = key, label = LABELS[key], recommended = (key == advised)}
          end
+         local initial = 1
+         for index, key in ipairs(KEYS) do
+            if key == advised then initial = index end
+         end
+         local picked = selector.pick(context, "What next?", items, {initial = initial})
+         if picked == nil then break end
+         local key = KEYS[picked]
+         if key == "q" then break end
+         ACTIONS[key](list, context, tty)
       end
    end
    -- An error inside an action must never leave the terminal in single-key mode.
