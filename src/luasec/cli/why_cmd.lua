@@ -44,6 +44,28 @@ local function code_frame(file, line, column)
    return table.concat(out, "\n")
 end
 
+function why.explain(finding, root, out)
+   out = out or io.stdout
+   out:write((plain.render({finding}):match("^[^\n]*")), "\n")
+   if finding.trace then
+      for _, step in ipairs(finding.trace) do
+         out:write(("  %-6s  %s  %s:%d\n"):format(step.kind, step.name, step.file, step.line))
+      end
+   else
+      out:write(NO_FLOW)
+   end
+   local frame = code_frame(finding.file, finding.line, finding.column)
+   if frame then out:write(frame, "\n") end
+   local fix = how_to_fix(root, finding.code)
+   if fix then
+      out:write("  how to fix:\n")
+      for text in (fix .. "\n"):gmatch("([^\n]*)\n") do
+         out:write(text == "" and "\n" or ("    " .. text .. "\n"))
+      end
+   end
+   out:write("  more: luasec rules explain ", finding.code, "\n")
+end
+
 function why.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local file, line = (argv[1] or ""):match("^(.+):(%d+)$")
@@ -91,24 +113,7 @@ function why.run(argv, root, out, err)
 
    for index, finding in ipairs(hits) do
       if index > 1 then out:write("\n") end
-      out:write((plain.render({finding}):match("^[^\n]*")), "\n")
-      if finding.trace then
-         for _, step in ipairs(finding.trace) do
-            out:write(("  %-6s  %s  %s:%d\n"):format(step.kind, step.name, step.file, step.line))
-         end
-      else
-         out:write(NO_FLOW)
-      end
-      local frame = code_frame(finding.file, finding.line, finding.column)
-      if frame then out:write(frame, "\n") end
-      local fix = how_to_fix(root, finding.code)
-      if fix then
-         out:write("  how to fix:\n")
-         for text in (fix .. "\n"):gmatch("([^\n]*)\n") do
-            out:write(text == "" and "\n" or ("    " .. text .. "\n"))
-         end
-      end
-      out:write("  more: luasec rules explain ", finding.code, "\n")
+      why.explain(finding, root, out)
    end
    return 0
 end
