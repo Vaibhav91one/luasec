@@ -294,6 +294,39 @@ the new ones; a finding the baseline marks fixed costs nothing — so a tree
 whose only findings are already in the baseline scores 100. Use the plain score
 for the state of the whole tree.
 
+### Progress
+
+A scan of a real firmware tree takes seconds to minutes. Progress reports
+where the scan is up to on stderr only, so the report on stdout and `--score`
+never change. It lists the paths being walked, how many files were found, a
+counter as each file is analyzed, under `--whole-program` a line when calls
+are resolved across files, and a closing line with the file count and elapsed
+seconds. By default it shows only when stderr is a terminal. `--progress`
+forces it on, `--no-progress` forces it off, and `--quiet` always turns it off.
+On a terminal the counter is rewritten in place; otherwise one plain line is
+printed per 10% step.
+
+```sh
+bin/luasec --progress test/fixtures/firmware > /dev/null
+```
+
+```
+luasec: listing files under test/fixtures/firmware
+luasec: found 23 files to analyze
+luasec: analyzing 1/23 files (4%)
+luasec: analyzing 3/23 files (13%)
+luasec: analyzing 5/23 files (21%)
+luasec: analyzing 7/23 files (30%)
+luasec: analyzing 10/23 files (43%)
+luasec: analyzing 12/23 files (52%)
+luasec: analyzing 14/23 files (60%)
+luasec: analyzing 17/23 files (73%)
+luasec: analyzing 19/23 files (82%)
+luasec: analyzing 21/23 files (91%)
+luasec: analyzing 23/23 files (100%)
+luasec: analyzed 23 files in 1s
+```
+
 ## Config file
 
 `luasec.config.lua` in the current directory is loaded when it exists.
