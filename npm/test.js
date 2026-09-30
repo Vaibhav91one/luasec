@@ -1,7 +1,7 @@
 'use strict';
 // End-to-end check of the npm launcher against a tarball built from this
 // checkout, the way the release job builds it: tracked files plus vendor/.
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawnSync, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -39,5 +39,16 @@ const again = run(['--score', path.join(repo, 'test/fixtures/clean/report.lua')]
 assert.strictEqual(again.status, 0, again.stderr);
 assert.strictEqual(again.stdout.trim(), '100');
 
-fs.rmSync(tmp, { recursive: true, force: true });
-console.log('npm launcher: ok');
+const raceEnv = Object.assign({}, env, { LUASEC_CACHE: path.join(tmp, 'race-cache') });
+const runAsync = (args) => new Promise((resolve) => {
+  const child = spawn(process.execPath, [launcher].concat(args), { env: raceEnv });
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d; });
+  child.on('close', (status) => resolve({ status, stderr }));
+});
+(async () => {
+    const both = await Promise.all([runAsync(['--version']), runAsync(['--version'])]);
+    for (const r of both) assert.strictEqual(r.status, 0, `a concurrent first run failed: ${r.stderr}`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    console.log('npm launcher: ok');
+  })();
