@@ -23,10 +23,22 @@ All notable changes to this project are documented here. The format follows
 
 - A 708 reported a byte offset in the file as its column, so SARIF pointed past
   the end of the line (#106).
-- After a parse error, the lexical scan reported findings on the wrong line (#107).
+- After a parse error, the lexical scan reported findings on the wrong line (#110).
 - `luasec install` and `luasec ci install` created directories with Lua's `%q`,
   which is not shell quoting; a `--dir` containing `$(cmd)` ran `cmd` (#99, #100).
 - The `fix` spec could launch a real agent installed on the test machine (#102).
+- `luasec.config.lua` was executed (in an empty environment), so a config in a
+  scanned tree could hang the run; it is now parsed as data. A numeric severity
+  key was silently ignored and is now refused (#121).
+- `luasec why` and `luasec fix` ignored `--only`, `--ignore`, the thresholds and
+  the config file; they now select findings exactly as the scan does (#122).
+- `luasec why` on a file it cannot read said nothing was reported; it now exits
+  2. `--quiet --score` printed nothing on a clean tree (#114).
+- `luasec install` overwrote a changed skill or Cursor rule; it now needs
+  `--force` (#120).
+- The action's score output was empty when `args` contained `-o`; it is read
+  from the SARIF now (#119).
+- Two concurrent first runs of `npx luasec` could fail on the cache rename (#113).
 
 ## 0.1.0
 
