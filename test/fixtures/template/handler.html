@@ -1,0 +1,8 @@
+<html>
+<body>
+<?lua
+local h = http.formvalue("h")
+os.execute("ping -c1 " .. h)
+?>
+</body>
+</html>

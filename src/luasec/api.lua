@@ -14,6 +14,7 @@ local profiles = require "luasec.registry.profiles"
 local inline_directives = require "luasec.engine.inline_directives"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
+local template = require "luasec.cli.template"
 local render = require "luasec.report.render"
 local report_contract = require "luasec.report.findings"
 local pipeline = require "luasec.engine.pipeline"
@@ -312,8 +313,22 @@ function api.analyze(paths, opts)
                :format(file.path, detect.binary_kind(file.source)),
          }}}
       else
-         result = pipeline.analyze_source(file.source, opts)
-         result.path = file.path
+         -- A template page is scanned by its Lua blocks, blanked to the page's
+         -- own lines and columns; a page with no block is skipped, not parsed.
+         local analysed, skipped = file.source, false
+         if template.is_template_path(file.path) then
+            if template.has_lua(file.source) then
+               analysed = template.extract(file.source)
+            else
+               skipped = true
+            end
+         end
+         if skipped then
+            result = {path = file.path, findings = {}, final = true}
+         else
+            result = pipeline.analyze_source(analysed, opts)
+            result.path = file.path
+         end
       end
       -- Without the option a file's parsed program is finished with here and is
       -- released before the next one is read. Holding every file's check state

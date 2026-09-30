@@ -1,16 +1,19 @@
 -- Input collection: files given on the command line, or directories walked
 -- recursively. Deliberately conservative about what counts as a Lua file in
--- firmware: `.lua` plus extensionless files under cgi-bin, and files whose
--- first line looks like a Lua shebang or a Lua comment.
+-- firmware: `.lua` plus extensionless files under cgi-bin, CGILua pages whose
+-- Lua blocks template.lua finds, and files whose first line looks like a Lua
+-- shebang or a Lua comment.
 local walk = {}
 
-local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec"}
+local template = require "luasec.cli.template"
+
+local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec", ".lp"}
 
 -- Extensions that are definitely not Lua. A firmware tree is mostly web assets
 -- and translations, and scanning them produced hundreds of findings that were
 -- all noise.
 local NOT_LUA_EXTENSIONS = {
-   ".js", ".uc", ".json", ".po", ".pot", ".css", ".html", ".htm", ".xml", ".svg",
+   ".js", ".uc", ".json", ".po", ".pot", ".css", ".xml", ".svg",
    ".png", ".jpg", ".gif", ".woff", ".woff2", ".ttf", ".map", ".conf", ".sh",
    ".py", ".md", ".txt", ".ucode", ".patch", ".diff", ".pem", ".cer", ".p8",
    ".luadoc", ".awk", ".h", ".hpp", ".c", ".pl", ".dts", ".yml", ".yaml",
@@ -61,6 +64,25 @@ local LUA_OPENERS = {
    "^%a+%s*=%s*function", "^do$", "^local%s+function",
 }
 
+-- A template page counts as Lua only when it holds a Lua block, which means
+-- reading the whole file. Past 2 MiB the page is skipped rather than read.
+local TEMPLATE_MAX_BYTES = 2000000
+
+local function template_file_has_lua(path)
+   local handle = io.open(path, "rb")
+   if not handle then return false end
+   local size = handle:seek("end")
+   if not size or size > TEMPLATE_MAX_BYTES then
+      handle:close()
+      return false
+   end
+   handle:seek("set", 0)
+   local text = handle:read("*a")
+   handle:close()
+   if not text then return false end
+   return template.has_lua(text)
+end
+
 -- Is this file Lua? An extension decides it when it is one we know. Otherwise
 -- the content must look like Lua: a shebang naming lua, or an opener that a web
 -- asset or a translation file would not have.
@@ -69,6 +91,10 @@ local function looks_like_lua(path)
    if NOT_LUA_NAMES[name:lower()] or name:lower():match("^readme[%a-z0-9_.-]*$")
          or name:lower():match("^changelog[%a-z0-9_.-]*$") then
       return false
+   end
+
+   if template.is_template_path(path) then
+      return template_file_has_lua(path)
    end
 
    local by_extension = is_lua_extension(path)
@@ -499,6 +525,9 @@ local BINARY_LINK_SUFFIXES = {".so", ".a", ".ko", ".o", ".bin", ".img", ".gz", "
 local function cannot_be_lua(path)
    local lower = path:lower()
    if is_lua_extension(lower) == false then return true end
+   -- A dangling link names no content to check for a Lua block, so a template
+   -- name is not ground we know we missed, as a dangling .html never was.
+   if template.is_template_path(lower) then return true end
    if lower:find("%.so%.[%d%.]+$") then return true end
    for _, suffix in ipairs(BINARY_LINK_SUFFIXES) do
       if lower:sub(-#suffix) == suffix then return true end
