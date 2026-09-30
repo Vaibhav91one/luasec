@@ -2,6 +2,7 @@
 local args_parser = require "luasec.cli.args"
 local config_file = require "luasec.cli.config"
 local walk = require "luasec.cli.walk"
+local scope = require "luasec.cli.scope"
 local progress = require "luasec.cli.progress"
 local api = require "luasec.api"
 local baseline = require "luasec.cli.baseline"
@@ -202,6 +203,12 @@ local function run(argv)
       return validate(opts)
    end
 
+   -- A scoped scan is about the current repository, so it needs no path: a
+   -- pre-commit hook is just `luasec --staged`.
+   if #opts.paths == 0 and (opts.staged or opts.scope == "changed") then
+      opts.paths = {"."}
+   end
+
    if #opts.paths == 0 and not opts.help and not opts.version then
       io.stdout:write(args_parser.usage())
       return EXIT_ERROR
@@ -246,13 +253,29 @@ local function run(argv)
    local options_ok, options_error = api.validate_options(opts)
    if not options_ok then return fail(options_error) end
 
+   if opts.scope and opts.scope ~= "full" and opts.scope ~= "changed" then
+      return fail("--scope expects full or changed")
+   end
+
    if opts.no_progress then opts.progress = false end
    local bar = progress.new(opts)
    opts.on_file = function(done, total, path) bar:file(done, total, path) end
    opts.on_phase = function(text) bar:say(text) end
    bar:say("listing files under " .. table.concat(opts.paths, ", "))
 
-   local files, walk_errors = walk.collect(opts.paths)
+   local files, walk_errors
+   if opts.staged or opts.scope == "changed" then
+      local selected, scope_error = scope.files(opts)
+      if not selected then return fail(scope_error) end
+      if #selected == 0 then
+         if not opts.staged then io.stderr:write("luasec: no changed Lua files\n") end
+         return EXIT_CLEAN
+      end
+      files = selected
+      walk_errors = nil
+   else
+      files, walk_errors = walk.collect(opts.paths)
+   end
    if not files then return fail(walk_errors) end
    bar:say(("found %d file%s to analyze"):format(#files, #files == 1 and "" or "s"))
 
