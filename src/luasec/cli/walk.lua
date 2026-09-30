@@ -662,6 +662,30 @@ function walk.mkdir_p(path)
    return out == "ok" or nil
 end
 
+--- Make a file executable. The path is handed over the way the walk hands one
+-- over, so a name with shell syntax in it is only a name. Returns true or nil.
+function walk.make_executable(path)
+   local pipe, tmp = popen_with_path('chmod +x -- "$p" && printf ok', path)
+   local out = pipe:read("*a")
+   pipe:close()
+   os.remove(tmp)
+   return out == "ok" or nil
+end
+
+--- Hooks directory of the repository at dir, via git so worktrees work.
+-- Returns the path or nil when dir is not in a git repository.
+function walk.git_hooks_dir(dir)
+   local pipe, tmp = popen_with_path('cd "$p" && git rev-parse --git-path hooks', dir)
+   if not pipe then return nil end
+   local out = pipe:read("*a") or ""
+   pipe:close()
+   os.remove(tmp)
+   out = out:gsub("%s+$", ""):gsub("^%s+", "")
+   if out == "" then return nil end
+   if out:sub(1, 1) == "/" then return out end
+   return dir:gsub("/$", "") .. "/" .. out
+end
+
 function walk.collect(paths)
    local files, seen, errors = {}, {}, {}
 
