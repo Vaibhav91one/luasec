@@ -23,6 +23,23 @@ Found by scanning public router firmware images unpacked to a rootfs.
   instead of the machine running luasec; links to libraries and archives are not
   gaps, and the rest become one finding per scan root with a count. On one router
   image the coverage warnings fell from 238 to 19 (#137).
+- A symlink to a file with a copy under the scanned root is no longer read
+  from the host (#147).
+- Colour follows the terminal (`NO_COLOR`, `--color`, `--no-color`), and
+  progress on a terminal is a spinner with a bar and the current file (#156).
+- On a terminal the default report is a grouped digest: score header with a
+  bar, counts by severity and family, findings grouped by code worst-first;
+  `--view list` keeps the flat list, `--verbose` shows everything (#157).
+- `luasec why` prints a code frame around the reported line (#155).
+- After a scan with findings on a terminal, an interactive menu offers
+  explain, fix, all, save report, save baseline, CI, install guidance and
+  quit; `--interactive` forces it, `--no-interactive` turns it off (#160).
+- `--scope changed [--base <ref>] [--include-untracked]` scans only changed
+  files, and `--staged` scans staged files for a pre-commit hook (#158, #163).
+- `--category` keeps one or more code families, and
+  `luasec rules set|enable|disable <code>` edits `luasec.config.lua` (#162).
+- `luasec install --hook` writes a pre-commit hook that blocks on high
+  severity at medium confidence or above (#161).
 
 ## 0.2.0 - 2026-09-30
 

@@ -57,7 +57,9 @@ An absolute link to a file that has a copy under the scanned root is not read fr
 bin/luasec --std +openwrt+luci rootfs/
 ```
 
-The default report is plain text, one finding per line, followed by a summary.
+The default report on a terminal is the grouped digest (see The terminal view
+below); in a pipe, a file, or any other non-terminal stream it is plain text,
+one finding per line, followed by a summary.
 
 ```
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]

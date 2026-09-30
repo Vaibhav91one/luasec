@@ -91,4 +91,11 @@ describe("the README", function()
          end
       end
    end)
+   it("documents the terminal options a person types", function()
+      local text = read("README.md")
+      for _, flag in ipairs({"--interactive", "--no-interactive", "--view doctor", "--progress"}) do
+         assert_true(text:find(flag, 1, true) ~= nil,
+            "the README does not document " .. flag)
+      end
+   end)
 end)
