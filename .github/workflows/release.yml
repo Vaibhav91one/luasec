@@ -55,7 +55,9 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Tested by name, not through NODE_AUTH_TOKEN: setup-node exports a
+      # placeholder NODE_AUTH_TOKEN when none is set, so that one is never empty.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,12 +65,14 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
       - name: Publish the launcher
-        if: env.NODE_AUTH_TOKEN != ''
+        if: env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         working-directory: npm
         run: |
           test "$(node -p "require('./package.json').version")" = "${{ needs.release.outputs.version }}"
           npm publish --access public
-      - if: env.NODE_AUTH_TOKEN == ''
+      - if: env.NPM_TOKEN == ''
         run: echo "::notice::NPM_TOKEN is not set; skipped publishing to npm"
 
   homebrew:
