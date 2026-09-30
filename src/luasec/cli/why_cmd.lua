@@ -5,6 +5,8 @@ local api = require "luasec.api"
 local args = require "luasec.cli.args"
 local findings = require "luasec.report.findings"
 local plain = require "luasec.report.plain"
+local selection = require "luasec.cli.selection"
+local config = require "luasec.cli.config"
 
 local why = {}
 
@@ -42,6 +44,11 @@ function why.run(argv, root, out, err)
       return 2
    end
    probe:close()
+   local settings, settings_error = selection.settings(opts)
+   if not settings then
+      err:write("luasec: " .. settings_error .. "\n")
+      return 2
+   end
    local ok, options_error = api.validate_options(opts)
    if not ok then
       err:write("luasec: " .. options_error .. "\n")
@@ -49,7 +56,10 @@ function why.run(argv, root, out, err)
    end
 
    local hits = {}
-   for _, finding in ipairs(findings.normalize(api.analyze({file}, opts))) do
+   local raw = api.analyze({file}, opts)
+   selection.override(raw, settings)
+   raw = config.apply_allow(selection.filter(raw, opts), settings.allow)
+   for _, finding in ipairs(findings.normalize(raw)) do
       if finding.line == tonumber(line) then hits[#hits + 1] = finding end
    end
    if #hits == 0 then

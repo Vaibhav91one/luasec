@@ -7,6 +7,8 @@ local args = require "luasec.cli.args"
 local findings = require "luasec.report.findings"
 local plain = require "luasec.report.plain"
 local walk = require "luasec.cli.walk"
+local selection = require "luasec.cli.selection"
+local config = require "luasec.cli.config"
 
 local fix = {}
 
@@ -83,6 +85,11 @@ function fix.run(argv, root, out, err)
       err:write("luasec: fix needs a file or directory\n")
       return 2
    end
+   local settings, settings_error = selection.settings(opts)
+   if not settings then
+      err:write("luasec: " .. settings_error .. "\n")
+      return 2
+   end
    local ok, options_error = api.validate_options(opts)
    if not ok then
       err:write("luasec: " .. options_error .. "\n")
@@ -94,7 +101,10 @@ function fix.run(argv, root, out, err)
       return 2
    end
 
-   local list = findings.normalize(api.analyze(files, opts))
+   local raw = api.analyze(files, opts)
+   selection.override(raw, settings)
+   raw = config.apply_allow(selection.filter(raw, opts), settings.allow)
+   local list = findings.normalize(raw)
    if #list == 0 then
       out:write("luasec: nothing to fix\n")
       return 0
