@@ -41,6 +41,8 @@ rather than walking further. Raise the limit with `LUASEC_MAX_WALK_PATHS`. A
 symlink that leaves the tree is followed and read — point `luasec` at a tree you
 trust to be the tree you want read.
 
+luasec scans Lua source: a firmware image (tar, squashfs, UBI) has to be extracted first, and naming one on the command line reports a 901 that says so instead of reading it as Lua.
+
 ```sh
 bin/luasec --std +openwrt+luci rootfs/
 ```
