@@ -77,10 +77,31 @@ bin/luasec
 
 ### 2. First scan
 
-Point it at a file or a directory:
+Point it at a file or a directory. On a terminal the default report is a
+grouped digest, worst first (`--view doctor` forces it; `--view list` forces
+the flat list, `--verbose` shows every code and location):
 
 ```sh
-bin/luasec test/fixtures/tainted_exec/handler.lua
+bin/luasec --view doctor --no-color test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec  test/fixtures/tainted_exec/handler.lua
+Score 75/100  needs work  [###############-----]
+1 finding in 1 file: critical 1
+exec 1
+
+✖ 709  untrusted data reaches command execution  critical · certain
+    test/fixtures/tainted_exec/handler.lua:3
+
+Next: luasec why <file>:<line>  ·  luasec rules explain <code>  ·  luasec fix <path>  ·  luasec --summary
+```
+
+A pipe gets the flat list instead — pipes, files, `-o`, `--format`,
+`--summary`, `--score` and `--baseline` keep it unchanged:
+
+```sh
+bin/luasec --no-color test/fixtures/tainted_exec/handler.lua | cat
 ```
 
 ```
@@ -115,6 +136,12 @@ bin/luasec why test/fixtures/tainted_exec/handler.lua:3
 test/fixtures/tainted_exec/handler.lua:3:4: [709] critical: untrusted data reaches command execution (os.execute) (CWE-78) [source: http.formvalue]
   source  http.formvalue  test/fixtures/tainted_exec/handler.lua:3
   sink    os.execute  test/fixtures/tainted_exec/handler.lua:3
+    1 | -- Fixture: untrusted input reaches a command execution sink.
+    2 | local function ping(host)
+  > 3 |    os.execute("ping -c1 " .. http.formvalue(host))
+      |    ^
+    4 | end
+    5 | 
   how to fix:
     Do not build a shell command from request data; pass fixed arguments, validate against an allowlist, or use an API that does not go through the shell. If a shell is unavoidable, quote every untrusted part with a shell-quoting helper before concatenation.
   more: luasec rules explain 709
@@ -164,6 +191,52 @@ luasec reported 709 (untrusted data reaches command execution) at test/fixtures/
 > approval can be talked into running it or following instructions written in
 > it. Pass `--safe` to approve each action, or `--print` to review the prompt
 > before handing it to any agent.
+
+### In the terminal
+
+After a scan with findings on a terminal there is a menu: `e` explain (the
+`why` output above), `f` fix with an AI agent (default: print the prompt;
+approvals stay on unless answered `y`), `a` all, `s` save report, `b` save
+baseline, `c` CI, `i` install guidance, `q` quit; arrows and Enter also work.
+`--interactive` forces it, `--no-interactive` turns it off. It never changes
+the exit code. Colour follows the terminal (`NO_COLOR`, `--color`,
+`--no-color`); progress on a terminal is a spinner with a bar and the current
+file, otherwise plain lines every 10% with `--progress`:
+
+```sh
+bin/luasec --view doctor --no-color test/fixtures/tainted_exec/handler.lua
+```
+
+```
+luasec  test/fixtures/tainted_exec/handler.lua
+Score 75/100  needs work  [###############-----]
+1 finding in 1 file: critical 1
+exec 1
+
+✖ 709  untrusted data reaches command execution  critical · certain
+    test/fixtures/tainted_exec/handler.lua:3
+
+Next: luasec why <file>:<line>  ·  luasec rules explain <code>  ·  luasec fix <path>  ·  luasec --summary
+```
+
+### For developers
+
+`--scope changed [--base <ref>] [--include-untracked]` scans only changed
+files and `--staged` scans staged ones, so a pre-commit hook is
+`luasec --staged`; `luasec install --hook` writes it (blocks on high severity
+at medium confidence or above, quiet if luasec is not on PATH).
+`--category exec|firmware|payload|artifact|meta` keeps one family,
+`luasec rules set|enable|disable <code>` edits `luasec.config.lua`, and
+`--summary` prints counts instead of findings.
+
+### For security testers
+
+`luasec why <file>:<line>` shows the source-to-sink flow, a code frame and
+the fix; `--format sarif|json|html` feeds review tooling; `--baseline`
+reports only what is new; `--whole-program` follows `require` edges across
+files. Raw firmware images must be extracted first (luasec says so instead of
+scanning them), and in an extracted image absolute symlinks resolve against
+the image root.
 
 ### 4. Gate CI
 
@@ -484,9 +557,11 @@ Scan is the default: `bin/luasec <file|directory>...` scans and reports.
 | --- | --- |
 | `rules [list]` | print one line per registered code |
 | `rules explain <code>` | print that code's doc page |
+| `rules set\|enable\|disable <code>` | tune what this project reports (edits `luasec.config.lua`) |
 | `why <file>:<line>` | explain the findings on one line and how to fix them |
 | `fix [--agent claude\|codex\|cursor] [--safe] [--print] <path>...` | hand the findings to an AI agent |
 | `install [--dir <project>] [claude] [cursor] [agents]` | write agent guidance into a project |
+| `install --hook [--dir <project>]` | write a pre-commit hook that scans staged files |
 | `ci install [--dir <project>] [--force]` | write a GitHub workflow that runs the luasec action |
 
 The most used flags:
@@ -495,6 +570,15 @@ The most used flags:
 | --- | --- |
 | `--format plain\|json\|sarif\|html` | report format (`plain` default) |
 | `-o, --output <file>` | write the report to a file instead of stdout |
+| `--view list\|doctor` | flat list or grouped digest (digest default on a terminal) |
+| `--verbose` | with the digest: every code and every location |
+| `--summary` | counts by severity, confidence and code, not every finding |
+| `--interactive`, `--no-interactive` | force the follow-up menu on or off |
+| `--progress`, `--no-progress` | force progress on stderr on or off |
+| `--color`, `--no-color` | force colour on or off |
+| `--category <names>` | only these families: `exec`, `firmware`, `payload`, `artifact`, `meta` |
+| `--scope full\|changed`, `--base <ref>`, `--include-untracked` | scan only files changed since the base |
+| `--staged` | scan only files staged in git (for a pre-commit hook) |
 | `--std <names>` | platform API sets, `+` separated, e.g. `+openwrt+luci` |
 | `--only, --ignore <patterns>` | report only, or suppress, matching codes |
 | `--fail-on <severity>` | exit `1` at or above this severity |
