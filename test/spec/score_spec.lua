@@ -44,6 +44,23 @@ describe("health score", function()
       assert_equal(result.score, 0, "five criticals floor at 0")
       assert_equal(result.label, "critical", "0 is critical")
    end)
+
+   it("labels a run with a coverage gap incomplete, not good", function()
+      local result = api.score({{code = "901", severity = "low", confidence = "certain"}})
+      assert_equal(result.score, 99, "a gap still costs its point")
+      assert_equal(result.label, "incomplete", "but a scan that could not read a file is not good")
+      assert_equal(result.coverage_gaps, 1, "and it says how many")
+   end)
+
+   it("keeps a worse label, and does not count a gap the baseline marked fixed", function()
+      local worse = api.score({{code = "709", severity = "critical", confidence = "certain"},
+         {code = "901", severity = "low", confidence = "certain"}})
+      assert_equal(worse.label, "needs work", "74 stays needs work")
+      assert_equal(worse.coverage_gaps, 1, "the gap is still counted")
+      local fixed = api.score({{code = "901", severity = "low", confidence = "certain", status = "fixed"}})
+      assert_equal(fixed.label, "good", "a fixed gap is not a gap")
+      assert_equal(fixed.coverage_gaps, 0, "nothing to count")
+   end)
 end)
 
 describe("rule categories", function()

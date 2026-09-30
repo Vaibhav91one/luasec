@@ -145,7 +145,7 @@ function sarif.render(report, opts)
             rules = sarif.rules_table(),
          }},
          results = results,
-         properties = {score = {value = s.score, label = s.label, categories = s.categories}},
+         properties = {score = {value = s.score, label = s.label, coverage_gaps = s.coverage_gaps, categories = s.categories}},
       }},
    })
 end

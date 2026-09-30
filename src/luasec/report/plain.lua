@@ -70,7 +70,9 @@ function plain.render(report, opts)
          counted[#counted + 1] = id .. " " .. summary.categories[id]
       end
    end
-   buffer[#buffer + 1] = string.format("Score: %d/100 (%s)%s", summary.score, summary.label,
+   local note = summary.coverage_gaps > 0
+      and (", %d coverage gap%s"):format(summary.coverage_gaps, summary.coverage_gaps == 1 and "" or "s") or ""
+   buffer[#buffer + 1] = string.format("Score: %d/100 (%s%s)%s", summary.score, summary.label, note,
       #counted > 0 and (" - " .. table.concat(counted, ", ")) or "")
 
    return table.concat(buffer, "\n")

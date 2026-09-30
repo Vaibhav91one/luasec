@@ -50,11 +50,14 @@ guaranteed by the contract rather than by whatever order an engine happened to
 produce them in.
 
 The JSON document carries a top-level `score` object beside `findings`, with
-`value`, `label` (`good`, `needs work`, `critical`) and per-category `categories`
+`value`, `label` (`good`, `incomplete`, `needs work`, `critical`),
+`coverage_gaps` and per-category `categories`
 counts. It is computed from the findings, so the finding shape itself is unchanged.
 The score is 100 minus, for each finding, its severity weight (critical 25,
 high 10, medium 4, low 1) times its confidence (certain or high 1, medium 0.6,
-low 0.3), rounded down and floored at 0.
+low 0.3), rounded down and floored at 0. A coverage gap (any 901, 902, 904,
+801, 803, 805 or 012 finding) turns "good" into "incomplete"; the number
+itself does not change. A gap the baseline marked fixed is not counted.
 
 ## Determinism
 
@@ -107,9 +110,9 @@ the wrong text is worse than no location.
   somebody inserts a comment.
 
 **Score and category.** The run carries `properties.score` with the same
-`value`, `label` and `categories` counts as the JSON document's top-level
+`value`, `label`, `coverage_gaps` and `categories` counts as the JSON document's top-level
 `score`, and each result carries `properties.category` with the finding's
-category id.
+category id. The plain Score line names the count (", 1 coverage gap").
 
 ### Validation
 

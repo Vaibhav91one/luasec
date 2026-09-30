@@ -2,8 +2,10 @@
 -- a finding's shape does not change, and the same findings always give the same
 -- score. 100 means nothing was found. Each finding costs its severity weight
 -- scaled by its confidence, and the score is 100 minus the total, rounded down
--- and floored at 0. A finding a baseline marked fixed costs nothing.
+-- and floored at 0. A finding a baseline marked fixed costs nothing. A coverage
+-- gap makes a "good" result "incomplete".
 local categories = require "luasec.rules.categories"
+local degraded = require "luasec.rules.degraded"
 
 local score = {}
 
@@ -24,16 +26,20 @@ end
 -- categories counts the findings in each category id.
 function score.summarize(list)
    local total, counts = 0, {}
+   local gaps = 0
    for _, id in ipairs(categories.order()) do counts[id] = 0 end
    for _, finding in ipairs(list) do
       if finding.status ~= "fixed" then
          total = total + score.penalty(finding)
+         if degraded.is_degraded(finding.code) then gaps = gaps + 1 end
          local id = categories.of(finding.code)
          if id then counts[id] = counts[id] + 1 end
       end
    end
    local value = math.max(0, math.floor(100 - total))
-   return {score = value, label = score.label(value), categories = counts}
+   local label = score.label(value)
+   if gaps > 0 and label == "good" then label = "incomplete" end
+   return {score = value, label = label, categories = counts, coverage_gaps = gaps}
 end
 
 return score
