@@ -33,6 +33,7 @@ build = {
       ["luasec.cli.config"] = "src/luasec/cli/config.lua",
       ["luasec.cli.fix_cmd"] = "src/luasec/cli/fix_cmd.lua",
       ["luasec.cli.install_cmd"] = "src/luasec/cli/install_cmd.lua",
+      ["luasec.cli.menu"] = "src/luasec/cli/menu.lua",
       ["luasec.cli.progress"] = "src/luasec/cli/progress.lua",
       ["luasec.cli.rules_cmd"] = "src/luasec/cli/rules_cmd.lua",
       ["luasec.cli.scope"] = "src/luasec/cli/scope.lua",

@@ -8,6 +8,7 @@ local term = {}
 function term.is_tty(fd)
    if fd == 1 then return os.execute("test -t 1") == true end
    if fd == 2 then return os.execute("test -t 2") == true end
+   if fd == 0 then return os.execute("test -t 0") == true end
    return false
 end
 

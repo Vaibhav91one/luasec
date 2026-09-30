@@ -18,6 +18,7 @@ local render = require "luasec.report.render"
 local validate_report = require "luasec.validate.report"
 local version = require "luasec.version"
 local selection = require "luasec.cli.selection"
+local menu = require "luasec.cli.menu"
 
 -- 0 clean, 1 findings at or above the threshold, 2 error, and 3 for the one thing
 -- 1 cannot express: under --baseline, a finding that was not in the baseline. A
@@ -177,11 +178,15 @@ local SUBCOMMANDS = {
    why = "luasec.cli.why_cmd",
 }
 
+local function subcommand_root()
+   return rawget(_G, "LUASEC_ROOT")
+      or (arg and arg[0] or ""):match("^(.*)/src/luasec/main%.lua$") or "."
+end
+
 local function run(argv)
    local subcommand = SUBCOMMANDS[argv[1]]
    if subcommand then
-      local root = rawget(_G, "LUASEC_ROOT")
-         or (arg and arg[0] or ""):match("^(.*)/src/luasec/main%.lua$") or "."
+      local root = subcommand_root()
       -- luasec: ignore 705  the module name comes from the SUBCOMMANDS table above, not from input
       return require(subcommand).run({table.unpack(argv, 2)}, root)
    end
@@ -344,6 +349,9 @@ local function run(argv)
    local list = report_contract.normalize(report)
    local written = emit(list, opts.format or "plain", opts)
    if written then return written end
+   if menu.wanted(opts, list, opts.format or "plain") then
+      menu.run(list, {opts = opts, argv = argv, root = subcommand_root(), out = io.stdout, err = io.stderr})
+   end
 
    if ground_missing then
       return EXIT_FINDINGS

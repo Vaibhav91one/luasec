@@ -42,6 +42,8 @@ local BOOLEAN_FLAGS = {
    ["--verbose"] = "verbose",
    ["--staged"] = "staged",
    ["--include-untracked"] = "include_untracked",
+   ["--interactive"] = "interactive",
+   ["--no-interactive"] = "no_interactive",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -145,6 +147,8 @@ output:
   --summary                  print counts and the files with the most findings, not every finding
   --view <list|doctor>       doctor: findings grouped by code with the score (default on a terminal)
   --verbose                  with the doctor view: every code and every location
+  --interactive              offer a menu after the report (default: on a terminal)
+  --no-interactive           never offer the menu
   --progress                 show progress on stderr (default: only on a terminal)
   --no-progress              never show progress
   --color                    force colour (default: only on a terminal, never with NO_COLOR)
