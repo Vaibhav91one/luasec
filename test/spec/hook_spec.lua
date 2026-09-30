@@ -1,0 +1,120 @@
+local harness = require "harness"
+local describe, it = harness.describe, harness.it
+local assert_equal, assert_match, assert_true =
+   harness.assert_equal, harness.assert_match, harness.assert_true
+
+local function q(text) return string.format("%q", text) end
+
+local function sh(dir, command)
+   local pipe = assert(io.popen(("cd %s && %s 2>&1; printf '\\n__EXIT__%%d' $?"):format(q(dir), command)))
+   local out = pipe:read("*a")
+   pipe:close()
+   return (out:gsub("\n?__EXIT__%d+%s*$", "")), tonumber(out:match("__EXIT__(%d+)%s*$"))
+end
+
+local function read(path)
+   local handle = io.open(path, "rb")
+   if not handle then return nil end
+   local text = handle:read("*a")
+   handle:close()
+   return text
+end
+
+local function repo()
+   local dir = harness.scratch_dir("hook")
+   sh(dir, "git init -q && git config user.email t@t && git config user.name t")
+   return dir
+end
+
+local ROOT = io.popen("pwd"):read("*l")
+
+describe("luasec install --hook", function()
+   it("writes an executable pre-commit hook", function()
+      local dir = repo()
+      local out, code = harness.cli({"install", "--hook", "--dir", dir})
+      local hook = read(dir .. "/.git/hooks/pre-commit")
+      local _, mode = sh(dir, "test -x .git/hooks/pre-commit")
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(code, 0, out)
+      assert_match(out, "wrote .*pre%-commit", out)
+      assert_match(hook, "^#!/bin/sh\n# luasec: begin\n", hook)
+      assert_match(hook, "luasec %-%-staged %-%-fail%-on high %-%-min%-confidence medium", hook)
+      assert_equal(mode, 0, "the hook is executable")
+   end)
+
+   it("blocks a commit that stages a finding, and lets a clean one through", function()
+      local dir = repo()
+      harness.cli({"install", "--hook", "--dir", dir})
+      local path = "PATH=" .. q(ROOT .. "/bin") .. ':"$PATH"'
+      local handle = assert(io.open(dir .. "/bad.lua", "w"))
+      handle:write("os.execute(io.read())\n")
+      handle:close()
+      sh(dir, "git add bad.lua")
+      local out, code = sh(dir, path .. " git commit -q -m bad")
+      assert_true(code ~= 0, "the commit is blocked: " .. out)
+      assert_match(out, "709", out)
+      sh(dir, "git reset -q")
+      local clean = assert(io.open(dir .. "/ok.lua", "w"))
+      clean:write("local x = 1\n")
+      clean:close()
+      sh(dir, "git add ok.lua")
+      local _, clean_code = sh(dir, path .. " git commit -q -m ok")
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(clean_code, 0, "a clean commit goes through")
+   end)
+
+   it("does not block when luasec is not on the PATH", function()
+      local dir = repo()
+      harness.cli({"install", "--hook", "--dir", dir})
+      local handle = assert(io.open(dir .. "/a.lua", "w"))
+      handle:write("os.execute(io.read())\n")
+      handle:close()
+      sh(dir, "git add a.lua")
+      local out, code = sh(dir, "PATH=/usr/bin:/bin git commit -q -m x")
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(code, 0, out)
+      assert_match(out, "not on PATH", out)
+   end)
+
+   it("leaves someone else's hook alone unless forced, then appends and is idempotent", function()
+      local dir = repo()
+      local mine = "#!/bin/sh\necho mine\n"
+      local handle = assert(io.open(dir .. "/.git/hooks/pre-commit", "w"))
+      handle:write(mine)
+      handle:close()
+      os.execute("chmod +x " .. q(dir .. "/.git/hooks/pre-commit"))
+      local out, code = harness.cli({"install", "--hook", "--dir", dir})
+      assert_equal(code, 2, out)
+      assert_match(out, "already exists; use %-%-force", out)
+      assert_equal(read(dir .. "/.git/hooks/pre-commit"), mine, "untouched")
+      harness.cli({"install", "--hook", "--force", "--dir", dir})
+      local once = read(dir .. "/.git/hooks/pre-commit")
+      harness.cli({"install", "--hook", "--force", "--dir", dir})
+      local twice = read(dir .. "/.git/hooks/pre-commit")
+      os.execute("rm -rf " .. q(dir))
+      assert_match(once, "^#!/bin/sh\necho mine\n", "their hook stays first")
+      assert_match(once, "# luasec: begin", once)
+      assert_equal(twice, once, "a second run changes nothing")
+   end)
+
+   it("needs a git repository", function()
+      local dir = harness.scratch_dir("hook_norepo")
+      local out, code = harness.cli({"install", "--hook", "--dir", dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(code, 2, out)
+      assert_match(out, "%-%-hook needs a git repository", out)
+   end)
+   it("does not stop a commit for a shape-only finding, which a full scan still reports", function()
+      local dir = repo()
+      harness.cli({"install", "--hook", "--dir", dir})
+      local handle = assert(io.open(dir .. "/shape.lua", "w"))
+      handle:write("os.execute(arg[1])\n")
+      handle:close()
+      sh(dir, "git add shape.lua")
+      local _, code = sh(dir, "PATH=" .. q(ROOT .. "/bin") .. ':"$PATH" git commit -q -m shape')
+      local full, full_code = sh(dir, q(ROOT .. "/bin/luasec") .. " shape.lua")
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(code, 0, "a low-confidence 701 does not block the commit")
+      assert_equal(full_code, 1, "but a normal scan reports it: " .. full)
+   end)
+end)

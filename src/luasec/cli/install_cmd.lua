@@ -46,6 +46,19 @@ local CURSOR = "---\ndescription: Scanning and fixing Lua firmware code with lua
 local START, FINISH = "<!-- luasec:start -->", "<!-- luasec:end -->"
 local AGENTS_BLOCK = START .. "\n## luasec\n\n" .. GUIDE .. FINISH .. "\n"
 
+local HOOK_BEGIN, HOOK_END = "# luasec: begin", "# luasec: end"
+local HOOK_BLOCK = [[# luasec: begin
+# Scan the files staged for this commit. A finding at or above high severity and
+# at least medium confidence stops it; shape-only findings (low confidence) are for
+# a full scan, so this hook stays quiet enough to keep.
+if command -v luasec >/dev/null 2>&1; then
+   luasec --staged --fail-on high --min-confidence medium || exit 1
+else
+   echo "luasec: not on PATH, skipping the pre-commit scan" >&2
+fi
+# luasec: end
+]]
+
 local TARGETS = {"claude", "cursor", "agents"}
 
 local function read(path)
@@ -76,10 +89,70 @@ local function agents_text(existing)
    return existing .. (existing:sub(-1) == "\n" and "\n" or "\n\n") .. AGENTS_BLOCK
 end
 
+-- The pre-commit hook lives in the repository's hooks directory, and nowhere
+-- else: this writer reads and writes exactly one path under it.
+local function install_hook(dir, force, out, err)
+   local hooks = walk.git_hooks_dir(dir)
+   if not hooks then
+      err:write("luasec: --hook needs a git repository\n")
+      return 2
+   end
+   local path = hooks .. "/pre-commit"
+   local existing = read(path)
+   if existing == nil then
+      local ok, write_error = write(path, "#!/bin/sh\n" .. HOOK_BLOCK)
+      if not ok then
+         err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+         return 2
+      end
+      walk.make_executable(path)
+      out:write("wrote " .. path .. "\n")
+      return 0
+   end
+   if existing:find(HOOK_BEGIN, 1, true) and existing:find(HOOK_END, 1, true) then
+      local before, after = existing:match("^(.-)" .. HOOK_BEGIN:gsub("%p", "%%%0") .. ".-"
+         .. HOOK_END:gsub("%p", "%%%0") .. "\n?(.*)$")
+      if before then
+         local updated = before .. HOOK_BLOCK .. after
+         if updated ~= existing then
+            local ok, write_error = write(path, updated)
+            if not ok then
+               err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+               return 2
+            end
+         end
+         out:write("updated " .. path .. "\n")
+         return 0
+      end
+   end
+   if not force then
+      err:write(("luasec: %s already exists; use --force to add the luasec block to it\n"):format(path))
+      return 2
+   end
+   local sep
+   if existing == "" then
+      sep = ""
+   elseif existing:sub(-2) == "\n\n" then
+      sep = ""
+   elseif existing:sub(-1) == "\n" then
+      sep = "\n"
+   else
+      sep = "\n\n"
+   end
+   local ok, write_error = write(path, existing .. sep .. HOOK_BLOCK)
+   if not ok then
+      err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+      return 2
+   end
+   out:write("updated " .. path .. "\n")
+   return 0
+end
+
 function install.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local dir, wanted, index = ".", {}, 1
    local force = false
+   local hook = false
    while index <= #argv do
       local token = argv[index]
       if token == "--dir" then
@@ -92,6 +165,9 @@ function install.run(argv, root, out, err)
       elseif token == "--force" then
          force = true
          index = index + 1
+      elseif token == "--hook" then
+         hook = true
+         index = index + 1
       elseif token == "claude" or token == "cursor" or token == "agents" then
          wanted[token] = true
          index = index + 1
@@ -101,7 +177,7 @@ function install.run(argv, root, out, err)
          return 2
       end
    end
-   if next(wanted) == nil then
+   if next(wanted) == nil and not hook then
       for _, target in ipairs(TARGETS) do wanted[target] = true end
    end
 
@@ -132,6 +208,9 @@ function install.run(argv, root, out, err)
          end
          out:write("wrote ", path, "\n")
       end
+   end
+   if hook then
+      return install_hook(dir, force, out, err)
    end
    return 0
 end

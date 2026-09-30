@@ -614,10 +614,11 @@ bin/luasec --scope changed --base main src/
 bin/luasec --staged
 ```
 
-`--scope` and `--staged` need a git repository. As a pre-commit hook:
+`--scope` and `--staged` need a git repository. As a pre-commit hook (or let
+`luasec install --hook` write it, see below):
 
 ```sh
-bin/luasec --staged --fail-on high
+bin/luasec --staged --fail-on high --min-confidence medium
 ```
 
 ### `--severity-threshold` and `--min-confidence`
@@ -992,3 +993,37 @@ with the fixed relative paths below.)
 ```sh
 bin/luasec install --dir /tmp/demo cursor agents
 ```
+
+### A pre-commit hook
+
+`luasec install --hook` writes a `pre-commit` hook into the repository's
+hooks directory (found with `git rev-parse --git-path hooks`, so worktrees
+work). It is written in addition to any named targets; with no target names,
+only the hook is written. The hook scans the staged files and stops the
+commit when a finding at or above `high` severity **and at least medium
+confidence** is present. Shape-only findings (low confidence) are left to a
+full scan, so the hook stays quiet enough to keep; on one real router image
+about 1,000 of the 1,137 findings were low confidence. The block it writes is
+`luasec --staged --fail-on high --min-confidence medium`, and you can edit it:
+
+```sh
+bin/luasec install --hook --dir /tmp/demo
+```
+
+```
+wrote /tmp/demo/.git/hooks/pre-commit
+```
+
+(The run above used a scratch git repository; the path is the `--dir`
+joined with the hooks directory git reports.)
+
+When `luasec` is not on `PATH`, the hook prints
+`luasec: not on PATH, skipping the pre-commit scan` and lets the commit
+through — a missing scanner never blocks a commit. An existing hook that
+already carries the `# luasec: begin` ... `# luasec: end` block has only
+that block replaced, so running twice changes nothing. An existing hook
+without the block is left alone (`luasec: <path> already exists; use
+--force to add the luasec block to it`, exit `2`); with `--force` the
+block is appended after a blank line, keeping the rest of the file and
+its mode. Outside a git repository the run exits `2` with
+`luasec: --hook needs a git repository`.

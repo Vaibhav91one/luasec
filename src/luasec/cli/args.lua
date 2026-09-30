@@ -132,7 +132,7 @@ usage: luasec [options] <file|directory>...
        luasec rules [list | explain <code>]
        luasec why <file>:<line> [options]
        luasec fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
-       luasec install [--dir <project>] [--force] [claude] [cursor] [agents]
+      luasec install [--dir <project>] [--force] [--hook] [claude] [cursor] [agents]
        luasec ci install [--dir <project>] [--force]
 
 input:
