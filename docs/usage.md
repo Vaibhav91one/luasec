@@ -806,6 +806,7 @@ with the fixed relative paths below.)
   `<!-- luasec:start -->` and `<!-- luasec:end -->`. The block is replaced in
   place when the markers already exist and appended otherwise; the rest of
   the file is untouched, so re-running is idempotent.
+- `luasec install` leaves a changed skill or rule alone unless `--force` is passed.
 
 ```sh
 bin/luasec install --dir /tmp/demo cursor agents

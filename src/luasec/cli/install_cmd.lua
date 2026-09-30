@@ -79,6 +79,7 @@ end
 function install.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local dir, wanted, index = ".", {}, 1
+   local force = false
    while index <= #argv do
       local token = argv[index]
       if token == "--dir" then
@@ -88,6 +89,9 @@ function install.run(argv, root, out, err)
             return 2
          end
          index = index + 2
+      elseif token == "--force" then
+         force = true
+         index = index + 1
       elseif token == "claude" or token == "cursor" or token == "agents" then
          wanted[token] = true
          index = index + 1
@@ -106,6 +110,18 @@ function install.run(argv, root, out, err)
       cursor = {dir .. "/.cursor/rules/luasec.mdc", function() return CURSOR end},
       agents = {dir .. "/AGENTS.md", function(path) return agents_text(read(path)) end},
    }
+   if not force then
+      for _, target in ipairs(TARGETS) do
+         if wanted[target] and (target == "claude" or target == "cursor") then
+            local path, content = files[target][1], files[target][2]
+            local existing = read(path)
+            if existing ~= nil and existing ~= content(path) then
+               err:write(("luasec: %s already exists and was not written by this version of luasec install; use --force to replace it\n"):format(path))
+               return 2
+            end
+         end
+      end
+   end
    for _, target in ipairs(TARGETS) do
       if wanted[target] then
          local path, content = files[target][1], files[target][2]
