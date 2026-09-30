@@ -4,6 +4,8 @@ local assert_equal, assert_match, assert_true =
    harness.assert_equal, harness.assert_match, harness.assert_true
 
 local function q(text) return string.format("%q", text) end
+-- Single quotes: inside "..." the shell still runs $(...) and backticks.
+local function sq(text) return "'" .. text:gsub("'", "'\\''") .. "'" end
 
 local function tree(tag)
    local dir = harness.scratch_dir(tag)
@@ -118,5 +120,59 @@ describe("absolute symlinks in an extracted rootfs", function()
       os.execute("rm -rf " .. q(dir))
       assert_equal(code, 0, out)
       assert_true(not out:find("[901]", 1, true), "the host's /etc/hosts must not be parsed as Lua: " .. out)
+   end)
+
+   it("gives the same answers for many links at once", function()
+      local dir = tree("rootfs_many")
+      os.execute("mkdir -p " .. q(dir .. "/usr/lib"))
+      for i = 1, 20 do
+         local handle = assert(io.open(("%s/usr/lib/real%d"):format(dir, i), "w"))
+         handle:write("not lua\n")
+         handle:close()
+         os.execute(("ln -s /usr/lib/real%d %s"):format(i, q(dir .. "/bin/real" .. i)))
+      end
+      for i = 1, 40 do
+         os.execute(("ln -s /nowhere/gone%d %s"):format(i, q(dir .. "/bin/gone" .. i)))
+      end
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(code, 1, out)
+      local _, findings = out:gsub("%[901%]", "")
+      assert_equal(findings, 1, "one finding for the 40 that resolve nowhere: " .. out)
+      assert_match(out, "and 39 more", out)
+   end)
+
+   it("treats link names with shell syntax, spaces and quotes as plain names", function()
+      local dir = tree("rootfs_names_odd")
+      local marker = dir .. "/PWNED"
+      local names = {"a b", "it's", "$(touch " .. marker .. ")", "`touch " .. marker .. "`", "semi;colon"}
+      for _, name in ipairs(names) do
+         os.execute("ln -s /nowhere/x " .. sq(dir .. "/bin/" .. name))
+      end
+      local out, code = harness.cli({dir})
+      local made = io.open(marker, "rb")
+      if made then made:close() end
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(made, nil, "a link name must never run as a command")
+      assert_equal(code, 1, out)
+      assert_match(out, "could not resolve symlink", out)
+   end)
+   it("resolves a directory's links in one batch, not one shell per link", function()
+      local dir = tree("rootfs_batch")
+      local shim = dir .. "/shim"
+      local log = dir .. "/xargs.log"
+      os.execute("mkdir -p " .. sq(shim))
+      local handle = assert(io.open(shim .. "/xargs", "wb"))
+      handle:write("#!/bin/sh\necho run >> " .. sq(log) .. "\nexec /usr/bin/xargs \"$@\"\n")
+      handle:close()
+      os.execute("chmod +x " .. sq(shim .. "/xargs"))
+      for i = 1, 30 do
+         os.execute(("ln -s /usr/lib/real%d %s"):format(i, sq(dir .. "/bin/real" .. i)))
+      end
+      harness.cli({dir}, {env = "PATH=" .. sq(shim) .. ":$PATH"})
+      local runs = 0
+      for _ in io.lines(log) do runs = runs + 1 end
+      os.execute("rm -rf " .. q(dir))
+      assert_equal(runs, 1, "one xargs for the one directory holding links")
    end)
 end)

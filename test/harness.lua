@@ -192,7 +192,7 @@ end
 -- Run the CLI as a subprocess; returns combined output and the exit code.
 function harness.cli(args, opts)
    opts = opts or {}
-   local cmd = "./bin/luasec"
+   local cmd = (opts.env and (opts.env .. " ") or "") .. "./bin/luasec"
    for _, a in ipairs(args) do
       cmd = cmd .. " " .. string.format("%q", a)
    end

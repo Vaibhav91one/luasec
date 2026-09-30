@@ -126,42 +126,6 @@ local function popen_with_path(command, path)
    return io.popen(command_text, "r"), tmp
 end
 
--- An absolute link in an extracted image names its target as the device saw it:
--- /usr/sbin/foo means <image root>/usr/sbin/foo, and the image root may sit
--- anywhere under the scanned directory. Returns whether some ancestor of the link,
--- up to the scan root and never past it, holds that target, plus the target as
--- written. A target with a `..` component is never re-rooted, so a link cannot
--- point outside the tree.
-local function rerooted(path, anchor)
-   -- One shell per link. Line 1 is the target, and line 2 is "yes" when some
-   -- ancestor of the link, up to and never past the scan root, holds that target.
-   -- The scan root's length is a number, so no path is spliced into the script.
-   local script = table.concat({
-      "export LC_ALL=C",
-      't=$(readlink -- "$p") || exit 0',
-      'printf "%s\\n" "$t"',
-      'case "$t" in /*) ;; *) exit 0 ;; esac',
-      'case "$t" in */../*|*/..) exit 0 ;; esac',
-      'd=$(dirname -- "$p")',
-      -- The walk spells this directory as the operator spelled the scan root
-      -- while the bound below is the physical root, and the two differ in
-      -- length on macOS (/var against /private/var), which would end the loop
-      -- before it climbs at all. Resolve it once so both share one spelling.
-      'd=$(cd -P -- "$d" 2>/dev/null && printf "%s" "$PWD") || exit 0',
-      "while :; do",
-      '  if test -e "$d$t"; then echo yes; exit 0; fi',
-      ("  if test ${#d} -le %d; then exit 0; fi"):format(#anchor),
-      '  d=$(dirname -- "$d")',
-      "done",
-   }, "\n")
-   local pipe, tmp = popen_with_path(script, path)
-   if not pipe then return false, nil end
-   local target, answer = pipe:read("*l"), pipe:read("*l")
-   pipe:close()
-   os.remove(tmp)
-   return answer == "yes", target
-end
-
 -- How much one scan root is allowed to resolve to, and the environment variable
 -- that moves the number.
 --
@@ -271,6 +235,56 @@ local function read_nul_stream(pipe, budget)
    -- one. It is kept rather than dropped.
    if not over and pending ~= "" then records[#records + 1] = pending end
    return records, over
+end
+
+-- The question `rerooted` used to ask one link at a time, asked of many at once. The
+-- link paths go to the shell as ONE NUL-separated file read by `xargs -0`, so no path
+-- is ever spliced into a command, and xargs starts one sh for many links instead of
+-- one per link. Returns a table: link path -> {inside = boolean, target = string|nil}.
+-- `inside` is true when the link's absolute target exists under some ancestor of the
+-- link, up to and never past the scan root; a target with a `..` component never counts.
+local REROOT_SCRIPT = [[export LC_ALL=C
+for p; do
+  t=$(readlink -- "$p") || continue
+  r=0
+  case "$t" in
+    /*)
+      case "$t" in
+        */../*|*/..) ;;
+        *)
+          d=$(dirname -- "$p")
+          d=$(cd -P -- "$d" 2>/dev/null && printf "%s" "$PWD") || d=
+          while [ -n "$d" ]; do
+            if test -e "$d$t"; then r=1; break; fi
+            if test ${#d} -le $N; then break; fi
+            d=$(dirname -- "$d")
+          done ;;
+      esac ;;
+  esac
+  printf "%s\0%s\0%s\0" "$p" "$t" "$r"
+done]]
+
+local function reroot_batch(paths, anchor)
+   local answers = {}
+   if #paths == 0 then return answers end
+   local list = os.tmpname()
+   local handle = io.open(list, "wb")
+   if not handle then return answers end
+   for _, path in ipairs(paths) do handle:write(path, "\0") end
+   handle:close()
+   -- N is a number and `list` is a name os.tmpname chose; the script has no single quote.
+   local command = ("N=%d xargs -0 sh -c '%s' _ < '%s' 2>/dev/null"):format(#anchor, REROOT_SCRIPT, list)
+   -- luasec: ignore 702  the script is constant and N is a number; link paths travel as NUL bytes, never spliced
+   local pipe = io.popen(command, "r")
+   if pipe then
+      local records = read_nul_stream(pipe, #paths * 3 + 3)
+      pipe:close()
+      for index = 1, #records - 2, 3 do
+         answers[records[index]] = {inside = records[index + 2] == "1", target = records[index + 1]}
+      end
+   end
+   os.remove(list)
+   return answers
 end
 
 -- One pass over one directory, as three finds:
@@ -541,6 +555,18 @@ local function expand_root(root)
             path = path,
          }
       end
+      local checks = {}
+      for _, link in ipairs(scan.links) do
+         if link.kind == "f" then
+            checks[#checks + 1] = link.path
+         elseif link.kind == "d" then
+            local covered = link.dir == anchor or link.dir:sub(1, #inside_prefix) == inside_prefix
+            if not covered then checks[#checks + 1] = link.path end
+         elseif link.kind == "x" and not cannot_be_lua(link.path) then
+            checks[#checks + 1] = link.path
+         end
+      end
+      local verdict = reroot_batch(checks, anchor)
       for _, link in ipairs(scan.links) do
          if link.kind == "f" then
             -- Read under the name the tree gives the link, so the finding lands
@@ -548,9 +574,7 @@ local function expand_root(root)
             -- bytes analyzed are the target's. An absolute link whose target has a
             -- copy under the scan root names that copy, which is analysed at its
             -- real path, so following it here would read the HOST's file instead.
-            if not rerooted(link.path, anchor) then
-               files[#files + 1] = link.path
-            end
+            local answer = verdict[link.path]; if not (answer and answer.inside) then files[#files + 1] = link.path end
          elseif link.kind == "d" then
             local covered = link.dir == anchor
                or link.dir:sub(1, #inside_prefix) == inside_prefix
@@ -560,7 +584,7 @@ local function expand_root(root)
                -- machine instead. When that copy exists under the root it is
                -- analyzed at its real path already, so this names no new
                -- ground and is not walked a second time.
-               if rerooted(link.path, anchor) then covered = true end
+               local answer = verdict[link.path]; if answer and answer.inside then covered = true end
             end
             if not covered and not walked[link.dir] then
                walked[link.dir] = true
@@ -570,7 +594,7 @@ local function expand_root(root)
          elseif link.kind == "x" then
             -- A link that resolves to nothing, and a link that resolves to
             -- itself are the same report: we could not read what this names.
-            dangling[#dangling + 1] = link.path
+            if not cannot_be_lua(link.path) then dangling[#dangling + 1] = {path = link.path, target = verdict[link.path] and verdict[link.path].target, inside = verdict[link.path] and verdict[link.path].inside} end
          end
       end
    end
@@ -581,11 +605,8 @@ local function expand_root(root)
    -- path already. What is still missing is one finding per scan root, not one
    -- per link.
    local missing = {}
-   for _, path in ipairs(dangling) do
-      if not cannot_be_lua(path) then
-         local inside, target = rerooted(path, anchor)
-         if not inside then missing[#missing + 1] = {path = path, target = target} end
-      end
+   for _, entry in ipairs(dangling) do
+      if not entry.inside then missing[#missing + 1] = {path = entry.path, target = entry.target} end
    end
    if #missing == 1 then
       problems[#problems + 1] = {
