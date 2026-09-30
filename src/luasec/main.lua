@@ -2,6 +2,7 @@
 local args_parser = require "luasec.cli.args"
 local config_file = require "luasec.cli.config"
 local walk = require "luasec.cli.walk"
+local progress = require "luasec.cli.progress"
 local api = require "luasec.api"
 local baseline = require "luasec.cli.baseline"
 local codes = require "luasec.rules.codes"
@@ -223,8 +224,15 @@ local function run(argv)
    local options_ok, options_error = api.validate_options(opts)
    if not options_ok then return fail(options_error) end
 
+   if opts.no_progress then opts.progress = false end
+   local bar = progress.new(opts)
+   opts.on_file = function(done, total, path) bar:file(done, total, path) end
+   opts.on_phase = function(text) bar:say(text) end
+   bar:say("listing files under " .. table.concat(opts.paths, ", "))
+
    local files, walk_errors = walk.collect(opts.paths)
    if not files then return fail(walk_errors) end
+   bar:say(("found %d file%s to analyze"):format(#files, #files == 1 and "" or "s"))
 
    -- A path we could not read is reported as its own finding, so the run fails
    -- on it instead of quietly covering less ground than asked.
@@ -241,6 +249,7 @@ local function run(argv)
    for _, finding in ipairs(api.analyze(files, opts)) do
       report[#report + 1] = finding
    end
+   bar:finish(#files)
 
    -- Ground we did not cover, counted before any filtering is applied. A file
    -- that could not be read, a directory that could not be listed and a file

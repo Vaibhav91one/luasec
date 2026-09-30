@@ -18,6 +18,12 @@ local render = require "luasec.report.render"
 local report_contract = require "luasec.report.findings"
 local pipeline = require "luasec.engine.pipeline"
 
+-- A progress hook must never be able to change an analysis, so a callback that
+-- raises is ignored.
+local function notify(callback, ...)
+   if callback then pcall(callback, ...) end
+end
+
 local api = {}
 
 
@@ -289,7 +295,8 @@ function api.analyze(paths, opts)
       end
    end
 
-   for _, file in ipairs(files) do
+   for index, file in ipairs(files) do
+      notify(opts.on_file, index, #files, file.path)
       -- A precompiled chunk is triaged, not parsed: there is no source for the
       -- taint engine to work on, and feeding it bytes only produces a 901.
       local result
@@ -322,6 +329,7 @@ function api.analyze(paths, opts)
    end
 
    if opts.whole_program then
+      notify(opts.on_phase, "resolving calls across files")
       pipeline.merge_whole_program(results, opts)
    end
 

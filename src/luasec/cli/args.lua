@@ -31,6 +31,8 @@ local BOOLEAN_FLAGS = {
    ["--score"] = "score",
    ["--ranges"] = "ranges",
    ["--no-config"] = "no_config",
+   ["--progress"] = "progress",
+   ["--no-progress"] = "no_progress",
 }
 
 -- Options that take a list. They are accepted both as `--opt value` and
@@ -131,6 +133,8 @@ output:
   --ranges                   include the end column of each finding
   --quiet                    print nothing when there are no findings
   --score                    print only the 0-100 health score (exit code unchanged)
+  --progress                 show progress on stderr (default: only on a terminal)
+  --no-progress              never show progress
 
 selection:
   --std <names>              platform API sets, '+' separated, e.g. +openwrt+luci
