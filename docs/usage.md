@@ -923,6 +923,15 @@ bin/luasec why test/fixtures/tainted_exec/handler.lua:1
 nothing reported at test/fixtures/tainted_exec/handler.lua:1
 ```
 
+## `--jobs`
+
+`--jobs <n>` splits a scan over `n` worker processes, each analyzing a slice of
+the files; with `--progress` the run says `analyzing in n worker processes`. The
+report is the same bytes as a one-process run in every format (see
+[Determinism](sarif.md#determinism)). A worker that dies has its slice analyzed
+in the main process, so a crash costs time and never findings. `--whole-program`
+needs every file in one process and ignores `--jobs`.
+
 ## `--whole-program`
 
 By default each file is analyzed in isolation. `--whole-program` follows `require`

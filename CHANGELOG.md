@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `--jobs N` now analyzes files in N worker processes (it was accepted and ignored). The report is the same bytes as a one-process run in every format; a worker that dies has its slice analyzed in the main process; `--whole-program` stays in one process. Over `corpus/` on a loaded 10-core machine, `--jobs 8` took 4.5-4.7s against 6.5-7.1s for `--jobs 1` (#196).
 Found by scanning public router firmware images unpacked to a rootfs.
 
 - A profile can declare `entry_points` (function name pattern and argument positions): those arguments start tainted, so a sink they reach is a 709 instead of a 708. The cgilua std declares `*Handler` (argument 1) for the mesh JSON-RPC handlers (#178).

@@ -18,6 +18,7 @@ local template = require "luasec.cli.template"
 local render = require "luasec.report.render"
 local report_contract = require "luasec.report.findings"
 local pipeline = require "luasec.engine.pipeline"
+local jobs = require "luasec.engine.jobs"
 
 -- A progress hook must never be able to change an analysis, so a callback that
 -- raises is ignored.
@@ -276,6 +277,13 @@ end
 function api.analyze(paths, opts)
    opts = checked_options(opts)
    paths = checked_paths(paths)
+   -- `--jobs N` splits a per-file scan over N worker processes.
+   local workers = jobs.count(opts, #paths)
+   if workers > 1 then
+      notify(opts.on_phase, ("analyzing in %d worker processes"):format(workers))
+      return pipeline.sort_findings(jobs.run(paths, opts, workers, api.analyze,
+         function(...) notify(opts.on_file, ...) end))
+   end
    local findings = {}
    local files = {}
    local results = {}

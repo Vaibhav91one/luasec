@@ -195,7 +195,8 @@ analysis:
   --max-nodes <n>            node budget before analysis degrades (default 20000)
   --stdin                    with --validate, read the payload from standard input
   --validate-timeout <ms>    wall clock for one validated payload (default 2000)
-  --jobs <n>                 parallel workers
+  --jobs <n>                 analyze files in n worker processes (--whole-program
+                             runs in one process)
 
 validator exit codes: 0 benign, 1 rce, escape, partial or timeout, 2 the payload or
 the sandbox itself failed.
