@@ -29,6 +29,7 @@ help:
 	@echo "  make tdd-proof BASE HEAD   prove new tests fail without the new src"
 	@echo "  make precision re-measure corpus/ and fail on any difference from the frozen numbers"
 	@echo "  make corpus     clone firmware Lua corpora into corpus/ (network)"
+	@echo "  make lua55-check  compile every src/ file under Lua 5.5 (skips without one)"
 	@echo "  make clean      remove build artifacts"
 
 .PHONY: all
@@ -208,6 +209,12 @@ corpus: scripts/clone-corpus.sh
 .PHONY: clean
 clean:
 	rm -rf build
+
+# Every other check runs on the Lua 5.4 built above; Homebrew installs 5.5, which
+# refuses code 5.4 accepts. Skips with a notice without a 5.5, fails in CI.
+.PHONY: lua55-check
+lua55-check:
+	@sh scripts/check-lua55.sh
 
 .PHONY: selfscan
 selfscan: lua vendor
