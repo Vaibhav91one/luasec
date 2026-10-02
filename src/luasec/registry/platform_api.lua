@@ -250,9 +250,17 @@ function platform_api.match_method_source(method)
 end
 
 -- The entry-point declaration a function name matches, or nil. The caller tries
--- the full name and then the short name after the last `.` or `:`.
-function platform_api.match_entry_point(name)
-   return best_match(entry_points, name)
+-- the full name and then the short name after the last `.` or `:`. An entry with
+-- a `file` glob applies only to functions in a file whose path matches it, so it
+-- never matches source that has no path (check_source).
+function platform_api.match_entry_point(name, path)
+   local candidates = {}
+   for _, entry in ipairs(entry_points) do
+      if entry.file == nil or (path and util.wild_match(entry.file, path)) then
+         candidates[#candidates + 1] = entry
+      end
+   end
+   return best_match(candidates, name)
 end
 
 -- A global read is a source only on an exact name match.

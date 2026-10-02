@@ -125,7 +125,9 @@ end
 --   expensive  whether the cross-function passes were skipped
 --   final      true when the findings are already complete (bytecode triage),
 --              so the phases below must not run again
-local function analyze_source(source, opts)
+-- `path` is the file the source came from, when there is one: an entry point
+-- may be declared for the functions of some files only.
+local function analyze_source(source, opts, path)
    local ok, install_error = install_registries(opts)
    if not ok then
       -- A profile or rule file we cannot load is an operator error, not a
@@ -150,6 +152,8 @@ local function analyze_source(source, opts)
          end
       end
    end
+
+   if chstate then chstate.file_path = path end
 
    if not chstate then
       local finding = {

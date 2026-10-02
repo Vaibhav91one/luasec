@@ -1062,8 +1062,8 @@ function taint.run(chstate, opts, existing_state)
          local function_node = line.node
          if function_node and function_node.tag == "Function" and type(function_node.name) == "string" then
             local name = function_node.name
-            local entry = platform_api.match_entry_point(name)
-               or platform_api.match_entry_point(name:match("[^.:]+$") or name)
+            local entry = platform_api.match_entry_point(name, chstate.file_path)
+               or platform_api.match_entry_point(name:match("[^.:]+$") or name, chstate.file_path)
             if entry then
                local vars = taint.formals_of(function_node)
                for _, position in ipairs(entry.arg or {1}) do
