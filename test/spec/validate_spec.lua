@@ -9,6 +9,12 @@ local api = require "luasec.api"
 -- instead of depending on what happens to be on PATH.
 local LUA = os.getenv("LUA_BIN") or "./build/lua-5.4.9/src/lua"
 
+-- A wall clock for the payloads that stop on memory. They take about 0.2s of
+-- CPU, under the default 2s clock, but on a loaded machine (other test runs on
+-- the same cores) the clock fired first and the verdict named it instead of the
+-- memory bound the spec is about (#185). The clock is not their subject.
+local SLACK_MS = 30000
+
 describe("payload validator", function()
    it("verdicts a payload that calls os.execute as rce and names the sink", function()
       local verdict = api.validate_payload('os.execute("id")\n', {lua = LUA})
@@ -236,7 +242,7 @@ return load(_CHUNK)()
 local parts = {}
 for i = 1, 60000 do parts[i] = ("y"):rep(1024) end
 return #table.concat(parts)
-]], {lua = LUA})
+]], {lua = LUA, timeout_ms = SLACK_MS})
 
       assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
       assert_match(verdict.exit_reason, "table%.concat would allocate %d+ bytes", verdict.exit_reason)
@@ -423,7 +429,7 @@ return "done"
 local s = {("a"):rep(1024 * 1024)}
 for i = 1, 20 do s[1] = s[1] .. s[1] end
 return #s[1]
-]], {lua = LUA})
+]], {lua = LUA, timeout_ms = SLACK_MS})
       local elapsed = os.clock() - started
 
       assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
@@ -492,7 +498,7 @@ return load(string.rep("return 1\n", 50000))
 local s = {("a"):rep(1024 * 1024)}
 for i = 1, 20 do s[1] = s[1] .. s[1] end
 return #s[1]
-]], {lua = LUA})
+]], {lua = LUA, timeout_ms = SLACK_MS})
       local clock = api.validate_payload("while true do end\n",
          {lua = LUA, max_instructions = 1e12, timeout_ms = 500})
 
@@ -511,7 +517,7 @@ return #s[1]
 local parts = {}
 for i = 1, 60000 do parts[i] = ("y"):rep(1024) end
 return #table.concat(parts)
-]], {lua = LUA})
+]], {lua = LUA, timeout_ms = SLACK_MS})
 
       assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
       assert_match(verdict.exit_reason, "table%.concat would allocate")
@@ -524,7 +530,7 @@ return #table.concat(parts)
 local parts = {}
 for i = 1, 60000 do parts[i] = ("y"):rep(1024) end
 return #table.concat(parts)
-]], {lua = LUA, rss_limit_kb = 20000})
+]], {lua = LUA, timeout_ms = SLACK_MS, rss_limit_kb = 20000})
 
       assert_equal(verdict.verdict, "timeout", verdict.exit_reason)
       assert_match(verdict.exit_reason, "resident set", verdict.exit_reason)
