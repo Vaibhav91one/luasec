@@ -950,6 +950,15 @@ whether the call is a statement or its result is assigned. A dotted name defined
 two files is never guessed, and a local variable named like the root (`local gui`)
 is not the global.
 
+A call through a route table is followed when the key is known only at run time:
+`handlers[name](req)` and `routes[name].handler(req)`, where `handlers` or
+`routes` is a table literal (a local, or a global assigned once in its file) whose
+values, or whose entries' `handler` fields, name global functions defined in other
+files. Every such function receives the call's arguments. The list is bounded (64
+handlers per call, `whole_program_max_route_targets` in the library); a table
+past the bound reports a 904. Entries added to the table after the literal, and
+handlers in the dispatcher's own file, are not followed.
+
 ```sh
 bin/luasec --whole-program --std +luci test/fixtures/whole_program/cross_file/
 ```
