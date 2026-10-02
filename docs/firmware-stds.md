@@ -252,3 +252,15 @@ short name (`on_request`), with the same `*` and `?` wildcards as sources and si
 reached from such a parameter is a 709 with the entry point as its source, so the
 708 "exposed sink nothing feeds" at that site is dropped. The cgilua std declares
 `*Handler` with argument 1 for the mesh JSON-RPC handlers.
+
+An entry may also carry `file`, a glob matched against the path of the file as it
+was scanned (`*` crosses `/`). It then applies only to functions in matching
+files, so a vendor whose handlers follow a per-folder convention can say "every
+function in these files":
+
+```lua
+{pattern = "*", file = "*/teamf1lualib/easyMesh*.lua", arg = {1}}
+```
+
+A source string given to `check_source` has no path, so a `file` entry never
+matches it.

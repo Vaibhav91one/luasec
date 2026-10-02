@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- An `entry_points` entry can carry `file`, a path glob: it then applies only to functions in matching files, so a profile can say "every function in `*/easyMesh*.lua`". Name-only entries are unchanged, and a `file` entry never matches `check_source`, which has no path (#192).
 - `--jobs N` now analyzes files in N worker processes (it was accepted and ignored). The report is the same bytes as a one-process run in every format; a worker that dies has its slice analyzed in the main process; `--whole-program` stays in one process. Over `corpus/` on a loaded 10-core machine, `--jobs 8` took 4.5-4.7s against 6.5-7.1s for `--jobs 1` (#196).
 Found by scanning public router firmware images unpacked to a rootfs.
 

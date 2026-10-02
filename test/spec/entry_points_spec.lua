@@ -83,6 +83,40 @@ describe("entry points", function()
       assert_true(of(later, "709") == nil, "the declaration must not survive its run, got " .. codes(later))
    end)
 
+   it("an entry with a file glob applies to functions in matching files only", function()
+      local dir = harness.scratch_dir("entry_file")
+      local mesh, other = dir .. "/lib/easyMeshSet.lua", dir .. "/lib/other.lua"
+      os.execute(("mkdir -p %q"):format(dir .. "/lib"))
+      local source = "function setThing(obj)\n   os.execute(\"x \" .. obj.name)\nend\n"
+      for _, path in ipairs({mesh, other}) do
+         local handle = assert(io.open(path, "w"))
+         handle:write(source)
+         handle:close()
+      end
+      local rules = write_tmp([[return {name = "x", entry_points = {{pattern = "*", file = "*/easyMesh*.lua", arg = {1}}}}]])
+      local report = api.analyze({mesh, other}, {rules = {rules}})
+      os.execute(("rm -rf %q"):format(dir))
+      local by_file = {}
+      for _, finding in ipairs(report) do
+         if finding.code == "709" then by_file[finding.file] = true end
+      end
+      assert_true(by_file[mesh], "the matching file's handler is a 709, got " .. codes(report))
+      assert_true(not by_file[other], "a file the glob does not match stays a 708, got " .. codes(report))
+   end)
+
+   it("a file-glob entry never matches source with no path", function()
+      local path = write_tmp([[return {name = "x", entry_points = {{pattern = "handle_*", file = "*", arg = {1}}}}]])
+      local report = api.check_source(HANDLER, {rules = {path}})
+      assert_true(of(report, "709") == nil, "check_source has no file to match, got " .. codes(report))
+   end)
+
+   it("rejects a file glob that is not a string", function()
+      local bad = write_tmp([[return {name = "x", entry_points = {{pattern = "a*", file = 3}}}]])
+      local dec, err = profiles.load_file(bad)
+      assert_true(dec == nil, "a non-string file must be rejected")
+      assert_match(tostring(err), "file")
+   end)
+
    it("rejects an entry point with no pattern or a non-numeric arg", function()
       local none = write_tmp([[return {name = "x", entry_points = {{arg = {1}}}}]])
       local dec, err = profiles.load_file(none)

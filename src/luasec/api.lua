@@ -334,7 +334,7 @@ function api.analyze(paths, opts)
          if skipped then
             result = {path = file.path, findings = {}, final = true}
          else
-            result = pipeline.analyze_source(analysed, opts)
+            result = pipeline.analyze_source(analysed, opts, file.path)
             result.path = file.path
          end
       end
