@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `--whole-program` peak memory over `corpus/` is down from about 270MB to about 190MB, with the same report and CPU time: the collector runs sooner while every file's syntax tree is held for the cross-file pass (#197).
 - Under `--whole-program`, a call through a route table (`handlers[name](req)`, `routes[name].handler(req)`) with a key known only at run time is followed into every handler in another file that the table literal names; at most 64 per call, past which a 904 says the bound was hit (#193).
 - An `entry_points` entry can carry `file`, a path glob: it then applies only to functions in matching files, so a profile can say "every function in `*/easyMesh*.lua`". Name-only entries are unchanged, and a `file` entry never matches `check_source`, which has no path (#192).
 - `--jobs N` now analyzes files in N worker processes (it was accepted and ignored). The report is the same bytes as a one-process run in every format; a worker that dies has its slice analyzed in the main process; `--whole-program` stays in one process. Over `corpus/` on a loaded 10-core machine, `--jobs 8` took 4.5-4.7s against 6.5-7.1s for `--jobs 1` (#196).

@@ -975,7 +975,9 @@ Without `--whole-program`, the same directory reports a 708: the source
 are in different files, and without cross-file resolution the sink in the
 exported function nothing in its file feeds is reported as an exposed sink.
 
-`--whole-program` is slower and opt-in. It resolves calls across files and follows
+`--whole-program` is slower and opt-in, and it holds every file's syntax tree
+until the cross-file pass: over `corpus/` (566 files) it peaks at about 190MB
+resident against about 34MB for a per-file scan. It resolves calls across files and follows
 the return value of a function in a module bound with `local m = require "mod"`,
 but does not follow a method call (`M:m`), a function passed as a value, or a
 `require(...)` called inline inside an expression.

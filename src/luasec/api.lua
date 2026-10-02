@@ -28,6 +28,14 @@ end
 
 local api = {}
 
+-- Set the incremental collector's pause and return the previous one. Lua 5.5
+-- names it `param`, 5.1 to 5.4 `setpause`; whichever this interpreter has.
+local function gc_pause(value)
+   local ok, previous = pcall(collectgarbage, "param", "pause", value)
+   if ok and type(previous) == "number" then return previous end
+   return collectgarbage("setpause", value)
+end
+
 
 
 --- The rule catalogue: every warning code with its severity, confidence and CWE.
@@ -269,21 +277,8 @@ end
 
 
 
---- Analyze files. `paths` is an array of file paths.
---
--- With `opts.whole_program`, the files are also analyzed as one program: calls
--- are followed across `require` boundaries inside the set, and a source in one
--- file reaching a sink in another is reported once, at the sink.
-function api.analyze(paths, opts)
-   opts = checked_options(opts)
-   paths = checked_paths(paths)
-   -- `--jobs N` splits a per-file scan over N worker processes.
-   local workers = jobs.count(opts, #paths)
-   if workers > 1 then
-      notify(opts.on_phase, ("analyzing in %d worker processes"):format(workers))
-      return pipeline.sort_findings(jobs.run(paths, opts, workers, api.analyze,
-         function(...) notify(opts.on_file, ...) end))
-   end
+-- The analysis of `paths` in this process, findings sorted.
+local function analyze_files(paths, opts)
    local findings = {}
    local files = {}
    local results = {}
@@ -368,6 +363,38 @@ function api.analyze(paths, opts)
    end
 
    return pipeline.sort_findings(findings)
+end
+
+--- Analyze files. `paths` is an array of file paths.
+--
+-- With `opts.whole_program`, the files are also analyzed as one program: calls
+-- are followed across `require` boundaries inside the set, and a source in one
+-- file reaching a sink in another is reported once, at the sink.
+function api.analyze(paths, opts)
+   opts = checked_options(opts)
+   paths = checked_paths(paths)
+   -- `--jobs N` splits a per-file scan over N worker processes.
+   local workers = jobs.count(opts, #paths)
+   if workers > 1 then
+      notify(opts.on_phase, ("analyzing in %d worker processes"):format(workers))
+      return pipeline.sort_findings(jobs.run(paths, opts, workers, api.analyze,
+         function(...) notify(opts.on_file, ...) end))
+   end
+   -- Whole-program analysis holds every file's syntax tree until the cross-file
+   -- pass (measured on corpus/: 118 of 136MB live at that point, #197), and with
+   -- the default pause the collector lets the heap double before it runs, so the
+   -- resident set peaked at about twice the live data. A pause of 110 starts the
+   -- next cycle sooner; the report is the same bytes.
+   -- ponytail: the live data is unchanged; releasing files that take no part in a
+   -- cross-file edge is what would cut it (#206).
+   if not opts.whole_program then return analyze_files(paths, opts) end
+   -- Restored however the analysis ends, so a caller that catches an error is
+   -- not left with this pause for the rest of its process.
+   local previous_pause = gc_pause(110)
+   local ok, result = pcall(analyze_files, paths, opts)
+   gc_pause(previous_pause)
+   if not ok then error(result, 0) end
+   return result
 end
 
 --- Render a report in the named format.
