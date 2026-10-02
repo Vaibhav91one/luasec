@@ -42,11 +42,15 @@ local MAX_MODULES_PER_FILE = 32
 local MAX_SITES_PER_FILE = 4096
 local MAX_ALIAS_DEPTH = 4
 local MAX_CHAIN = 16
+-- The handlers one call through a route table may resolve to. A dispatcher over
+-- a larger table binds the first ones and says the bound was hit.
+local MAX_ROUTE_TARGETS = 64
 
 local BOUNDS = {
    whole_program_max_rounds = MAX_ROUNDS,
    whole_program_max_modules = MAX_MODULES_PER_FILE,
    whole_program_max_sites = MAX_SITES_PER_FILE,
+   whole_program_max_route_targets = MAX_ROUTE_TARGETS,
 }
 
 -- The configured bound for a name, never less than one: a bound of zero would
@@ -305,6 +309,7 @@ local function scan(file)
    file.module_fields = {}
    file.sole_functions = {}
    file.sole_tables = {}
+   file.global_tables = {}
 
    -- `module "name"` puts every top-level definition after it into that module,
    -- so the names it introduces have to be collected only from there on. The
@@ -343,7 +348,17 @@ local function scan(file)
          if tag == "Local" or tag == "Set" or tag == "OpSet" then
             for index, lhs in ipairs(item.lhs or {}) do
                local written = item.rhs and item.rhs[index]
-               if type(written) == "table" and lhs.tag == "Id" and lhs.var then
+               if type(written) == "table" and lhs.tag == "Id" and not lhs.var
+                     and written.tag == "Table" and type(lhs[1]) == "string" then
+                  -- `routes = {...}` at file level: a global table literal a
+                  -- dispatcher may index. Two different literals make it false.
+                  local existing = file.global_tables[lhs[1]]
+                  if existing == nil then
+                     file.global_tables[lhs[1]] = written
+                  elseif existing ~= written then
+                     file.global_tables[lhs[1]] = false
+                  end
+               elseif type(written) == "table" and lhs.tag == "Id" and lhs.var then
                   local module_name = require_name(written)
                   if module_name then
                      file.binds[lhs.var] = module_name
@@ -693,6 +708,84 @@ local function dotted_name(callee)
    return node[1] .. "." .. table.concat(keys, ".")
 end
 
+-- The plain global functions of every file, by name, under the same rule: a
+-- name two files define is false.
+local function build_globals(files)
+   local globals = {}
+   for _, file in ipairs(files) do
+      for name, function_node in pairs(file.functions or {}) do
+         local existing = globals[name]
+         if existing == nil then
+            globals[name] = function_node and {file = file, node = function_node} or false
+         elseif existing ~= false then
+            globals[name] = false
+         end
+      end
+   end
+   return globals
+end
+
+local function constant_key(node)
+   return type(node) == "table" and (node.tag == "String" or node.tag == "Number")
+end
+
+-- The value a table literal gives a string key, or nil.
+local function field_of(table_node, name)
+   for _, item in ipairs(table_node) do
+      if type(item) == "table" and item.tag == "Pair" and type(item[1]) == "table"
+            and item[1].tag == "String" and item[1][1] == name then
+         return item[2]
+      end
+   end
+   return nil
+end
+
+-- `handlers[name](...)` and `routes[name].handler(...)`: a call through a table
+-- literal indexed by a key known only at run time. The callee is any of the
+-- table's values (or, for the second shape, the `handler` field of any of its
+-- entries), so each one that names a function in another file is a target.
+-- Returns the targets and whether MAX_ROUTE_TARGETS cut the list.
+-- ponytail: only the literal itself is read; entries added later
+-- (`routes.x.handler = f`) and handlers in the dispatcher's own file are not
+-- followed. Add them when a firmware tree needs it.
+local function route_targets(file, callee, index)
+   if type(callee) ~= "table" or callee.tag ~= "Index" then return {} end
+   local base, key, field = callee[1], callee[2], nil
+   if constant_key(key) then
+      if key.tag ~= "String" or type(base) ~= "table" or base.tag ~= "Index"
+            or constant_key(base[2]) then
+         return {}
+      end
+      field = key[1]
+      base = base[1]
+   end
+   if type(base) ~= "table" or base.tag ~= "Id" then return {} end
+   local literal = base.var and sole_table(file, base)
+      or (not base.var and file.global_tables[base[1]]) or nil
+   if not literal then return {} end
+
+   local targets, seen, cut = {}, {}, false
+   for _, item in ipairs(literal) do
+      local value = type(item) == "table" and item.tag == "Pair" and item[2] or item
+      if field then
+         value = type(value) == "table" and value.tag == "Table" and field_of(value, field) or nil
+      end
+      local target
+      if type(value) == "table" and value.tag == "Id" and not value.var then
+         target = index.globals[value[1]]
+      end
+      if target and target.file ~= file and not seen[target.node] then
+         if #targets >= index.max_routes then
+            cut = true
+            break
+         end
+         seen[target.node] = true
+         targets[#targets + 1] = target
+      end
+   end
+   return targets, cut
+end
+
 -- The function a dotted callee names in another file, or nil.
 local function dotted_target(file, callee, index)
    local name = dotted_name(callee)
@@ -707,6 +800,9 @@ local function sites_of(file, index, max_sites, oracle)
    if file.sites then return file.sites end
    file.sites = {}
    file.sites_truncated = false
+   file.routes_truncated = false
+
+   local add_target
 
    local function add(node, item)
       local resolved = member_of(file, node[1])
@@ -718,11 +814,24 @@ local function sites_of(file, index, max_sites, oracle)
          function_node = function_for(entry, resolved.member)
       else
          local target = dotted_target(file, node[1], index)
-         if not target then return end
+         if not target then
+            local routed, cut = route_targets(file, node[1], index)
+            if cut then file.routes_truncated = true end
+            for _, route in ipairs(routed) do
+               add_target(node, item, {member = route.node.name or "<route>"},
+                  {file = route.file, kind = "path"}, route.node)
+               if file.sites_truncated then return end
+            end
+            return
+         end
          resolved = {member = dotted_name(node[1])}
          entry = {file = target.file, kind = "path"}
          function_node = target.node
       end
+      add_target(node, item, resolved, entry, function_node)
+   end
+
+   add_target = function(node, item, resolved, entry, function_node)
       if not function_node then return end
       if not taint_engine.line_of_function(entry.file.chstate, function_node) then return end
 
@@ -1048,6 +1157,8 @@ function whole_program.analyze(states, opts)
 
    local index = build_index(files, opts)
    index.dotted = build_dotted(files)
+   index.globals = build_globals(files)
+   index.max_routes = bound_of(opts, "whole_program_max_route_targets")
    diagnostics.modules = count(index.modules)
    diagnostics.ambiguous_modules = count(index.ambiguous)
    for _, file in ipairs(files) do
@@ -1137,6 +1248,7 @@ function whole_program.analyze(states, opts)
       for _, file in ipairs(batch) do
          local sites = sites_of(file, index, max_sites, opts.whole_program_oracle)
          if file.sites_truncated then note_bound("call sites", file.path) end
+         if file.routes_truncated then note_bound("route table targets", file.path) end
 
          file.modules_bound = file.modules_bound or {}
          for _, site in ipairs(sites) do
