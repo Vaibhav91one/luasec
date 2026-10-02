@@ -129,6 +129,8 @@ jobs:
           brew install --formula local/luasec/luasec
           brew test local/luasec/luasec
           luasec rules list | head -3
+      - name: Every source file compiles under the formula's Lua 5.5
+        run: make lua55-check
 
   npm-launcher:
     runs-on: ubuntu-latest
