@@ -280,7 +280,7 @@ bin/luasec --format json test/fixtures/tainted_exec/handler.lua
       "trace": [ ... ]
     }
   ],
-  "luasecVersion": "0.2.0",
+  "luasecVersion": "0.3.0",
   "reportVersion": "1.0"
 }
 ```

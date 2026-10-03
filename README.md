@@ -50,7 +50,7 @@ luasec fix --print rootfs/
 ### 1. Install
 
 Four ways to get it. The npm, LuaRocks and Homebrew packages are published
-from the v0.2.0 release.
+from the v0.3.0 release.
 
 ```sh
 npx luasec <path>
