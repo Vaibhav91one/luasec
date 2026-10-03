@@ -48,6 +48,12 @@ local platform_sources = {}
 -- arguments are tainted at entry. Merged in by profiles; cleared by reset().
 local entry_points = {}
 
+-- Calls that write a value to a store (a configuration database) and calls that
+-- read one back, so a value written from request data and read back into a
+-- command is seen as one flow (729). Merged in by profiles; cleared by reset().
+local store_writes = {}
+local store_reads = {}
+
 -- Globals whose read is itself untrusted input (CGILua `cgi`); merged in by
 -- registry/stds/*. Exact name match, never a local of the same name.
 local global_sources = {}
@@ -122,6 +128,8 @@ function platform_api.reset()
    for i = #platform_sources, 0, -1 do platform_sources[i] = nil end
    for i = #global_sources, 0, -1 do global_sources[i] = nil end
    for i = #entry_points, 0, -1 do entry_points[i] = nil end
+   for i = #store_writes, 0, -1 do store_writes[i] = nil end
+   for i = #store_reads, 0, -1 do store_reads[i] = nil end
    for kind, set in pairs(sanitizers) do
       for pattern in pairs(set) do set[pattern] = nil end
    end
@@ -139,6 +147,12 @@ function platform_api.apply_profile(declaration)
    end
    for _, entry in ipairs(declaration.entry_points or {}) do
       entry_points[#entry_points + 1] = entry
+   end
+   for _, entry in ipairs(declaration.store_writes or {}) do
+      store_writes[#store_writes + 1] = entry
+   end
+   for _, entry in ipairs(declaration.store_reads or {}) do
+      store_reads[#store_reads + 1] = entry
    end
    for _, sink in ipairs(declaration.sinks or {}) do
       default_sinks[#default_sinks + 1] = sink
@@ -261,6 +275,15 @@ function platform_api.match_entry_point(name, path)
       end
    end
    return best_match(candidates, name)
+end
+
+-- The store write or store read a callee path matches, or nil.
+function platform_api.match_store_write(path)
+   return best_match(store_writes, path)
+end
+
+function platform_api.match_store_read(path)
+   return best_match(store_reads, path)
 end
 
 -- A global read is a source only on an exact name match.

@@ -272,7 +272,8 @@ function api.check_source(source, opts)
    source = checked_source(source)
    local result = pipeline.analyze_source(source, opts)
    pipeline.cover_and_expose(result, opts)
-   return pipeline.finalize(result, opts)
+   local findings = pipeline.finalize(result, opts)
+   return pipeline.pair_store_hops(findings, pipeline.store_writes_of(result))
 end
 
 
@@ -341,6 +342,7 @@ local function analyze_files(paths, opts)
       if not opts.whole_program then
          pipeline.cover_and_expose(result, opts)
          result.findings = pipeline.finalize(result, opts)
+         result.store_writes = pipeline.store_writes_of(result)
          result.chstate, result.state = nil, nil
       end
       results[#results + 1] = result
@@ -351,18 +353,24 @@ local function analyze_files(paths, opts)
       pipeline.merge_whole_program(results, opts)
    end
 
+   local writes = {}
    for _, result in ipairs(results) do
       if result.chstate then
          pipeline.cover_and_expose(result, opts)
          result.findings = pipeline.finalize(result, opts)
+         result.store_writes = pipeline.store_writes_of(result)
       end
       for _, finding in ipairs(result.findings) do
          finding.file = result.path
          findings[#findings + 1] = finding
       end
+      for _, write in ipairs(result.store_writes or {}) do
+         write.file = result.path
+         writes[#writes + 1] = write
+      end
    end
 
-   return pipeline.sort_findings(findings)
+   return pipeline.sort_findings(findings), writes
 end
 
 --- Analyze files. `paths` is an array of file paths.
@@ -377,8 +385,9 @@ function api.analyze(paths, opts)
    local workers = jobs.count(opts, #paths)
    if workers > 1 then
       notify(opts.on_phase, ("analyzing in %d worker processes"):format(workers))
-      return pipeline.sort_findings(jobs.run(paths, opts, workers, api.analyze,
-         function(...) notify(opts.on_file, ...) end))
+      local findings, writes = jobs.run(paths, opts, workers, api.analyze_unpaired,
+         function(...) notify(opts.on_file, ...) end)
+      return pipeline.sort_findings(pipeline.pair_store_hops(findings, writes))
    end
    -- Whole-program analysis holds every file's syntax tree until the cross-file
    -- pass (measured on corpus/: 118 of 136MB live at that point, #197), and with
@@ -387,14 +396,23 @@ function api.analyze(paths, opts)
    -- next cycle sooner; the report is the same bytes.
    -- ponytail: the live data is unchanged; releasing files that take no part in a
    -- cross-file edge is what would cut it (#206).
-   if not opts.whole_program then return analyze_files(paths, opts) end
+   if not opts.whole_program then
+      return pipeline.sort_findings(pipeline.pair_store_hops(analyze_files(paths, opts)))
+   end
    -- Restored however the analysis ends, so a caller that catches an error is
    -- not left with this pause for the rest of its process.
    local previous_pause = gc_pause(110)
-   local ok, result = pcall(analyze_files, paths, opts)
+   local ok, findings, writes = pcall(analyze_files, paths, opts)
    gc_pause(previous_pause)
-   if not ok then error(result, 0) end
-   return result
+   if not ok then error(findings, 0) end
+   return pipeline.sort_findings(pipeline.pair_store_hops(findings, writes))
+end
+
+--- `analyze` in this process, without pairing store writes with store reads:
+-- the findings, and the store writes the pairing needs. A `--jobs` worker
+-- returns both, so a write in one slice pairs with a read in another.
+function api.analyze_unpaired(paths, opts)
+   return analyze_files(checked_paths(paths), checked_options(opts))
 end
 
 --- Render a report in the named format.

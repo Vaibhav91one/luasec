@@ -266,3 +266,32 @@ function in these files":
 A source string given to `check_source` has no path, so a `file` entry never
 matches it. What a CGILua scan still does not follow is listed in one place in
 [docs/usage.md](usage.md#what-a-cgilua-scan-does-not-follow).
+
+## Stores
+
+A profile may declare a store: calls that write a value somewhere a later call
+reads it back from, such as a configuration database. A request value written
+there and read back into a command is one flow, reported as `729`:
+
+```lua
+return {
+   name = "myvendor",
+   store_writes = {
+      {pattern = "cfg.set", store = "cfg", table = 1, column = 2, value = 3},
+      {pattern = "cfg.save_row", store = "cfg", table = 1, row = 2},
+   },
+   store_reads = {
+      {pattern = "cfg.get", store = "cfg", table = 1, column = 2},
+      {pattern = "cfg.get_row", store = "cfg", table = 1},
+   },
+}
+```
+
+Every field but `pattern` and `store` is an argument position. A write writes
+either one `value` (into `column`) or a whole `row`, never both; a read has
+neither. The table must be a literal (or fold to one) on both sides, or the call
+is not paired. The column comes from a literal `column` argument; a row write or
+a row read stands for every column of its table and pairs at low confidence. The
+pairing runs over the whole scan after it ends, so the write and the read may
+be in different files and `--whole-program` is not needed. The cgilua std
+declares the `db.*` API this way.

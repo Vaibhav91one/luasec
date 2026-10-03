@@ -87,9 +87,11 @@ function jobs.count(opts, file_count)
    return math.min(wanted, file_count)
 end
 
---- Analyze `paths` in `workers` child processes. `analyze` is api.analyze,
--- used in this process for a slice whose worker failed, so a crashed worker
--- costs time and never findings. `notify(done, total, path)` reports progress.
+--- Analyze `paths` in `workers` child processes. `analyze(paths, opts)` returns
+-- a slice's findings and its store writes without pairing them, and is used in
+-- this process for a slice whose worker failed, so a crashed worker costs time
+-- and never findings. `notify(done, total, path)` reports progress. Returns the
+-- findings and the store writes of every slice; the caller pairs them.
 function jobs.run(paths, opts, workers, analyze, notify)
    local lua = interpreter()
    local child_opts = {}
@@ -119,7 +121,7 @@ function jobs.run(paths, opts, workers, analyze, notify)
       return job
    end
 
-   local findings, running, next_slice, done = {}, {}, 1, 0
+   local findings, writes, running, next_slice, done = {}, {}, {}, 1, 0
    while next_slice <= #slices or #running > 0 do
       while #running < workers and next_slice <= #slices do
          running[#running + 1] = start(slices[next_slice])
@@ -131,17 +133,19 @@ function jobs.run(paths, opts, workers, analyze, notify)
       local result = read_value(job.output)
       os.remove(job.input)
       os.remove(job.output)
-      if type(result) ~= "table" then
+      if type(result) ~= "table" or type(result.findings) ~= "table" then
          -- The worker died (a crash, a kill, an interpreter that would not
          -- start): its slice is analyzed here instead, where a file that breaks
          -- the engine is one 901 like in any serial run.
-         result = analyze(job.slice, child_opts)
+         local slice_findings, slice_writes = analyze(job.slice, child_opts)
+         result = {findings = slice_findings, writes = slice_writes}
       end
-      for _, finding in ipairs(result) do findings[#findings + 1] = finding end
+      for _, finding in ipairs(result.findings) do findings[#findings + 1] = finding end
+      for _, write in ipairs(result.writes or {}) do writes[#writes + 1] = write end
       done = done + #job.slice
       notify(done, #paths, job.slice[#job.slice])
    end
-   return findings
+   return findings, writes
 end
 
 --- The child's side: analyze the slice in `input`, write the findings to `output`.
@@ -153,8 +157,10 @@ function jobs.child(input, output)
    -- The registries (--std, --rules) are installed by validate_options, which
    -- the parent ran before the scan; this process has to do the same.
    assert(api.validate_options(opts))
-   local findings = api.analyze(job.paths, opts)
-   write_file(output, "return " .. table.concat(serialize(findings, {})))
+   -- Unpaired: a store write in one slice can pair with a read in another, so
+   -- the parent pairs once every slice is back.
+   local findings, writes = api.analyze_unpaired(job.paths, opts)
+   write_file(output, "return " .. table.concat(serialize({findings = findings, writes = writes}, {})))
 end
 
 return jobs

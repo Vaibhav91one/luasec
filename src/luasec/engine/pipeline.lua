@@ -521,6 +521,87 @@ local function merge_whole_program(results, opts)
    return diagnostics
 end
 
+-- ------------------------------------------------------------ store hops (729)
+
+--- The store writes one analysed file recorded: request data written to a
+-- declared store, as {key = "T.C" or "T.*", line, source}, in line order.
+local function store_writes_of(result)
+   local writes = {}
+   for _, write in pairs(result and result.state and result.state.store_writes or {}) do
+      writes[#writes + 1] = {key = write.key, line = write.line, source = write.source}
+   end
+   table.sort(writes, function(a, b)
+      if a.line ~= b.line then return a.line < b.line end
+      return a.key < b.key
+   end)
+   return writes
+end
+
+-- Does a read of `key` see a write of `written`? The same table, and the same
+-- column unless either side is the whole row (`T.*`).
+local function store_keys_meet(key, written)
+   if key == written then return true end
+   local read_table, read_column = key:match("^(.*)%.([^.]*)$")
+   local write_table, write_column = written:match("^(.*)%.([^.]*)$")
+   return read_table == write_table and (read_column == "*" or write_column == "*")
+end
+
+--- Pair the scan's store writes with its pending 729s. A pending 729 is a
+-- command fed only by a value read back from a store; it is kept when some file
+-- writes request data to the same place, and then it replaces the 701/702 the
+-- same site reported without the pairing. One that pairs with nothing is
+-- removed, so a scan with no tainted write reports what it did before.
+local function pair_store_hops(findings, writes)
+   writes = writes or {}
+   table.sort(writes, function(a, b)
+      if (a.file or "") ~= (b.file or "") then return (a.file or "") < (b.file or "") end
+      if a.line ~= b.line then return a.line < b.line end
+      return a.key < b.key
+   end)
+   local kept, paired_sites = {}, {}
+   local function site(finding)
+      return table.concat({tostring(finding.file), tostring(finding.line), tostring(finding.column)}, "|")
+   end
+   for _, finding in ipairs(findings) do
+      if finding.pending_store then
+         local writer, count = nil, 0
+         for _, key in ipairs(finding.store_keys or {}) do
+            for _, write in ipairs(writes) do
+               if store_keys_meet(key, write.key) then
+                  count = count + 1
+                  writer = writer or write
+               end
+            end
+         end
+         local keys = finding.store_keys
+         finding.pending_store, finding.store_keys = nil, nil
+         if writer then
+            local at = (writer.file and (writer.file .. ":") or "line ") .. writer.line
+            finding.writer = at
+            finding.source = writer.source
+            finding.message = finding.message .. ("; written from %s at %s%s")
+               :format(writer.source, at, count > 1 and (" and %d other place%s"):format(count - 1,
+                  count == 2 and "" or "s") or "")
+            finding.store = table.concat(keys, ", ")
+            paired_sites[site(finding)] = true
+            kept[#kept + 1] = finding
+         end
+      else
+         kept[#kept + 1] = finding
+      end
+   end
+   if next(paired_sites) == nil then return kept end
+   local out = {}
+   for _, finding in ipairs(kept) do
+      if not ((finding.code == "701" or finding.code == "702") and paired_sites[site(finding)]) then
+         out[#out + 1] = finding
+      end
+   end
+   return out
+end
+
+pipeline.store_writes_of = store_writes_of
+pipeline.pair_store_hops = pair_store_hops
 pipeline.raise_config_error = raise_config_error
 pipeline.install_registries = install_registries
 pipeline.sort_findings = sort_findings

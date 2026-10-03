@@ -49,6 +49,7 @@ default), `low` (shape only, no proven flow).
 | 726 | medium | CWE-732 | self-modifying or destructive operation |
 | 727 | medium | CWE-400 | unbounded string growth can exhaust memory |
 | 728 | medium | CWE-1333 | untrusted data used as a search pattern |
+| 729 | high | CWE-78 | untrusted data stored, then read back into command execution |
 
 ## 7xx - payload and backdoor
 

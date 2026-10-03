@@ -338,7 +338,7 @@ sensitive reaching definitions. On top of that `luasec` adds taint tracking
 with a stable code, severity, confidence, CWE and a source-to-sink trace, and
 plain, JSON, SARIF and HTML reports.
 
-37 registered rule codes, in five categories (from `bin/luasec rules list`):
+38 registered rule codes, in five categories (from `bin/luasec rules list`):
 
 ```sh
 bin/luasec rules list | head -5
@@ -355,7 +355,7 @@ bin/luasec rules list | head -5
 | Category | Meaning | Codes |
 | --- | --- | --- |
 | `exec` | command execution and dynamic code sinks | 701–712 |
-| `firmware` | firmware-specific: flash writes, UCI chain, sandbox escape, DoS | 721–728 |
+| `firmware` | firmware-specific: flash writes, UCI chain, store read-back, sandbox escape, DoS | 721–729 |
 | `payload` | payload and backdoor patterns | 741–750 |
 | `artifact` | artifact and bytecode triage | 801–805 |
 | `meta` | parse, dialect and coverage-gap codes | 012, 901–904 |
