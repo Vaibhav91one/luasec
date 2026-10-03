@@ -421,6 +421,32 @@ local function taint_of_index(node, item, state, depth)
       set_union_into(result, fields[node[2][1]] or new_set())
    end
 
+   -- A value read back from a whole row (store key `T.*`) and then indexed by a
+   -- literal column narrows to `T.C`: the taint that reaches a sink is the one
+   -- column the sink used, so a reader of one column no longer pairs with a
+   -- writer of another. An index by a variable leaves `T.*` as it was.
+   if node[2] and node[2].tag == "String" then
+      local key = node[2][1]
+      local column = key:find(".", 1, true) and key:match("[^.]+$") or key
+      local narrowings = {}
+      for id, descriptor in pairs(result) do
+         if descriptor.stored and descriptor.store_key and descriptor.store_key:sub(-2) == ".*" then
+            narrowings[#narrowings + 1] = {id = id, descriptor = descriptor}
+         end
+      end
+      for _, hit in ipairs(narrowings) do
+         local store = hit.descriptor.store or "db"
+         local narrowed = hit.descriptor.store_key:sub(1, -3) .. "." .. column
+         result[hit.id] = nil
+         local new_id = "store:" .. store .. ":" .. narrowed
+         result[new_id] = {
+            id = new_id, name = store .. " " .. narrowed,
+            line = hit.descriptor.line, confidence = "medium",
+            stored = true, store_key = narrowed, store = store,
+         }
+      end
+   end
+
    return result
 end
 
@@ -485,6 +511,7 @@ local function taint_of_call(node, item, state, depth)
                confidence = column and "medium" or "low",
                stored = true,
                store_key = key,
+               store = store,
             })
          end
          return result
@@ -1008,25 +1035,41 @@ local function check_store_write(node, item, state)
    local value_node = args[write.value or write.row]
    if not value_node then return end
 
-   local live = live_only(taint_of_expr(value_node, item, state, 0))
-   if set_is_empty(live) and write.row then
-      -- A row is a table: request data in any of its fields is a tainted write.
-      local fields = table_fields_of(value_node, item, state)
-      for _, field_taint in pairs(fields or {}) do
-         field_taint = live_only(field_taint)
-         if not set_is_empty(field_taint) then live = field_taint break end
+   state.store_writes = state.store_writes or {}
+   local function record(key, sources)
+      local fact_key = key .. "|" .. node.line
+      if not state.store_writes[fact_key] then
+         state.store_writes[fact_key] = {key = key, line = node.line, source = sources[1].id}
       end
    end
-   if set_is_empty(live) then return end
 
-   local column = write.value and write.column and literal_of(args[write.column]) or nil
-   local key = store_table .. "." .. (column or "*")
-   local sources = set_list(live)
-   state.store_writes = state.store_writes or {}
-   local fact_key = key .. "|" .. node.line
-   if not state.store_writes[fact_key] then
-      state.store_writes[fact_key] = {key = key, line = node.line, source = sources[1].id}
+   if write.row then
+      -- A row is a table: record each field that carries request data by its own
+      -- literal column, so a writer of one column does not pair with readers of
+      -- the rest of the row. A field key already of the form `T.C` keeps its
+      -- column; a bare key is taken under this write's table. A row with no
+      -- resolvable literal fields falls back to the whole row (`T.*`).
+      local fields = table_fields_of(args[write.row], item, state)
+      local any = false
+      for field_key, field_taint in pairs(fields or {}) do
+         local live = live_only(field_taint)
+         if not set_is_empty(live) then
+            local column = field_key:find(".", 1, true) and field_key:match("[^.]+$") or field_key
+            record(store_table .. "." .. column, set_list(live))
+            any = true
+         end
+      end
+      if not any then
+         local live = live_only(taint_of_expr(value_node, item, state, 0))
+         if not set_is_empty(live) then record(store_table .. ".*", set_list(live)) end
+      end
+      return
    end
+
+   local live = live_only(taint_of_expr(value_node, item, state, 0))
+   if set_is_empty(live) then return end
+   local column = write.column and literal_of(args[write.column]) or nil
+   record(store_table .. "." .. (column or "*"), set_list(live))
 end
 
 -- Walk an expression and run shape + sink checks on every Call/Invoke node it

@@ -74,14 +74,35 @@ describe("store hop (729)", function()
       assert_equal(count(report, "729"), 0, codes(report))
    end)
 
-   it("pairs a whole-row write with a read of one of its columns, at low confidence", function()
+   it("pairs a row write and a row read on the same column, at medium confidence", function()
       local row = 'local row = {}\nrow["system.hostname"] = cgi["hostname"]\ndb.update("system", row, "1")\n'
       local read_row = 'local r = db.getRow("system", "_ROWID_", "1")\nos.execute("hostname " .. r["system.hostname"])\n'
       local report = api.check_source(row .. read_row, {std = "cgilua"})
       assert_equal(count(report, "729"), 1, codes(report))
       for _, f in ipairs(report) do
-         if f.code == "729" then assert_equal(f.confidence, "low", "a row read is a wildcard") end
+         if f.code == "729" then
+            assert_equal(f.confidence, "medium", "both sides name the column")
+         end
       end
+   end)
+
+   it("does not pair a row read of a different column than the row write set", function()
+      -- The firmware false positive: a writer sets one column of a table, and a
+      -- reader reads a different column of the same table back into a command.
+      local row = 'local row = {}\nrow["dot11Radio.chanWidth"] = cgi["cw"]\ndb.update("dot11Radio", row, "1")\n'
+      local read_other = 'local r = db.getRow("dot11Radio", "_ROWID_", "1")\nos.execute("wl " .. r["dot11Radio.interfaceName"])\n'
+      local report = api.check_source(row .. read_other, {std = "cgilua"})
+      assert_equal(count(report, "729"), 0, "different column must not pair: " .. codes(report))
+   end)
+
+   it("does not pair a column write with a whole-row read of a different column (setAttribute firmware shape)", function()
+      -- setAttribute writes one literal column; getRowWhere reads the whole row;
+      -- the sink uses a different column. This was 82 false positives on one
+      -- firmware image.
+      local write = 'db.setAttribute("dot11Radio", "interfaceName", "wl0", "chanWidth", cgi["cw"])\n'
+      local read_other = 'local r = db.getRowWhere("dot11Radio", "radioNo=1", false)\nos.execute("wl " .. r["dot11Radio.interfaceName"])\n'
+      local report = api.check_source(write .. read_other, {std = "cgilua"})
+      assert_equal(count(report, "729"), 0, "whole-row read of another column must not pair: " .. codes(report))
    end)
 
    it("pairs a write in one file with a read in another, without --whole-program", function()

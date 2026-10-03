@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- 729 is column-accurate: a value read back from a whole row narrows to the column the sink actually uses, and a row write records the columns it actually sets, so a writer of one column no longer pairs with readers of the rest of the table. On one firmware image this cut 729 from 121 to 39 (#215).
 - New rule 729: request data written to a declared store and read back into a command, paired by table and column across the whole scan (no `--whole-program` needed). A profile declares `store_writes` and `store_reads`; the cgilua std declares the `db.*` API. A paired read replaces the 701/702 at that site; a scan with no tainted write reports what it did before (#211).
 - Under `--whole-program`, a method call across files is followed like the dotted call it stands for: `mod:run(req)` into `function M:run(cfg)` or `M.run = function(self, cfg)` in a required module, and `gui.net:set(t)` into a global table's method in another file, the receiver binding to `self` (#210).
 - The file walk runs one `find` per scan root instead of three (files, unreadable directories, links), with the same file list and coverage gaps: over `corpus/` it takes 1.1-1.2s instead of 2.0-2.2s, most of the saving system time (#205).
