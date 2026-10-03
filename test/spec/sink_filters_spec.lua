@@ -70,7 +70,7 @@ os.execute("ls " .. cgi["d"])
 ]], {std = "cgilua"})
       local f = at(report, "709")
       assert_true(f ~= nil, "os.execute reports")
-      assert_equal(f.message, "untrusted data reaches command execution (os.execute)")
+      assert_equal(f.message, "untrusted data reaches command execution (os.execute) [reachable from: web]")
       assert_equal(f.confidence, "certain")
    end)
 

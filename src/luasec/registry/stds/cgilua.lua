@@ -8,18 +8,18 @@
 return {
    name = "cgilua",
    global_sources = {
-      {global = "cgi", id = "cgi", name = "CGILua request table", confidence = "certain"},
-      {global = "RowId", id = "RowId", name = "CGILua row id", confidence = "high"},
-      {global = "DBTable", id = "DBTable", name = "CGILua db table", confidence = "high"},
-      {global = "NextPage", id = "NextPage", name = "CGILua next page", confidence = "high"},
+      {global = "cgi", id = "cgi", name = "CGILua request table", confidence = "certain", channel = "web"},
+      {global = "RowId", id = "RowId", name = "CGILua row id", confidence = "high", channel = "web"},
+      {global = "DBTable", id = "DBTable", name = "CGILua db table", confidence = "high", channel = "web"},
+      {global = "NextPage", id = "NextPage", name = "CGILua next page", confidence = "high", channel = "web"},
    },
    sources = {
-      {pattern = "web.cgiToLuaTable", id = "web.cgiToLuaTable", name = "CGILua request table", confidence = "certain"},
-      {pattern = "web.cgiSearch", id = "web.cgiSearch", name = "CGILua request value", confidence = "high"},
-      {pattern = "web.cgiFindButton", id = "web.cgiFindButton", name = "CGILua button value", confidence = "high"},
-      {pattern = "web.cgiFindToken", id = "web.cgiFindToken", name = "CGILua token value", confidence = "high"},
-      {pattern = "SAPI.Request.servervariable", id = "SAPI.Request.servervariable", name = "server variable", confidence = "high"},
-      {pattern = "cgilua.cookies.get", id = "cgilua.cookies.get", name = "CGILua cookie", confidence = "medium"},
+      {pattern = "web.cgiToLuaTable", id = "web.cgiToLuaTable", name = "CGILua request table", confidence = "certain", channel = "web"},
+      {pattern = "web.cgiSearch", id = "web.cgiSearch", name = "CGILua request value", confidence = "high", channel = "web"},
+      {pattern = "web.cgiFindButton", id = "web.cgiFindButton", name = "CGILua button value", confidence = "high", channel = "web"},
+      {pattern = "web.cgiFindToken", id = "web.cgiFindToken", name = "CGILua token value", confidence = "high", channel = "web"},
+      {pattern = "SAPI.Request.servervariable", id = "SAPI.Request.servervariable", name = "server variable", confidence = "high", channel = "web"},
+      {pattern = "cgilua.cookies.get", id = "cgilua.cookies.get", name = "CGILua cookie", confidence = "medium", channel = "web"},
    },
    sinks = {
       -- Both wrappers strip ; ` $ & | < > from the command, not from `options`,
@@ -32,7 +32,12 @@ return {
    -- The mesh JSON-RPC handlers are called as `handler(methodObj, method)` from a
    -- route table the analysis does not follow; methodObj is the decoded request.
    entry_points = {
-      {pattern = "*Handler", arg = {1}, id = "methodObj", name = "mesh request object", confidence = "medium"},
+      -- Mesh JSON-RPC handlers, reached over HTTP through meshApi.cgi.
+      {pattern = "*Handler", arg = {1}, id = "methodObj", name = "mesh request object", confidence = "medium", channel = "web"},
+      -- TR-069 diagnostics handlers, reached over the ACS (CWMP) management channel.
+      {pattern = "*DiagnosticsHandler", file = "*Tr*.lua", arg = {1}, name = "TR-069 diagnostics request", confidence = "medium", channel = "acs"},
+      -- CLI command handlers in the *CLI.lua libraries, reached from the console.
+      {pattern = "*CLIPing", file = "*CLI.lua", arg = {1}, name = "CLI command argument", confidence = "medium", channel = "cli"},
    },
    -- db.setAttribute(table, keyField, key, column, value), db.insert(table, row),
    -- db.update(table, row, rowid); db.getAttribute(table, keyField, key, column)

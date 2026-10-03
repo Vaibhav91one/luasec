@@ -528,7 +528,7 @@ end
 local function store_writes_of(result)
    local writes = {}
    for _, write in pairs(result and result.state and result.state.store_writes or {}) do
-      writes[#writes + 1] = {key = write.key, line = write.line, source = write.source}
+      writes[#writes + 1] = {key = write.key, line = write.line, source = write.source, channel = write.channel}
    end
    table.sort(writes, function(a, b)
       if a.line ~= b.line then return a.line < b.line end
@@ -579,6 +579,10 @@ local function pair_store_hops(findings, writes)
             local at = (writer.file and (writer.file .. ":") or "line ") .. writer.line
             finding.writer = at
             finding.source = writer.source
+            if writer.channel then
+               finding.channels = {writer.channel}
+               finding.message = finding.message .. (" [reachable from: %s]"):format(writer.channel)
+            end
             finding.message = finding.message .. ("; written from %s at %s%s")
                :format(writer.source, at, count > 1 and (" and %d other place%s"):format(count - 1,
                   count == 2 and "" or "s") or "")

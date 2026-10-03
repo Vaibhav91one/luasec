@@ -268,13 +268,20 @@ end
 -- a `file` glob applies only to functions in a file whose path matches it, so it
 -- never matches source that has no path (check_source).
 function platform_api.match_entry_point(name, path)
-   local candidates = {}
+   -- A file-scoped entry whose glob matches is more specific than a global one
+   -- and wins: it is how two profiles for the same handler-name convention in
+   -- different files (a web `*Handler` and an ACS `*DiagnosticsHandler` in the
+   -- TR-069 libraries) are told apart. Within one scope, pattern specificity
+   -- decides as usual.
+   local scoped, global = {}, {}
    for _, entry in ipairs(entry_points) do
-      if entry.file == nil or (path and util.wild_match(entry.file, path)) then
-         candidates[#candidates + 1] = entry
+      if entry.file == nil then
+         global[#global + 1] = entry
+      elseif path and util.wild_match(entry.file, path) then
+         scoped[#scoped + 1] = entry
       end
    end
-   return best_match(candidates, name)
+   return best_match(scoped, name) or best_match(global, name)
 end
 
 -- The store write or store read a callee path matches, or nil.

@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- A finding records which channel reaches the sink. An entry-point or source declaration may carry a `channel` tag (`web`, `acs`, `cli`, ...); a 709/729 then shows `[reachable from: ...]` and carries a `channels` array in JSON/SARIF. A file-scoped entry point now beats a global one of the same name. The cgilua std tags its web sources `web`, the TR-069 diagnostics handlers `acs`, and the CLI ping handler `cli` (#217).
 - 729 is column-accurate: a value read back from a whole row narrows to the column the sink actually uses, and a row write records the columns it actually sets, so a writer of one column no longer pairs with readers of the rest of the table. On one firmware image this cut 729 from 121 to 39 (#215).
 - New rule 729: request data written to a declared store and read back into a command, paired by table and column across the whole scan (no `--whole-program` needed). A profile declares `store_writes` and `store_reads`; the cgilua std declares the `db.*` API. A paired read replaces the 701/702 at that site; a scan with no tainted write reports what it did before (#211).
 - Under `--whole-program`, a method call across files is followed like the dotted call it stands for: `mod:run(req)` into `function M:run(cfg)` or `M.run = function(self, cfg)` in a required module, and `gui.net:set(t)` into a global table's method in another file, the receiver binding to `self` (#210).

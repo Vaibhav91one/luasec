@@ -72,6 +72,8 @@ local function quoted_descriptor(descriptor)
       shell_quoted = true,
       stored = descriptor.stored,
       store_key = descriptor.store_key,
+      store = descriptor.store,
+      channel = descriptor.channel,
    }
 end
 
@@ -182,6 +184,21 @@ local function literal_of(node)
    if type(node) ~= "table" then return nil end
    local value = const_eval.value(node)
    return type(value) == "string" and value or nil
+end
+
+-- The distinct channels a set of source descriptors names, sorted. Empty when
+-- no source carried one (an undeclared channel is not guessed).
+local function channels_of(sources)
+   local seen, list = {}, {}
+   for _, descriptor in ipairs(sources) do
+      local channel = descriptor.channel
+      if channel and not seen[channel] then
+         seen[channel] = true
+         list[#list + 1] = channel
+      end
+   end
+   table.sort(list)
+   return list
 end
 
 local function set_list(set)
@@ -402,6 +419,7 @@ local function taint_of_var(node, item, state)
          set_add(result, {
             id = global_source.id, name = global_source.name,
             line = node.line, confidence = global_source.confidence,
+            channel = global_source.channel,
          })
       end
    end
@@ -488,6 +506,7 @@ local function taint_of_call(node, item, state, depth)
          set_add(result, {
             id = by_method.id, name = by_method.name,
             line = node.line, confidence = by_method.confidence,
+            channel = by_method.channel,
          })
          return result
       end
@@ -524,6 +543,7 @@ local function taint_of_call(node, item, state, depth)
             name = source.name,
             line = node.line,
             confidence = source.confidence,
+            channel = source.channel,
          })
          return result
       end
@@ -948,6 +968,7 @@ local function check_sink(node, item, state, chstate, opts)
       if type(filtered) == "string" then removed, survivors = filter_split(filtered) end
       local confidence = source.confidence or code_confidence(taint_spec.code)
       if removed then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local channels = channels_of(sources)
       local finding = emit(state, taint_spec, node, chstate, {
          name = path,
          confidence = confidence,
@@ -956,7 +977,11 @@ local function check_sink(node, item, state, chstate, opts)
          trace = build_trace(tainted_arg.node, sources),
          snippet = snippet_at(chstate, tainted_arg.node),
          sanitizer = (not any_unquoted(sources)) and "shell-quoted" or nil,
+         channels = #channels > 0 and channels or nil,
       })
+      if finding and #channels > 0 then
+         finding.message = finding.message .. (" [reachable from: %s]"):format(table.concat(channels, ", "))
+      end
       if finding and removed then
          finding.message = finding.message .. (" (a partial filter removes %s; %s still pass)")
             :format(table.concat(removed, " "), table.concat(survivors, " "))
@@ -1039,7 +1064,8 @@ local function check_store_write(node, item, state)
    local function record(key, sources)
       local fact_key = key .. "|" .. node.line
       if not state.store_writes[fact_key] then
-         state.store_writes[fact_key] = {key = key, line = node.line, source = sources[1].id}
+         state.store_writes[fact_key] = {key = key, line = node.line,
+            source = sources[1].id, channel = sources[1].channel}
       end
    end
 
@@ -1234,6 +1260,7 @@ function taint.run(chstate, opts, existing_state)
                      local existing = state.param_taint[var] or {}
                      state.param_taint[var] = existing
                      set_add(existing, {
+                        channel = entry.channel,
                         id = "entry:" .. name .. ":" .. position,
                         name = "entry-point argument " .. position .. " of " .. name,
                         line = function_node.line,
