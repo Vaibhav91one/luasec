@@ -939,17 +939,21 @@ By default each file is analyzed in isolation. `--whole-program` follows `requir
 edges across files and passes taint into a required module's parameters. A local
 function's return value is also followed — `local function id(x) return x end`
 hands taint through — and under `--whole-program` the return value of a function in
-a module bound with `local m = require "mod"` (e.g. `m.id(x)`) is followed too.
-A method call (`M:m`), a function passed as a value, and a `require(...)` called
-inline inside an expression are not: a function that hands its argument back is
-opaque across files in those shapes.
+a module bound with `local m = require "mod"` (e.g. `m.id(x)`) is followed too,
+and so is the method spelling of the same call (`m:id(x)`, with the receiver as
+the callee's `self`). A method call on any other object, a function passed as a
+value, and a `require(...)` called inline inside an expression are not: a function
+that hands its argument back is opaque across files in those shapes.
 
 A call to a function written onto a global table's field path in another file
 (`gui.a.b.set(t)` with `function gui.a.b.set(cfg) ... end` elsewhere, the shape
 CGILua backends use between a page and its component library) is followed too,
 whether the call is a statement or its result is assigned. A dotted name defined in
 two files is never guessed, and a local variable named like the root (`local gui`)
-is not the global.
+is not the global. The method spelling of both shapes is followed as well:
+`m:run(req)` into `function M:run(cfg)` and `gui.net:set(t)` into
+`function gui.net:set(cfg)` (or `gui.net.set = function(self, cfg)`), the receiver
+binding to `self`.
 
 A call through a route table is followed when the key is known only at run time:
 `handlers[name](req)` and `routes[name].handler(req)`, where `handlers` or
@@ -980,8 +984,9 @@ exported function nothing in its file feeds is reported as an exposed sink.
 until the cross-file pass: over `corpus/` (566 files) it peaks at about 190MB
 resident against about 34MB for a per-file scan. It resolves calls across files and follows
 the return value of a function in a module bound with `local m = require "mod"`,
-but does not follow a method call (`M:m`), a function passed as a value, or a
-`require(...)` called inline inside an expression.
+but does not follow a method call on an object that is neither a required module
+nor a global table, a function passed as a value, or a `require(...)` called
+inline inside an expression.
 
 ## A CGILua backend, end to end
 
@@ -1044,8 +1049,10 @@ Score: 94/100 (good) - exec 2
 Every limit of the web-backend story, in one place. A flow through any of these is
 missed, which is a known gap, not a clean result.
 
-- **Method calls.** `obj:set(x)` on a table-stored object is not resolved across
-  files; only dotted calls on a global root (`gui.a.b.set(x)`) are.
+- **Method calls on objects.** `obj:set(x)` is followed across files when `obj`
+  is a module bound with `require` or a global table (`gui.net:set(t)`); a method
+  on any other object (an instance built at run time, a table passed in) is not,
+  and neither is a method call within one file.
 - **Function values.** A function passed as an argument, returned, or stored
   anywhere other than a route-table literal is not followed. In a route table,
   entries added after the literal (`methods.X.methodHandler = f`) and handlers

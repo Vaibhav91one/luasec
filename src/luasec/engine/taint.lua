@@ -559,11 +559,13 @@ local function taint_of_call(node, item, state, depth)
    -- it for the target function and follow its return the same way a local or
    -- field function is followed, just in the target file's state.
    if not sanitized and state.resolve_external
-         and node.tag == "Call" and node[1] then
+         and (node.tag == "Call" or node.tag == "Invoke") and node[1] then
       local fn, target_state, target_path = state.resolve_external(node, item)
       if fn and target_state.returns and target_state.returns[fn]
             and not target_state.returning[fn] then
          local arg_nodes = args_of(node)
+         -- A method call's receiver is the callee's first formal (`self`).
+         if node.tag == "Invoke" then table.insert(arg_nodes, 1, node[1]) end
          local arg_taints = {}
          for i = 1, #arg_nodes do
             arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
