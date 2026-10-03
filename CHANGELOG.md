@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-03
+
 - A profile may declare `validators` (an IP/host/number check used as a guard). A command flow guarded by one is kept but reported one confidence step lower with a `guarded_by` field and a message note, instead of at full confidence: a static pass cannot prove the check rejects every metacharacter, so the judgement is left to a reviewer or the `fix` agent. The cgilua std declares the CGILua IP/host validators (#218).
 - A finding records which channel reaches the sink. An entry-point or source declaration may carry a `channel` tag (`web`, `acs`, `cli`, ...); a 709/729 then shows `[reachable from: ...]` and carries a `channels` array in JSON/SARIF. A file-scoped entry point now beats a global one of the same name. The cgilua std tags its web sources `web`, the TR-069 diagnostics handlers `acs`, and the CLI ping handler `cli` (#217).
 - 729 is column-accurate: a value read back from a whole row narrows to the column the sink actually uses, and a row write records the columns it actually sets, so a writer of one column no longer pairs with readers of the rest of the table. On one firmware image this cut 729 from 121 to 39 (#215).
