@@ -74,6 +74,7 @@ local function quoted_descriptor(descriptor)
       store_key = descriptor.store_key,
       store = descriptor.store,
       channel = descriptor.channel,
+      validated_by = descriptor.validated_by,
    }
 end
 
@@ -968,6 +969,11 @@ local function check_sink(node, item, state, chstate, opts)
       if type(filtered) == "string" then removed, survivors = filter_split(filtered) end
       local confidence = source.confidence or code_confidence(taint_spec.code)
       if removed then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local guard
+      for _, descriptor in ipairs(sources) do
+         if descriptor.validated_by then guard = descriptor.validated_by break end
+      end
+      if guard then confidence = CONFIDENCE_DOWN[confidence] or confidence end
       local channels = channels_of(sources)
       local finding = emit(state, taint_spec, node, chstate, {
          name = path,
@@ -985,6 +991,10 @@ local function check_sink(node, item, state, chstate, opts)
       if finding and removed then
          finding.message = finding.message .. (" (a partial filter removes %s; %s still pass)")
             :format(table.concat(removed, " "), table.concat(survivors, " "))
+      end
+      if finding and guard then
+         finding.guarded_by = guard
+         finding.message = finding.message .. (" (guarded by %s; verify it rejects shell metacharacters)"):format(guard)
       end
 
       -- 712 is the partially quoted case: some of the untrusted data was passed
@@ -1098,6 +1108,23 @@ local function check_store_write(node, item, state)
    record(store_table .. "." .. (column or "*"), set_list(live))
 end
 
+-- A call to a declared validator marks the taint of the value it checks as
+-- validated: a guard like `if is_ipv4(x) then run(x) end` does not transform x,
+-- so the mark rides on x's source descriptors and a sink reached by a validated
+-- value is reported one confidence step lower and names the guard, not dropped
+-- (its strength is left for a person or an AI agent to confirm). The mark is
+-- monotone, so the fixpoint walk is unaffected.
+local function check_validator(node, item, state)
+   local path = callee_path(node[1], item, state, 0)
+   local validator = path and platform_api.match_validator(path)
+   if not validator then return end
+   for _, arg in ipairs(args_of(node)) do
+      for _, descriptor in pairs(taint_of_expr(arg, item, state, 0)) do
+         descriptor.validated_by = path
+      end
+   end
+end
+
 -- Walk an expression and run shape + sink checks on every Call/Invoke node it
 -- contains, including calls nested inside arguments. A Function body is its
 -- own chstate line with its own items and is not walked from here: descending
@@ -1107,6 +1134,7 @@ local function check_calls_in(expr, item, state, chstate, opts, depth)
    if depth > 64 or type(expr) ~= "table" then return end
    if expr.tag == "Function" then return end
    if expr.tag == "Call" or expr.tag == "Invoke" then
+      check_validator(expr, item, state)
       check_shape(expr, item, state, chstate, opts)
       check_sink(expr, item, state, chstate, opts)
       check_store_write(expr, item, state)

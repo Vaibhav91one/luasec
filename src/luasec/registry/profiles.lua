@@ -27,7 +27,7 @@ local builtin = {
 local function validate(name, declaration)
    assert(type(declaration) == "table", "profile " .. name .. " must return a table")
    for _, key in ipairs({"sources", "sinks", "propagators", "shapes", "entry_points",
-         "store_writes", "store_reads"}) do
+         "store_writes", "store_reads", "validators"}) do
       if declaration[key] ~= nil then
          assert(type(declaration[key]) == "table", "profile " .. name .. "." .. key .. " must be a list")
          for _, entry in ipairs(declaration[key]) do

@@ -54,6 +54,11 @@ local entry_points = {}
 local store_writes = {}
 local store_reads = {}
 
+-- Functions that validate their argument (an IP/hostname/number check used as a
+-- guard): a value they are called on reaches a sink as a guarded finding, one
+-- confidence step lower and named, rather than at full confidence.
+local validators = {}
+
 -- Globals whose read is itself untrusted input (CGILua `cgi`); merged in by
 -- registry/stds/*. Exact name match, never a local of the same name.
 local global_sources = {}
@@ -130,6 +135,7 @@ function platform_api.reset()
    for i = #entry_points, 0, -1 do entry_points[i] = nil end
    for i = #store_writes, 0, -1 do store_writes[i] = nil end
    for i = #store_reads, 0, -1 do store_reads[i] = nil end
+   for i = #validators, 0, -1 do validators[i] = nil end
    for kind, set in pairs(sanitizers) do
       for pattern in pairs(set) do set[pattern] = nil end
    end
@@ -153,6 +159,9 @@ function platform_api.apply_profile(declaration)
    end
    for _, entry in ipairs(declaration.store_reads or {}) do
       store_reads[#store_reads + 1] = entry
+   end
+   for _, entry in ipairs(declaration.validators or {}) do
+      validators[#validators + 1] = entry
    end
    for _, sink in ipairs(declaration.sinks or {}) do
       default_sinks[#default_sinks + 1] = sink
@@ -291,6 +300,10 @@ end
 
 function platform_api.match_store_read(path)
    return best_match(store_reads, path)
+end
+
+function platform_api.match_validator(path)
+   return best_match(validators, path)
 end
 
 -- A global read is a source only on an exact name match.

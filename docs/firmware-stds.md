@@ -295,3 +295,25 @@ a row read stands for every column of its table and pairs at low confidence. The
 pairing runs over the whole scan after it ends, so the write and the read may
 be in different files and `--whole-program` is not needed. The cgilua std
 declares the `db.*` API this way.
+
+## Validators
+
+A profile may declare functions that validate their argument, used as a guard
+before a sink (`if is_ipv4(x) then run(x) end`):
+
+```lua
+return {
+   name = "myvendor",
+   validators = {
+      {pattern = "validations.is_ipv4_address"},
+      {pattern = "validations.is_fqdn_address"},
+   },
+}
+```
+
+A guard does not transform the value, so the flow is still reported — a static
+pass cannot be sure the check rejects every shell metacharacter — but one
+confidence step lower, with the guard named and a `guarded_by` field in the
+report. Treat it as "probably handled, confirm the validator"; `--min-confidence`
+filters these out when you trust the checks, and the `fix` handoff passes the
+guard name to the agent. The cgilua std declares the CGILua IP/host validators.
