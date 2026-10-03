@@ -105,6 +105,10 @@ local function validate(name, declaration)
             assert(type(entry.file) == "string",
                "every " .. name .. ".entry_points entry needs file as a path glob string")
          end
+         if entry.channel ~= nil then
+            assert(type(entry.channel) == "string",
+               "every " .. name .. "." .. key .. " entry needs channel as a string")
+         end
          if entry.confidence ~= nil then
             assert(type(entry.confidence) == "string",
                "every " .. name .. "." .. key .. " entry needs confidence as a string")

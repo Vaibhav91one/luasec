@@ -1009,8 +1009,8 @@ bin/luasec --std cgilua --whole-program test/fixtures/cgilua_example
 ```
 
 ```
-test/fixtures/cgilua_example/lib/gui_net.lua:6:4: [709] critical: untrusted data reaches command execution (util.runShellCmd) (a partial filter removes ; | & $ ` < >; ( ) newline still pass); untrusted data reached this sink from test/fixtures/cgilua_example/www/diagnostics.html (CWE-78) [source: web.cgiToLuaTable]
-test/fixtures/cgilua_example/mesh/rename.lua:2:4: [709] critical: untrusted data reaches command execution (os.execute); untrusted data reached this sink from test/fixtures/cgilua_example/mesh/dispatch.lua (CWE-78) [source: web.cgiToLuaTable]
+test/fixtures/cgilua_example/lib/gui_net.lua:6:4: [709] critical: untrusted data reaches command execution (util.runShellCmd) [reachable from: web] (a partial filter removes ; | & $ ` < >; ( ) newline still pass); untrusted data reached this sink from test/fixtures/cgilua_example/www/diagnostics.html (CWE-78) [source: web.cgiToLuaTable]
+test/fixtures/cgilua_example/mesh/rename.lua:2:4: [709] critical: untrusted data reaches command execution (os.execute) [reachable from: web]; untrusted data reached this sink from test/fixtures/cgilua_example/mesh/dispatch.lua (CWE-78) [source: web.cgiToLuaTable]
 
 Total: 2 findings (2 critical)
 Score: 50/100 (critical) - exec 2
