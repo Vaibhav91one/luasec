@@ -1,0 +1,9 @@
+<html><body>
+<?lua
+local inputTable = web.cgiToLuaTable(cgi)
+if ButtonType == "trace" then
+   errorFlag, statusMessage = gui.net.trace.set(inputTable)
+end
+?>
+<p>Trace</p>
+</body></html>

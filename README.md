@@ -432,8 +432,11 @@ than one that does not have the feature.
   over a generated file stalled the gate.
 - Alias resolution is bounded at 4 definitions and 6 hops. Past that the
   answer is "not a cursor", so a credential can be missed.
-- `--whole-program` is opt-in and slower. It follows `require` edges and
-  passes taint into a required module's parameters, and nothing else.
+- `--whole-program` is opt-in and slower. It follows `require` edges, calls to
+  dotted global functions in other files (`gui.a.b.set(t)`) and route-table
+  literals (`routes[name].handler(req)`), and passes taint into the callee's
+  parameters. What a web backend scan still misses is listed in
+  [docs/usage.md](docs/usage.md#what-a-cgilua-scan-does-not-follow).
 - A symlink to a file outside the scanned tree is followed and read. Point
   `luasec` at a tree you trust to be the tree you want read.
 

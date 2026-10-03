@@ -147,7 +147,8 @@ CGILua web backends. Sources are the global request table (`cgi`), the
 functions (the mesh JSON-RPC handlers, called as `handler(methodObj, method)`) as
 entry points: their first argument is treated as request data. The wrappers strip some shell
 metacharacters from the command, so a flow into it is reported one confidence step
-lower and names the characters that still pass.
+lower and names the characters that still pass. A whole backend, page to command,
+is walked through in [A CGILua backend, end to end](#a-cgilua-backend-end-to-end).
 
 ```sh
 bin/luasec --std +cgilua page.lua
@@ -981,6 +982,92 @@ resident against about 34MB for a per-file scan. It resolves calls across files 
 the return value of a function in a module bound with `local m = require "mod"`,
 but does not follow a method call (`M:m`), a function passed as a value, or a
 `require(...)` called inline inside an expression.
+
+## A CGILua backend, end to end
+
+A CGILua backend spreads one request over several files: an HTML page with a Lua
+block reads the request, calls a setter in a component library, and the library
+runs a command through a vendor wrapper; a JSON API dispatches by method name
+through a route table to a handler in another file. `--std cgilua` knows the
+request sources and the wrappers, and `--whole-program` follows the calls between
+the files. The tree below is in `test/fixtures/cgilua_example/`:
+
+```
+www/diagnostics.html   page: <?lua inputTable = web.cgiToLuaTable(cgi) ... gui.net.trace.set(inputTable) ?>
+lib/gui_net.lua        setter: function gui.net.trace.set(cfg) util.runShellCmd("traceroute " .. cfg.host) end
+mesh/dispatch.lua      route table: methods[name]["methodHandler"](request, name)
+mesh/rename.lua        handler: function renameNode(request, name) os.execute("setname " .. request.label) end
+```
+
+```sh
+bin/luasec --std cgilua --whole-program test/fixtures/cgilua_example
+```
+
+```
+test/fixtures/cgilua_example/lib/gui_net.lua:6:4: [709] critical: untrusted data reaches command execution (util.runShellCmd) (a partial filter removes ; | & $ ` < >; ( ) newline still pass); untrusted data reached this sink from test/fixtures/cgilua_example/www/diagnostics.html (CWE-78) [source: web.cgiToLuaTable]
+test/fixtures/cgilua_example/mesh/rename.lua:2:4: [709] critical: untrusted data reaches command execution (os.execute); untrusted data reached this sink from test/fixtures/cgilua_example/mesh/dispatch.lua (CWE-78) [source: web.cgiToLuaTable]
+
+Total: 2 findings (2 critical)
+Score: 50/100 (critical) - exec 2
+```
+
+What each step is:
+
+- **Page.** `diagnostics.html` is scanned by its `<?lua ... ?>` block; the HTML
+  around it is ignored and the finding keeps the page's own line numbers.
+- **Source.** `web.cgiToLuaTable(cgi)` is a request source in the cgilua std, so
+  `inputTable` and every field of it is tainted.
+- **Dotted global call.** `gui.net.trace.set(inputTable)` is a call to a function
+  written onto a global table's field path in another file; `--whole-program`
+  binds its argument to `cfg` there.
+- **Filtered sink.** `util.runShellCmd` strips some shell metacharacters from its
+  command, so the finding names what is removed and what still passes, one
+  confidence step lower than an unfiltered sink.
+- **Route table.** `methods[name]["methodHandler"](request, name)` indexes a table
+  literal with a key known only at run time, so every handler the table names is
+  a target: `renameNode` in `mesh/rename.lua` receives `request`.
+
+Without `--whole-program` each file is analyzed alone: the page has no sink, and
+the two library functions have sinks nothing in their own file feeds, so they are
+reported as exposed (`708`) rather than as proven flows (`709`):
+
+```
+test/fixtures/cgilua_example/lib/gui_net.lua:5:1: [708] high: execution sink in an exported function that nothing in this file feeds (gui.net.trace.set) (CWE-78) [source: ] [exposed as gui.net.trace.set]
+test/fixtures/cgilua_example/mesh/rename.lua:1:1: [708] high: execution sink in an exported function that nothing in this file feeds (renameNode) (CWE-78) [source: ] [exposed as renameNode]
+
+Total: 2 findings (2 high)
+Score: 94/100 (good) - exec 2
+```
+
+### What a CGILua scan does not follow
+
+Every limit of the web-backend story, in one place. A flow through any of these is
+missed, which is a known gap, not a clean result.
+
+- **Method calls.** `obj:set(x)` on a table-stored object is not resolved across
+  files; only dotted calls on a global root (`gui.a.b.set(x)`) are.
+- **Function values.** A function passed as an argument, returned, or stored
+  anywhere other than a route-table literal is not followed. In a route table,
+  entries added after the literal (`methods.X.methodHandler = f`) and handlers
+  defined in the dispatcher's own file are not followed either; a table with more
+  than 64 handlers is cut there and reported as a `904`.
+- **Computed `require`.** `require("lib/" .. name)` is not resolved. A route table
+  still reaches its handlers through their global names, so a mesh dispatcher
+  that loads the handler file this way is covered, but a module reached only
+  through a computed name is not.
+- **Entry points match by name or file.** An `entry_points` declaration taints the
+  parameters of functions whose name (and, with `file`, whose path) matches; a
+  handler that matches neither is not an entry point. See
+  [Entry points](firmware-stds.md#entry-points).
+- **Other callers of the same setters.** TR-069, a CLI, cron jobs or daemons that
+  call the same library functions are not modelled: only call edges visible in
+  the scanned Lua tree are followed.
+- **Stored values.** A setter that writes a request value to a database or a file
+  that another program later acts on is a hop the analysis does not see; the
+  flow ends at the write.
+- **`.lp` templates.** A directory walk collects `.html` and `.htm` pages that hold
+  a `<?lua ?>` block, but not `.lp` files: name a `.lp` page explicitly and it is
+  read by `<?lua ?>`, `<% %>` and `<%= %>` blocks.
 
 ## `--validate`
 

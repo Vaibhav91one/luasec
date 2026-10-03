@@ -235,7 +235,8 @@ callee strips; each position must also be in `arg`).
 ## Entry points
 
 A profile may declare functions that are called with request data, for a web
-server whose route table the analysis cannot follow:
+server whose dispatch the analysis cannot follow (`--whole-program` follows a
+route-table literal, but not a computed one or a handler registered later):
 
 ```lua
 return {
@@ -259,8 +260,9 @@ files, so a vendor whose handlers follow a per-folder convention can say "every
 function in these files":
 
 ```lua
-{pattern = "*", file = "*/teamf1lualib/easyMesh*.lua", arg = {1}}
+{pattern = "*", file = "*/meshlib/mesh*.lua", arg = {1}}
 ```
 
 A source string given to `check_source` has no path, so a `file` entry never
-matches it.
+matches it. What a CGILua scan still does not follow is listed in one place in
+[docs/usage.md](usage.md#what-a-cgilua-scan-does-not-follow).
