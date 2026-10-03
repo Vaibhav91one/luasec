@@ -1069,9 +1069,13 @@ missed, which is a known gap, not a clean result.
 - **Other callers of the same setters.** TR-069, a CLI, cron jobs or daemons that
   call the same library functions are not modelled: only call edges visible in
   the scanned Lua tree are followed.
-- **Stored values.** A setter that writes a request value to a database or a file
-  that another program later acts on is a hop the analysis does not see; the
-  flow ends at the write.
+- **Stored values outside a declared store.** A request value written to a
+  store the profile declares (`store_writes` / `store_reads`; the cgilua std
+  declares the `db.*` API) and read back into a command is reported as `729`,
+  paired by table and column across the whole scan. A write to anything else (a
+  file, a store no profile declares, a table name computed at run time), and a
+  value another program reads back, are not followed: the flow ends at the
+  write.
 - **`.lp` templates.** A directory walk collects `.html` and `.htm` pages that hold
   a `<?lua ?>` block, but not `.lp` files: name a `.lp` page explicitly and it is
   read by `<?lua ?>`, `<% %>` and `<%= %>` blocks.

@@ -70,6 +70,8 @@ local function quoted_descriptor(descriptor)
       line = descriptor.line,
       confidence = descriptor.confidence,
       shell_quoted = true,
+      stored = descriptor.stored,
+      store_key = descriptor.store_key,
    }
 end
 
@@ -155,6 +157,31 @@ end
 
 local function set_is_empty(set)
    return next(set) == nil
+end
+
+-- The set without values read back from a store. A stored value is untrusted
+-- only if something in the scan wrote request data there, which no single file
+-- can know, so it counts at an execution sink (as a pending 729, paired after
+-- the scan) and nowhere else: every other reader of taint sees the live set.
+local function live_only(set)
+   local live
+   for id, descriptor in pairs(set) do
+      if descriptor.stored then
+         if not live then
+            live = {}
+            for other_id, other in pairs(set) do live[other_id] = other end
+         end
+         live[id] = nil
+      end
+   end
+   return live or set
+end
+
+-- The string a node folds to, or nil.
+local function literal_of(node)
+   if type(node) ~= "table" then return nil end
+   local value = const_eval.value(node)
+   return type(value) == "string" and value or nil
 end
 
 local function set_list(set)
@@ -441,6 +468,28 @@ local function taint_of_call(node, item, state, depth)
    end
 
    if path then
+      -- A read from a declared store: the value is stored taint, keyed by the
+      -- table and column when the call names them as literals. A table that is
+      -- computed at run time matches no write and is not followed.
+      local read = platform_api.match_store_read(path)
+      if read then
+         local store_table = literal_of(args[read.table or 1])
+         if store_table then
+            local column = read.column and literal_of(args[read.column]) or nil
+            local key = store_table .. "." .. (column or "*")
+            local store = read.store or "db"
+            set_add(result, {
+               id = "store:" .. store .. ":" .. key,
+               name = store .. " " .. key,
+               line = node.line,
+               confidence = column and "medium" or "low",
+               stored = true,
+               store_key = key,
+            })
+         end
+         return result
+      end
+
       local source = platform_api.match_source(path)
       if source then
          set_add(result, {
@@ -796,7 +845,7 @@ local function check_shape(node, item, state, chstate, opts)
    if shape.code == "705" or shape.code == "706" then
       local arg = args_of(node)[1]
       if arg and not const_eval.is_constant(arg) then
-         local arg_taint = taint_of_expr(arg, item, state, 0)
+         local arg_taint = live_only(taint_of_expr(arg, item, state, 0))
          emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {
             name = path,
             confidence = set_is_empty(arg_taint) and "low" or "high",
@@ -838,13 +887,18 @@ local function check_sink(node, item, state, chstate, opts)
       return
    end
 
-   local tainted_args = {}
+   local tainted_args, stored = {}, {}
    for _, index in ipairs(sink.arg or {1}) do
       local arg = args[index]
       if arg then
-         local arg_taint = taint_of_expr(arg, item, state, 0)
+         local all_taint = taint_of_expr(arg, item, state, 0)
+         local arg_taint = live_only(all_taint)
          if not set_is_empty(arg_taint) then
             tainted_args[#tainted_args + 1] = {index = index, node = arg, taint = arg_taint}
+         elseif arg_taint ~= all_taint then
+            for _, descriptor in pairs(all_taint) do
+               if descriptor.stored then stored[#stored + 1] = {node = arg, descriptor = descriptor} end
+            end
          end
       end
    end
@@ -901,6 +955,34 @@ local function check_sink(node, item, state, chstate, opts)
 
    if #tainted_args > 0 then return end
 
+   -- Only values read back from a store reach this command. Whether that is a
+   -- finding depends on whether anything in the scan writes request data to the
+   -- same place, so it is a pending 729 that the pairing after the scan either
+   -- keeps (and then drops the 701/702 below at this site) or removes. Until
+   -- then the site reports exactly what it reported before.
+   if kind == "exec" and #stored > 0 then
+      table.sort(stored, function(a, b) return a.descriptor.store_key < b.descriptor.store_key end)
+      local keys, seen, exact = {}, {}, true
+      for _, entry in ipairs(stored) do
+         local key = entry.descriptor.store_key
+         if not seen[key] then
+            seen[key] = true
+            keys[#keys + 1] = key
+            if key:sub(-2) == ".*" then exact = false end
+         end
+      end
+      local finding = emit(state, {code = "729", pattern = sink.pattern, name = path}, node, chstate, {
+         name = path,
+         store = table.concat(keys, ", "),
+         confidence = exact and "medium" or "low",
+         snippet = snippet_at(chstate, stored[1].node),
+      })
+      if finding then
+         finding.pending_store = true
+         finding.store_keys = keys
+      end
+   end
+
    -- No known taint, but is the argument actually constant? If we cannot prove
    -- it is, the call is still an execution sink fed by something unknown.
    if opts.report_dynamic_sinks == false then return end
@@ -910,6 +992,40 @@ local function check_sink(node, item, state, chstate, opts)
       if arg and not const_eval.is_constant(arg) then
          emit(state, sink, node, chstate, {name = path, confidence = "low"})
       end
+   end
+end
+
+-- A call that writes request data to a declared store: recorded on the state as
+-- a fact the pairing after the scan matches against store reads. Not a finding
+-- by itself: a value at rest runs nothing.
+local function check_store_write(node, item, state)
+   local path = callee_path(node[1], item, state, 0)
+   local write = path and platform_api.match_store_write(path)
+   if not write then return end
+   local args = args_of(node)
+   local store_table = literal_of(args[write.table or 1])
+   if not store_table then return end
+   local value_node = args[write.value or write.row]
+   if not value_node then return end
+
+   local live = live_only(taint_of_expr(value_node, item, state, 0))
+   if set_is_empty(live) and write.row then
+      -- A row is a table: request data in any of its fields is a tainted write.
+      local fields = table_fields_of(value_node, item, state)
+      for _, field_taint in pairs(fields or {}) do
+         field_taint = live_only(field_taint)
+         if not set_is_empty(field_taint) then live = field_taint break end
+      end
+   end
+   if set_is_empty(live) then return end
+
+   local column = write.value and write.column and literal_of(args[write.column]) or nil
+   local key = store_table .. "." .. (column or "*")
+   local sources = set_list(live)
+   state.store_writes = state.store_writes or {}
+   local fact_key = key .. "|" .. node.line
+   if not state.store_writes[fact_key] then
+      state.store_writes[fact_key] = {key = key, line = node.line, source = sources[1].id}
    end
 end
 
@@ -924,6 +1040,7 @@ local function check_calls_in(expr, item, state, chstate, opts, depth)
    if expr.tag == "Call" or expr.tag == "Invoke" then
       check_shape(expr, item, state, chstate, opts)
       check_sink(expr, item, state, chstate, opts)
+      check_store_write(expr, item, state)
    end
    for _, child in ipairs(expr) do
       if type(child) == "table" then
@@ -1240,7 +1357,7 @@ end
 
 -- Exposed for the interprocedural pass, which reuses the same propagation.
 taint.new_state = new_state
-taint.of_expr = function(state, node, item) return taint_of_expr(node, item, state, 0) end
+taint.of_expr = function(state, node, item) return live_only(taint_of_expr(node, item, state, 0)) end
 taint.return_taint = return_taint
 taint.callee_path = function(node, item, state) return callee_path(node, item, state, 0) end
 taint.add_value = function(state, value, set)

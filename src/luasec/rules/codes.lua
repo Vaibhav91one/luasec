@@ -108,6 +108,10 @@ register {code = "722", severity = "high", cwe = "CWE-78",
    message = "configuration value set from untrusted data, which a service may later execute ({name})",
    fields = {"sink", "source", "sources", "trace", "chain"}}
 
+register {code = "729", severity = "high", cwe = "CWE-78", confidence = "medium",
+   message = "untrusted data stored in {store} is read back into command execution ({name})",
+   fields = {"sink", "source", "sources", "trace", "store", "writer"}}
+
 register {code = "723", severity = "medium", cwe = "CWE-538",
    message = "sensitive file read by path literal ({name})",
    fields = {"path"}}
