@@ -55,6 +55,14 @@ return {
       {pattern = "db.getRowsWhere", store = "db", table = 1},
       {pattern = "db.getTable", store = "db", table = 1},
    },
+   -- Host/IP validators used as guards before a diagnostics command. A value they
+   -- check still reaches the sink in the taint model, so it is reported one step
+   -- lower and names the guard for a reviewer to confirm.
+   validators = {
+      {pattern = "validations.is_ipv4_address"},
+      {pattern = "validations.is_ipv6_address"},
+      {pattern = "validations.is_fqdn_address"},
+   },
    propagators = {},
    sanitizers = {shell = {}, dyncode = {}, path = {}},
 }

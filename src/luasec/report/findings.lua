@@ -97,6 +97,7 @@ local function project(raw, status)
    -- Whether the data crossed a quoting helper decides if a 709 is exploitable,
    -- so it is part of the contract rather than an engine detail.
    if raw.sanitizer then out.sanitizer = text(raw.sanitizer) end
+   if raw.guarded_by then out.guarded_by = text(raw.guarded_by) end
    if type(raw.channels) == "table" and #raw.channels > 0 then
       local channels = {}
       for _, channel in ipairs(raw.channels) do channels[#channels + 1] = text(channel) end
