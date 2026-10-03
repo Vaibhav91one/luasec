@@ -225,15 +225,12 @@ end
 -- one path more, because a path that is not read cannot be reported as read.
 local READ_CHUNK = 65536
 
--- The link pass below writes one path in up to four records and the other two
--- write one each, so the reader is given as many records per path as the pass it
--- is reading can use. Running out of records always means running out of budget:
--- stopping the stream there instead would leave the rest of a legal listing
--- unread, which is a file missing from a report that says the tree was read. The
--- headroom is per pass rather than shared, because four times the limit read
--- before the walk is cut is four times the work the limit exists to bound.
+-- A link writes one path in up to four records and a file or an unreadable
+-- directory in two, so the reader is given four records per path. Running out of
+-- records always means running out of budget: stopping the stream there instead
+-- would leave the rest of a legal listing unread, which is a file missing from a
+-- report that says the tree was read.
 local LINK_RECORDS_PER_PATH = 4
-local ONE_RECORD_PER_PATH = 1
 
 local function read_nul_stream(pipe, budget)
    local records, pending, over = {}, "", false
@@ -314,28 +311,33 @@ local function reroot_batch(paths, anchor)
    return answers
 end
 
--- One pass over one directory, as three finds:
+-- One pass over one directory, as one find with three branches:
 --
---   find -H "$p" -type f -print0
---   find -H "$p" -type d -exec ... test -r ...
---   find -H "$p" -type l -exec ... the link pass ...
+--   find -H "$p" \( -type f -exec printf ... \) -o \( -type d -exec ... test -r ... \)
+--        -o \( -type l -exec ... the link pass ... \)
 --
 -- -H follows the scan root when the operator points luasec at a link, and
 -- nothing else. Every other link is resolved by expand_root below, which is what
 -- keeps a directory from being walked twice through two links that name it.
 --
--- Three finds and not one, because each find knows its own type. Working it out
--- from the spelling is the trap this walk already fell into: -type f matches a
--- symlink rather than its target, and a link reached with -H is still spelled
--- like a link, so a test on what find printed would call the root of a linked
--- directory a link and lose the tree.
+-- Each branch knows its own type and tags its records with it (`f` a file, `r`
+-- a directory we cannot read, `l`/`u` a link). Working the type out from the
+-- spelling is the trap this walk already fell into: -type f matches a symlink
+-- rather than its target, and a link reached with -H is still spelled like a
+-- link, so a test on what find printed would call the root of a linked
+-- directory a link and lose the tree. It was three finds, one per type, and each
+-- one stat'ed the whole tree again: over a 10,000-directory tree that was three
+-- times 0.4-0.7s, most of it system time (#205).
 --
 -- Two traps in the shell below, both of which answer silently and wrongly:
 --   - `-exec cmd {} +` passes every match as trailing arguments, so an sh -c
 --     script has to loop over "$@" rather than read "$1"
 --   - `test -e` on a link that resolves to a directory is true, so the link
 --     pass asks what the target is before it asks whether there is one
-local FILE_PASS = 'find -H "$p" -type f -print0 2>/dev/null'
+--
+-- `printf` repeats its format for every argument, so one batch of files is one
+-- tagged record per file.
+local FILE_BRANCH = '-type f -exec printf "f\\0%s\\0" {} +'
 
 -- Directories we cannot read. This is ground the walk did not cover, and it is
 -- silent otherwise, because find lists what it can, exits 0, and the tree looks
@@ -344,11 +346,10 @@ local FILE_PASS = 'find -H "$p" -type f -print0 2>/dev/null'
 -- Neither find's exit status nor its stderr catches an unreadable EMPTY
 -- directory on every platform, and an empty directory is exactly the case that
 -- matters: it is the tree that looks complete and is not. BSD find has no
--- -readable, so each candidate is asked about with test -r instead. This pass
--- writes bare paths, no kind, because it has only one kind to write.
-local UNREADABLE_PASS =
-   'find -H "$p" -type d -exec sh -c \'for x in "$@"; do '
-   .. 'test -r "$x" || printf "%s\\0" "$x"; done\' _ {} + 2>/dev/null'
+-- -readable, so each candidate is asked about with test -r instead.
+local UNREADABLE_BRANCH =
+   '-type d -exec sh -c \'for x in "$@"; do '
+   .. 'test -r "$x" || printf "r\\0%s\\0" "$x"; done\' _ {} +'
 
 -- Every link, with what it names and, for a directory, where the kernel says
 -- that directory is. Four records for a directory link -- the kind, the link,
@@ -378,8 +379,8 @@ local UNREADABLE_PASS =
 -- nothing else: there is no Lua source in a device node or a socket, and a fifo
 -- must never be opened at all, because reading one blocks until something
 -- writes to it and one entry in an image would hang the scan.
-local LINK_PASS =
-   'find -H "$p" -type l -exec sh -c \''
+local LINK_BRANCH =
+   '-type l -exec sh -c \''
    .. 'here=$(pwd -P) || exit 1; '
    .. 'for x in "$@"; do '
    .. 'if test -d "$x"; then '
@@ -389,7 +390,10 @@ local LINK_PASS =
    .. 'elif test -f "$x"; then printf "l\\0%s\\0f\\0" "$x"; '
    .. 'elif test -e "$x"; then printf "l\\0%s\\0n\\0" "$x"; '
    .. 'else printf "l\\0%s\\0x\\0" "$x"; fi '
-   .. 'done\' _ {} + 2>/dev/null'
+   .. 'done\' _ {} +'
+
+local ONE_PASS = 'find -H "$p" \\( ' .. FILE_BRANCH .. ' \\) -o \\( ' .. UNREADABLE_BRANCH
+   .. ' \\) -o \\( ' .. LINK_BRANCH .. ' \\) 2>/dev/null'
 
 -- Run one find pass and read what it printed. Returns the records, whether the
 -- pass printed more of them than the budget allows, and find's exit status, which
@@ -427,66 +431,69 @@ local function scan_dir(dir, state)
    -- this is checked here rather than after them: over the limit, the unreadable
    -- directories and the links of this directory are part of the rest the
    -- finding says was not read, so there is nothing to gain by asking.
-   local files, over, ok, reason =
-      find_pass(dir, FILE_PASS, state.left, ONE_RECORD_PER_PATH)
-   if not files then
+   local records, over, ok, reason =
+      find_pass(dir, ONE_PASS, state.left, LINK_RECORDS_PER_PATH)
+   if not records then
       return scan, ("could not list directory: %s"):format(dir)
    end
-   scan.files = files
-   state.over = over or state.over
-   charge(state, #files)
-   if state.over then return scan end
 
-   local unreadable, unreadable_over, unreadable_ok =
-      find_pass(dir, UNREADABLE_PASS, state.left, ONE_RECORD_PER_PATH)
-   if unreadable then
-      scan.unreadable = unreadable
-      state.over = unreadable_over or state.over
-      charge(state, #unreadable)
-   end
-   if state.over then return scan end
-
-   local records, links_over, links_ok =
-      find_pass(dir, LINK_PASS, state.left, LINK_RECORDS_PER_PATH)
-   if records then
-      state.over = links_over or state.over
-      local index = 1
-      while index <= #records do
-         local kind, entry = records[index]:sub(1, 1), records[index + 1] or ""
-         if kind == "u" then
-            scan.unreadable[#scan.unreadable + 1] = entry
-            index = index + 2
-         elseif kind == "l" and entry ~= "" then
-            local what = records[index + 2] or "x"
-            local link = {path = entry, kind = what}
-            if what == "d" then
-               link.dir = records[index + 3]
-               -- A stream the limit cut can end between a directory link's kind
-               -- and the directory it names. It is reported as a link that
-               -- resolves to nothing rather than indexed: we did not resolve it,
-               -- which is what that finding says, and dropping it silently is
-               -- the one answer that is not allowed here.
-               if link.dir == nil or link.dir == "" then link.kind = "x" end
-            end
-            scan.links[#scan.links + 1] = link
-            index = index + (what == "d" and 4 or 3)
-         else
-            -- A record this reader has no shape for, which is a stream that
-            -- ended in the middle of one. The budget is what stopped it, and the
-            -- gap for that is already accounted for.
-            index = index + 1
+   local index = 1
+   while index <= #records do
+      local kind, entry = records[index], records[index + 1] or ""
+      if kind == "f" and entry ~= "" then
+         scan.files[#scan.files + 1] = entry
+         index = index + 2
+      elseif kind == "r" and entry ~= "" then
+         scan.unreadable[#scan.unreadable + 1] = entry
+         index = index + 2
+      elseif kind == "u" and entry ~= "" then
+         scan.unreadable[#scan.unreadable + 1] = entry
+         index = index + 2
+      elseif kind == "l" and entry ~= "" then
+         local what = records[index + 2] or "x"
+         local link = {path = entry, kind = what}
+         if what == "d" then
+            link.dir = records[index + 3]
+            -- A stream the limit cut can end between a directory link's kind
+            -- and the directory it names. It is reported as a link that
+            -- resolves to nothing rather than indexed: we did not resolve it,
+            -- which is what that finding says, and dropping it silently is
+            -- the one answer that is not allowed here.
+            if link.dir == nil or link.dir == "" then link.kind = "x" end
          end
+         scan.links[#scan.links + 1] = link
+         index = index + (what == "d" and 4 or 3)
+      else
+         -- A record this reader has no shape for, which is a stream that
+         -- ended in the middle of one. The budget is what stopped it, and the
+         -- gap for that is already accounted for.
+         index = index + 1
       end
-      charge(state, #scan.links)
    end
+
+   -- The files are what the limit is about: past it the walk stops here, and
+   -- the unreadable directories and links are part of the rest the finding
+   -- says was not read.
+   if #scan.files > state.left then
+      for i = #scan.files, state.left + 1, -1 do scan.files[i] = nil end
+      over = true
+   end
+   state.over = over or state.over
+   charge(state, #scan.files)
+   if state.over then
+      scan.unreadable, scan.links = {}, {}
+      return scan
+   end
+   charge(state, #scan.unreadable)
+   if state.over then return scan end
+   charge(state, #scan.links)
 
    -- find lists what it can and exits non-zero for the rest, so a partial
    -- listing is still a listing: throwing it away would drop every readable
    -- file because of one directory we could not read, and keeping it silent
    -- would claim we read the whole tree. The named directory explains the exit
    -- status, so the fallback below is only for what that does not explain.
-   if not ok and not unreadable_ok and not links_ok and #scan.unreadable == 0
-      and reason and reason ~= "" then
+   if not ok and #scan.unreadable == 0 and reason and reason ~= "" then
       return scan, ("could not list %s: find %s"):format(dir, reason)
    end
    return scan

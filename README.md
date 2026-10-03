@@ -601,6 +601,7 @@ The most used flags:
 | `--baseline <file.json>` | report only what is new since that report |
 | `--severity-threshold, --min-confidence` | floor for reported severity, confidence |
 | `--whole-program` | follow `require` edges across files |
+| `--jobs <n>` | analyze files in n worker processes (same report; `--whole-program` stays in one) |
 | `--quiet` | print nothing when there are no findings |
 | `--score` | print only the 0-100 health score |
 | `--config <file>`, `--no-config` | settings file, or ignore it |
