@@ -410,9 +410,9 @@ than one that does not have the feature.
   same file that hands its argument back is followed, so
   `os.execute(id(http.formvalue("h")))` is reported. With `--whole-program`, the
   return value of a function in a module bound with `local m = require "mod"`
-  (e.g. `m.id(x)`) is followed too. A method call (`M:m`), a function passed as a
-  value, and a `require(...)` called inline inside an expression are not: that
-  flow is missed.
+  (e.g. `m.id(x)`, or `m:id(x)`) is followed too. A method call on any other
+  object, a function passed as a value, and a `require(...)` called inline inside
+  an expression are not: that flow is missed.
 - **A call that returns a cursor is opaque to the credential rule.** A factory
   named `open_section()` that returns `uci.cursor()` is not recognised as a
   config handle, so a credential written through it is not reported.

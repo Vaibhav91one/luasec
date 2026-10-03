@@ -233,8 +233,9 @@ the verdict itself are luasec's, and come from the sandbox rather than the paylo
   `local m = require "mod"` is also followed (`m.id(x)`). Also under `--whole-program`, a call to a dotted global function defined in
   another file (`gui.a.b.set(t)`), or through a route-table literal indexed by a
   run-time key (`routes[name].handler(req)`), binds its arguments to the callee's
-  parameters. A method call
-  (`M:m`), a function passed as a value, and a `require(...)` called inline
+  parameters, and so does the method spelling of the first two (`m:run(x)`,
+  `gui.net:set(t)`, the receiver bound to `self`). A method call on any other
+  object, a function passed as a value, and a `require(...)` called inline
   inside an expression are not followed: that flow stops and no finding is
   produced. Firmware that pipes request data through such a helper is missed,
   and that is a known limit rather than a clean bill of health.

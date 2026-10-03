@@ -612,6 +612,30 @@ local function member_of(file, callee, depth)
    return nil
 end
 
+-- What a call node calls, as an expression `member_of` and `dotted_name` can
+-- read. A method call `obj:m(x)` is the call `obj.m(obj, x)`, so its callee is
+-- the field `obj.m`, built here as the Index node the dotted spelling would have.
+local function callee_of(node)
+   if node.tag == "Invoke" then
+      return {tag = "Index", node[1], node[2]}
+   end
+   return node[1]
+end
+
+-- The arguments a call passes, in the order the callee's formals receive them.
+-- A method call passes its receiver first, which is where `function M:m(cfg)`
+-- has its implicit `self` and `M.m = function(self, cfg)` has its first formal.
+local function call_args(node)
+   local args = {}
+   if node.tag == "Invoke" then
+      args[1] = node[1]
+      for position = 3, #node do args[#args + 1] = node[position] end
+   else
+      for position = 2, #node do args[#args + 1] = node[position] end
+   end
+   return args
+end
+
 -- The Function node a resolved member names, within one module.
 local function function_for(entry, member)
    if not entry then return nil end
@@ -805,7 +829,8 @@ local function sites_of(file, index, max_sites, oracle)
    local add_target
 
    local function add(node, item)
-      local resolved = member_of(file, node[1])
+      local callee = callee_of(node)
+      local resolved = member_of(file, callee)
       local entry, function_node
       if resolved then
          entry = resolved.entry
@@ -813,9 +838,11 @@ local function sites_of(file, index, max_sites, oracle)
          if not entry or entry.file == file then return end
          function_node = function_for(entry, resolved.member)
       else
-         local target = dotted_target(file, node[1], index)
+         local target = dotted_target(file, callee, index)
          if not target then
-            local routed, cut = route_targets(file, node[1], index)
+            -- A route table is reached through a call, not a method call.
+            if node.tag == "Invoke" then return end
+            local routed, cut = route_targets(file, callee, index)
             if cut then file.routes_truncated = true end
             for _, route in ipairs(routed) do
                add_target(node, item, {member = route.node.name or "<route>"},
@@ -824,7 +851,7 @@ local function sites_of(file, index, max_sites, oracle)
             end
             return
          end
-         resolved = {member = dotted_name(node[1])}
+         resolved = {member = dotted_name(callee)}
          entry = {file = target.file, kind = "path"}
          function_node = target.node
       end
@@ -840,8 +867,7 @@ local function sites_of(file, index, max_sites, oracle)
          return
       end
 
-      local args = {}
-      for position = 2, #node do args[#args + 1] = node[position] end
+      local args = call_args(node)
       if oracle and reaches_sink(entry.file, function_node) then
          file.sites_with_sink = (file.sites_with_sink or 0) + 1
          file.sink_sites = file.sink_sites or {}
@@ -864,14 +890,15 @@ local function sites_of(file, index, max_sites, oracle)
    for _, line in ipairs(file.chstate.lines) do
       for _, item in ipairs(line.items) do
          if item.tag == "Eval" and type(item.node) == "table"
-               and item.node.tag == "Call" then
+               and (item.node.tag == "Call" or item.node.tag == "Invoke") then
             add(item.node, item)
             if file.sites_truncated then return file.sites end
          elseif item.tag == "Local" or item.tag == "Set" or item.tag == "OpSet" then
             -- `errorFlag, code = gui.a.b.set(t)`: the value is used, but the
             -- arguments still reach the callee's parameters.
             for _, written in ipairs(item.rhs or {}) do
-               if type(written) == "table" and written.tag == "Call" then
+               if type(written) == "table"
+                     and (written.tag == "Call" or written.tag == "Invoke") then
                   add(written, item)
                   if file.sites_truncated then return file.sites end
                end
@@ -1202,7 +1229,7 @@ function whole_program.analyze(states, opts)
             local cached = memo[call_node]
             if cached == nil then
                cached = false
-               local resolved = member_of(file, call_node[1])
+               local resolved = member_of(file, callee_of(call_node))
                local entry = resolved and (resolved.entry or entry_for(index, resolved.module))
                local fn = entry and entry.file ~= file and function_for(entry, resolved.member)
                if fn then cached = {fn, state_of(entry.file, ctx), entry.file.path} end

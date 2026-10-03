@@ -5,7 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Under `--whole-program`, a method call across files is followed like the dotted call it stands for: `mod:run(req)` into `function M:run(cfg)` or `M.run = function(self, cfg)` in a required module, and `gui.net:set(t)` into a global table's method in another file, the receiver binding to `self` (#210).
 - The file walk runs one `find` per scan root instead of three (files, unreadable directories, links), with the same file list and coverage gaps: over `corpus/` it takes 1.1-1.2s instead of 2.0-2.2s, most of the saving system time (#205).
+
 ## 0.3.0 - 2026-10-03
 
 - `--whole-program` peak memory over `corpus/` is down from about 270MB to about 190MB, with the same report and CPU time: the collector runs sooner while every file's syntax tree is held for the cross-file pass (#197).
