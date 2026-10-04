@@ -543,6 +543,36 @@ local function cannot_be_lua(path)
    return false
 end
 
+-- Directories whose contents are runtime state of a MOUNTED system rather than
+-- bytes the image carries. The kernel synthesises everything under /proc, /sys
+-- and /dev when the image is booted, and /tmp is scratch the boot scripts fill
+-- in, so no extraction of any firmware contains them: a link into one of these
+-- is a structural property of every rootfs, not ground this walk failed to read.
+local RUNTIME_STATE_ROOTS = {"/proc", "/sys", "/dev", "/tmp"}
+
+-- Whether a link target names runtime state rather than a place inside the image.
+--
+-- This is a question about the TARGET, not the link's own name: the link is
+-- spelled by the image, the target is the place it asks for. A target inside the
+-- image (/usr/lib/lua/foo.lua) names a location an extraction really could have
+-- held, so not finding it means something really is missing; a target into one
+-- of these roots cannot be recovered by any scan of an unmounted tree, because
+-- recovering it would mean mounting the image, which this tool does not do.
+--
+-- Only an ABSOLUTE target can land here. A relative target stays inside the
+-- image by construction, and a target with a `..` climbs back out of the root the
+-- operator pointed at, so neither is runtime state by this test.
+local function names_runtime_state(target)
+   if not target or target:sub(1, 1) ~= "/" then return false end
+   -- "//proc" is the same directory as "/proc" to every kernel, and a symlink
+   -- target spelled that way is not an attempt to name something else.
+   local normalized = "/" .. target:gsub("^/+", "")
+   for _, root in ipairs(RUNTIME_STATE_ROOTS) do
+      if normalized == root or normalized:sub(1, #root + 1) == root .. "/" then return true end
+   end
+   return false
+end
+
 -- Everything one scan root resolves to: the files under it, plus the ground its
 -- symlinks name that the walk has not already covered.
 --
@@ -641,9 +671,15 @@ local function expand_root(root)
    -- called a gap: when that copy exists the target is analyzed at its real
    -- path already. What is still missing is one finding per scan root, not one
    -- per link.
+   --
+   -- A link into runtime state is not in this set even when nothing is there:
+   -- the target is a place the image could not have carried, so its absence says
+   -- nothing about what this scan read.
    local missing = {}
    for _, entry in ipairs(dangling) do
-      if not entry.inside then missing[#missing + 1] = {path = entry.path, target = entry.target} end
+      if not entry.inside and not names_runtime_state(entry.target) then
+         missing[#missing + 1] = {path = entry.path, target = entry.target}
+      end
    end
    if #missing == 1 then
       problems[#problems + 1] = {
