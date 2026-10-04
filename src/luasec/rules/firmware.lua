@@ -1094,23 +1094,33 @@ end
 -- This asks `const_eval` the question 701 asks before it will report, and 701's
 -- silence on the same line is the disagreement this answers: one of two codes
 -- looking at one construct has to say the command cannot be injected. When
--- every argument the sink declares folds, nothing can be put into the command,
+-- every argument at the call site folds, nothing at all reaches the command,
 -- so what the handler exposes is a fixed command rather than an injection
 -- point.
 --
--- Every declared argument has to fold, not one of them: a sink that declares
--- two (`util.runShellCmd`'s command and its environment) has a command whose
--- value depends on both. A sink that declares none - `ffi.C.fork` - has nothing
--- to fold and so nothing to prove, and answers no. The 707 shape is the same
--- question asked about a name rather than an argument, and has no argument.
+-- The test is the whole argument list rather than the index the sink registry
+-- declares for the command, and that is a deliberate narrowing. A declared
+-- index is a claim about the API's signature; `nixio.exec` is registered as
+-- taking its command first, but the shell form `nixio.exec("/bin/sh", "-c", c)`
+-- takes it third, so asking about argument 1 alone would fold `"/bin/sh"` and
+-- downgrade a handler that passes request data in the third. Requiring every
+-- argument to fold is a weaker downgrade and the safe direction: 701's blind
+-- spot there is an omission, and repeating it as an assertion here would invent
+-- a finding rather than lose one.
+--
+-- A call with no arguments, and a hole in the argument list, prove nothing and
+-- answer no. `sink` is nil for the 707 shape, which names a library rather than
+-- a command and so has no argument to fold.
 local function literal_command(ctx, node, sink)
-   if not sink or not sink.arg or #sink.arg == 0 then return false end
-   local args = ctx.args_of(node)
-   for _, index in ipairs(sink.arg) do
-      local argument = args[index]
-      if not argument or not ctx.is_constant(argument) then return false end
+   if not sink then return false end
+   local from = node.tag == "Invoke" and 3 or 2
+   local count = 0
+   for index = from, #node do
+      local argument = node[index]
+      if type(argument) ~= "table" or not ctx.is_constant(argument) then return false end
+      count = count + 1
    end
-   return true
+   return count > 0
 end
 
 -- The first execution sink inside a function, as the dataflow pass's own view of

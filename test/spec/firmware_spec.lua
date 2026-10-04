@@ -626,6 +626,101 @@ return m
       assert_match(found[1].message, "the command is a literal", found[1].message)
    end)
 
+   it("still reports a handler whose command is built from request data at full strength", function()
+      -- The negative that stops this becoming rule deletion: the same shape,
+      -- one request-supplied value away from the literal, is still the finding
+      -- 724 exists for.
+      local report = api.check_source([[
+m = Map("telephony", "VoIP")
+m.on_after_commit = function(self)
+   luci.sys.call("/etc/init.d/telephony " .. self.target)
+end
+return m
+]], {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "the hook is an exposed sink either way")
+      assert_equal(found[1].severity, "high",
+         "a command built from request data is the remotely reachable execution 724 is for")
+      assert_equal(found[1].confidence, "medium")
+      assert_no_match(found[1].message, "the command is a literal", found[1].message)
+   end)
+
+   it("names the sink whose command can hold data when a handler has both kinds", function()
+      local report = api.check_source([[
+m = Map("telephony", "VoIP")
+m.on_after_commit = function(self)
+   luci.sys.call("/etc/init.d/telephony reload")
+   os.execute(self.command)
+end
+return m
+]], {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "one handler is one finding however many sinks it holds")
+      assert_equal(found[1].sink, "os.execute",
+         "the finding names the sink an argument can reach, not the literal that came first")
+      assert_equal(found[1].severity, "high",
+         "one reachable command is enough: the literal beside it does not downgrade the finding")
+   end)
+
+   it("downgrades a handler whose command is a local that only ever holds one constant", function()
+      -- The form real LuCI files use: the command is a module-local constant, and
+      -- `const_eval` folds a local whose sole reaching definition is a literal.
+      local report = api.check_source([[
+local RESTART = "/etc/init.d/telephony restart"
+
+m = Map("telephony", "VoIP")
+m.on_after_commit = function()
+   luci.sys.call(RESTART)
+end
+return m
+]], {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1)
+      assert_equal(found[1].severity, "medium",
+         "a local that folds is as fixed as the literal it was written with")
+   end)
+
+   it("does not downgrade a handler whose command local is assigned more than once", function()
+      -- The honesty half of the fold, and the half that stops this becoming a
+      -- false negative: a second definition anywhere means the value at the
+      -- call is not the constant.
+      local report = api.check_source([[
+local RESTART = "/etc/init.d/telephony restart"
+do RESTART = "/etc/init.d/other restart" end
+
+m = Map("telephony", "VoIP")
+m.on_after_commit = function()
+   luci.sys.call(RESTART)
+end
+return m
+]], {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1)
+      assert_equal(found[1].severity, "high",
+         "a local with a second definition is not a constant, whatever its first one is")
+   end)
+
+   it("does not downgrade when any other argument of the call can hold data", function()
+      -- `nixio.exec`'s declared command argument is its first, but the shell
+      -- form takes the command third. 701 has the same blind spot and is silent
+      -- on this line for the same reason; 724 must not turn that silence into a
+      -- claim that the command is fixed.
+      local report = api.check_source([[
+local ubus = require "ubus"
+local object = ubus.add("luci.example")
+
+object.run = function(self, data)
+   nixio.exec("/bin/sh", "-c", data.command)
+end
+
+return object
+]], {std = "+openwrt"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1)
+      assert_equal(found[1].severity, "high",
+         "an argument this rule cannot vouch for is a reason not to claim the command is fixed")
+   end)
+
    it("reports the exposure from the command line, naming the entry point", function()
       local out, code = harness.cli({"--std", "+openwrt",
          "test/fixtures/firmware/ubus_method.lua"})
