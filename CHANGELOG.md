@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- The `luci` std models how a LuCI handler actually receives input. `luci.dispatcher` resolves `/admin/luci/<module>/<action>/<segment>...` and calls the controller module's exported function as `stem_action(node, <every URL segment>)`, so every argument in a file under `controller/` — including the vararg of a `function(...)` handler — is declared as an entry point at `medium` confidence. Over `corpus/` this takes 709 from 5 to 17, and the weaker shape-only and exposed-sink findings those sites carried are no longer reported beside them (708 36 to 33, 724 28 to 25, 701 25 to 22, 702 21 to 15; two more sites now show their partial quoting, 712 1 to 3). `luci.http.getenv` — how a handler reads `REMOTE_ADDR` and the `HTTP_*` headers — is a source at `certain` (#226).
+- An `entry_points` entry may use `arg = "*"` for "every parameter, and the vararg", for a dispatcher whose arity is the request path rather than the signature. A `...` has no parameter position to list, so a handler written `function(...)` was untainted however long a position list was (#226).
+
 ## 0.4.0 - 2026-10-03
 
 - A profile may declare `validators` (an IP/host/number check used as a guard). A command flow guarded by one is kept but reported one confidence step lower with a `guarded_by` field and a message note, instead of at full confidence: a static pass cannot prove the check rejects every metacharacter, so the judgement is left to a reviewer or the `fix` agent. The cgilua std declares the CGILua IP/host validators (#218).

@@ -249,7 +249,8 @@ return {
 
 `pattern` is matched against a function's full name (`M.on_request`) and then its
 short name (`on_request`), with the same `*` and `?` wildcards as sources and sinks.
-`arg` lists the parameter positions that start tainted (default `{1}`). A sink
+`arg` lists the parameter positions that start tainted (default `{1}`, or `"*"`
+for every parameter and the vararg — see below). A sink
 reached from such a parameter is a 709 with the entry point as its source, so the
 708 "exposed sink nothing feeds" at that site is dropped. The cgilua std declares
 `*Handler` with argument 1 for the mesh JSON-RPC handlers.
@@ -263,9 +264,32 @@ function in these files":
 {pattern = "*", file = "*/meshlib/mesh*.lua", arg = {1}}
 ```
 
+`arg` may also be `"*"`, which means every parameter the function has **and** its
+vararg. Use it where the caller's arity is the request rather than the signature —
+a dispatcher that calls `handler(node, <every URL segment>)` does not promise a
+fixed number of arguments. It is the only way to reach a handler written
+`function(...)`, which has no formal parameter at any position:
+
+```lua
+{pattern = "*", file = "*/controller/*.lua", arg = "*"}
+```
+
+That is what the luci std declares. Without it, `function(...)` and every
+argument past the first were reachable to nobody: a `...` has no parameter
+position to list and the positions past the node name were never declared.
+
 A source string given to `check_source` has no path, so a `file` entry never
 matches it. What a CGILua scan still does not follow is listed in one place in
 [docs/usage.md](usage.md#what-a-cgilua-scan-does-not-follow).
+
+### What an entry point is allowed to claim
+
+An entry point asserts that the function *is* called with request data. It does
+not assert that anything calls it, so it cannot be reported at `certain` the way
+`luci.http.formvalue` is: `formvalue` reads the request, while an entry point
+infers it from where the function sits. Every std that declares entry points
+reports them at `medium` (`#178` for the cgilua mesh handlers, `#226` for the
+LuCI dispatcher) and this is why.
 
 ## Stores
 
