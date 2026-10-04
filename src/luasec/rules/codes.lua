@@ -124,9 +124,15 @@ register {code = "723", severity = "medium", cwe = "CWE-538",
    message = "sensitive file read by path literal ({name})",
    fields = {"path"}}
 
+-- The registered severity is the one that holds when the sink's command can
+-- hold request data. A handler whose command is a literal is the same exposure
+-- with no injection behind it, so its finding keeps the shape, carries lower
+-- strength, and says why in `{note}`. A finding with nothing to add must set
+-- that field to the empty string: `render` leaves an unset placeholder in the
+-- message rather than printing nothing.
 register {code = "724", severity = "high", cwe = "CWE-78",
-   message = "function containing an execution sink is exposed as an RPC handler ({name})",
-   fields = {"sink", "exposed_as"}}
+   message = "function containing an execution sink is exposed as an RPC handler ({name}){note}",
+   fields = {"sink", "exposed_as", "note"}}
 
 register {code = "725", severity = "high", cwe = "CWE-693",
    message = "sandbox or global environment manipulated ({name})"}
