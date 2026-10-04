@@ -331,7 +331,7 @@ return run
       assert_true(by_code["708"] ~= nil, "an exposed wrapper with no visible source is 708")
       assert_true(by_code["709"] == nil, "without a source the claim is exposure, not injection")
       assert_equal(by_code["708"].severity, "high",
-         "708 carries the severity of the sink it wraps, because it replaces 701 there")
+         "708 speaks at the severity of the sink it names, without replacing the 701 there")
    end)
 
    it("follows a tainted argument passed through a local id function (A)", function()

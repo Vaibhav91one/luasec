@@ -127,13 +127,14 @@ end
 -- Run a command with an untrusted path, without the path ever being part of the
 -- command text.
 --
--- luasec: ignore 708
+-- luasec: ignore 702,708
 -- Accepted, and worth saying why. This does hand a command to a shell, which is
--- the exposure 708 names, and luasec found it by scanning itself. What makes it
+-- what the 702 reports - the command is not a constant - and the exposure 708
+-- names, and luasec found it by scanning itself. What makes it
 -- safe is the three lines below: the untrusted path never appears in the command
 -- text, and the only variable in it, $p, comes from a temporary file we wrote.
 -- The report of a suppression is itself a small safety net: this comment is
--- written, it says 708, and it is above the function.
+-- written, it names both codes, and it is above the function.
 --
 -- Lua's %q escapes only " and \, so a directory named '/tmp/$(cmd)' would
 -- otherwise run a command substitution inside luasec itself, and SECURITY.md says
