@@ -4,9 +4,10 @@ return {
    name = "openresty",
    sources = {
       -- A blanket over every nginx variable, and not every one of them is
-      -- attacker-influenced: $pid and $hostname are the server's own, and a
-      -- header usually reaches nginx through a proxy that can rewrite it. The
-      -- claim is that the value is influenced, which is what the LuCI
+      -- attacker-influenced: $pid, $hostname, $status and $msec are the
+      -- server's own. One pattern cannot promise influence for each member it
+      -- covers, so the claim made here is the weaker one -- the value is
+      -- influenced, not proven attacker data -- which is what the LuCI
       -- dispatcher entry point claims about data inferred rather than read.
       {pattern = "ngx.var.*", id = "ngx.var", name = "nginx variable", confidence = "medium"},
       {pattern = "ngx.req.get_uri_arg", id = "ngx.req.get_uri_arg",
