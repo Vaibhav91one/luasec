@@ -63,6 +63,29 @@ return {
       -- it is the caller reaching that framing.
       {pattern = "ngx.location.capture", code = "731", kind = "subrequest",
          arg = {2}, taint_code = "731", taint_only = true},
+      -- ngx.header[k] = v is an ASSIGNMENT to an index target, so no call sink
+      -- above can see it: a call pattern is matched in callee position and there
+      -- is no callee. It is the same defect as ngx.resp.set_header -- the value
+      -- reaches the response header message and a CRLF in it splits the response
+      -- (CVE-2020-36309) -- so it is the same code rather than a second number
+      -- for one meaning, because someone filtering on 730 must see both
+      -- spellings. What is new is the position, not the risk; `kind = "assign"`
+      -- is what tells the engine to match a target instead of a callee, and
+      -- `arg = {1}` here means the first right-hand side, not the first argument.
+      --
+      -- The pattern matches the TARGET's base (`ngx.header`), not the whole
+      -- target, because the key is not the sink:
+      --
+      --   ngx.header[tainted_key] = "fixed"
+      --
+      -- is the attacker choosing WHICH header is written while the program still
+      -- chooses the bytes in it. That is header selection, not CWE-93 header
+      -- injection, so it is deliberately out of scope and reported as nothing.
+      -- It is written down rather than left undefined (see docs/rules/730.md)
+      -- because it leaves no injection surface open on its own: where the value
+      -- is tainted too, the value position below still fires and covers the CRLF.
+      {pattern = "ngx.header", code = "730", kind = "assign",
+         arg = {1}, taint_code = "730", taint_only = true},
    },
    propagators = {
       {pattern = "ngx.re.gsub", arg = {1}},
