@@ -122,11 +122,24 @@ reproducible.
 
 | Range | Meaning |
 | --- | --- |
+| 012 | unreadable `-- luasec:` suppression directive |
 | 701-712 | command execution / dynamic code sinks |
-| 721-728 | firmware-specific (flash, uci chain, sandbox escape, DoS) |
+| 721-729 | firmware-specific (flash, uci chain, sandbox escape, DoS, store hop) |
 | 741-750 | payload / backdoor patterns |
 | 801-805 | artifact / bytecode |
-| 901-903 | meta (parse failed, unsupported dialect, dialect mismatch) |
+| 901-904 | meta (901-903 parse failed, unsupported dialect, dialect mismatch; 904 analysis degraded on a large file, results approximate, never threshold-filterable) |
+
+Every registered code is in this table. The ranges contain gaps because not
+every number in them is registered.
+
+Codes that mean a file was **not fully analyzed** rather than clean are never
+filtered out by `--severity-threshold` and always fail the run: `012`, `801`,
+`803`, `805`, `901`, `902`, `904`. That is a set, not a property of one code -
+`904` is only the newest member of it - and `src/luasec/rules/degraded.lua` is
+the single list of them, read by the exit code, the threshold exemption and the
+baseline. `903` is deliberately not in it: it reports an API the configured Lua
+standard does not have, a statement about the profile rather than a gap in what
+was read.
 
 The 0xx-6xx range is luacheck's vocabulary and a luasec code must not collide with
 one it uses. The reserved set is enumerated in
@@ -138,7 +151,9 @@ luacheck's.
 Every code carries `severity` (critical/high/medium/low), `confidence`
 (certain/high/medium/low), and `cwe` where a CWE applies. Codes are registered in
 `src/luasec/rules/codes.lua` and documented in `docs/rules.md`; a spec asserts every
-registered code has a doc row.
+registered code has a doc row. That spec covers `docs/rules.md` only - it cannot
+read the table above - so when you add a code, update this table in the same PR or
+nothing will tell you it is stale.
 
 ## Commit / PR conventions
 
