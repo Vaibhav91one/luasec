@@ -104,3 +104,20 @@ describe("a directory inside the image that merely starts with a runtime root's 
       assert_equal(code, 1, out)
    end)
 end)
+
+describe("a dangling link into an ordinary directory under /tmp", function()
+   it("still reports, because /tmp is writable storage and not a runtime pseudo-filesystem", function()
+      -- /proc, /sys and /dev have their CONTENTS synthesised by the kernel at
+      -- boot. /tmp does not: it is an ordinary writable directory, and anything
+      -- a firmware or an operator put there is content, not machine state.
+      -- The path is fixed rather than under TMPDIR so this holds whether the
+      -- harness runs where TMPDIR points into /tmp (Linux CI) or elsewhere.
+      local dir = tree("tmp_ordinary")
+      os.execute("ln -s /tmp/luasec-absent-dir/handler.lua " .. q(dir .. "/bin/linked.lua"))
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_match(out, "could not resolve symlink", out)
+      assert_match(out, "coverage gap", out)
+      assert_equal(code, 1, out)
+   end)
+end)

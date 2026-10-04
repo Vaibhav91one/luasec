@@ -543,26 +543,47 @@ local function cannot_be_lua(path)
    return false
 end
 
--- Directories whose CONTENTS are runtime state of a MOUNTED system rather than
--- bytes the image carries. The kernel synthesises everything under /proc, /sys
--- and /dev when the image is booted, and /tmp is scratch the boot scripts fill
--- in, so no extraction of any firmware carries contents for them (images do
--- ship the directories, empty): a link into one of these is a structural
--- property of every rootfs, not ground this walk failed to read.
-local RUNTIME_STATE_ROOTS = {"/proc", "/sys", "/dev", "/tmp"}
+-- Directories whose CONTENTS the kernel synthesises when the image is booted,
+-- so no extraction of any firmware carries contents for them (images do ship
+-- the directories, empty). A link into one of these is a structural property of
+-- every rootfs, not ground this walk failed to read.
+--
+-- /tmp is deliberately NOT one of these. /proc, /sys and /dev are pseudo-
+-- filesystems the kernel mounts and fills; /tmp is an ordinary writable
+-- directory, and anything a firmware, a boot script or an operator put in it is
+-- content that an extraction really could have carried. Exempting the whole
+-- prefix therefore loses real gaps -- most visibly, any scan whose tree happens
+-- to sit under /tmp, where every unresolvable link in it looks like this. The
+-- two OpenWrt links that point into /tmp are handled by name below.
+local RUNTIME_PSEUDO_ROOTS = {"/proc", "/sys", "/dev"}
 
--- Whether a link target names runtime state rather than a place inside the image.
+-- The /etc links OpenWrt and its relatives have shipped for fifteen years,
+-- whose target the boot scripts create on every boot: /etc/localtime ->
+-- /tmp/localtime and /etc/TZ -> /tmp/TZ, both written by the timezone setup.
+--
+-- Named one by one because they are two known cases and not a shape. `/tmp` and
+-- `/tmp/localtime` are the same thing to a path test, so any rule that quiets
+-- the second quiets the first, and the first is exactly the missing artifact
+-- the finding exists to report. Keyed on the last two components of the LINK's
+-- own path so it matches wherever in the scanned tree the image sits. Adding to
+-- this table is a claim that a specific firmware ships a specific link, so it
+-- wants a real image to point at; widening it into a prefix is how /tmp was
+-- wrong in the first place.
+local BOOT_CREATED_TMP_LINKS = {["etc/localtime"] = true, ["etc/TZ"] = true}
+
+-- Whether a link names runtime state rather than a place inside the image.
 --
 -- This is a question about the TARGET, not the link's own name: the link is
 -- spelled by the image, the target is the place it asks for. A target inside the
 -- image (/usr/lib/lua/foo.lua) names a location an extraction really could have
--- held, so not finding it means something really is missing; a target into one
--- of these roots cannot be recovered by any scan of an unmounted tree, because
--- recovering it would mean mounting the image, which this tool does not do.
+-- held, so not finding it means something really is missing; a target into a
+-- pseudo-filesystem cannot be recovered by any scan of an unmounted tree,
+-- because recovering it would mean mounting the image, which this tool does not
+-- do and should not.
 --
 -- Only an ABSOLUTE target can land here. A relative target stays inside the
 -- image by construction, so it is not runtime state by this test.
-local function names_runtime_state(target)
+local function names_runtime_state(link_path, target)
    if not target or target:sub(1, 1) ~= "/" then return false end
    -- "//proc" is the same directory as "/proc" to every kernel, and a symlink
    -- target spelled that way is not an attempt to name something else.
@@ -579,8 +600,12 @@ local function names_runtime_state(target)
    for segment in normalized:gmatch("[^/]+") do
       if segment == ".." then return false end
    end
-   for _, root in ipairs(RUNTIME_STATE_ROOTS) do
+   for _, root in ipairs(RUNTIME_PSEUDO_ROOTS) do
       if normalized == root or normalized:sub(1, #root + 1) == root .. "/" then return true end
+   end
+   if normalized == "/tmp" or normalized:sub(1, 5) == "/tmp/" then
+      local tail = link_path:match("([^/]+/[^/]+)$")
+      return tail ~= nil and BOOT_CREATED_TMP_LINKS[tail] == true
    end
    return false
 end
@@ -689,7 +714,7 @@ local function expand_root(root)
    -- nothing about what this scan read.
    local missing = {}
    for _, entry in ipairs(dangling) do
-      if not entry.inside and not names_runtime_state(entry.target) then
+      if not entry.inside and not names_runtime_state(entry.path, entry.target) then
          missing[#missing + 1] = {path = entry.path, target = entry.target}
       end
    end
