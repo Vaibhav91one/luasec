@@ -124,7 +124,7 @@ reproducible.
 | --- | --- |
 | 012 | unreadable `-- luasec:` suppression directive |
 | 701-712 | command execution / dynamic code sinks |
-| 721-729 | firmware-specific (flash, uci chain, sandbox escape, DoS, store hop) |
+| 721-731 | firmware-specific (flash, uci chain, sandbox escape, DoS, store hop, HTTP header and subrequest writes) |
 | 741-750 | payload / backdoor patterns |
 | 801-805 | artifact / bytecode |
 | 901-904 | meta (901-903 parse failed, unsupported dialect, dialect mismatch; 904 analysis degraded on a large file, results approximate, never threshold-filterable) |

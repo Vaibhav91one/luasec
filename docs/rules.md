@@ -50,6 +50,8 @@ default), `low` (shape only, no proven flow).
 | 727 | medium | CWE-400 | unbounded string growth can exhaust memory |
 | 728 | medium | CWE-1333 | untrusted data used as a search pattern |
 | 729 | high | CWE-78 | untrusted data stored, then read back into command execution |
+| 730 | high | CWE-93 | untrusted data written into an HTTP header or URI |
+| 731 | high | CWE-444 | untrusted data written into an HTTP subrequest |
 
 ## 7xx - payload and backdoor
 
