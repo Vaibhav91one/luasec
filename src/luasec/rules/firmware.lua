@@ -1104,9 +1104,11 @@ end
 -- taking its command first, but the shell form `nixio.exec("/bin/sh", "-c", c)`
 -- takes it third, so asking about argument 1 alone would fold `"/bin/sh"` and
 -- downgrade a handler that passes request data in the third. Requiring every
--- argument to fold is a weaker downgrade and the safe direction: 701's blind
--- spot there is an omission, and repeating it as an assertion here would invent
--- a finding rather than lose one.
+-- argument to fold is a weaker downgrade and the safe direction. 701's blind
+-- spot there is an omission -- it reports nothing. Repeating it as an assertion
+-- here would go the other way and cost a real one: the handler passing request
+-- data in the third argument would be downgraded to medium and reported as a
+-- literal, which loses the high finding rather than inventing it.
 --
 -- A call with no arguments, and a hole in the argument list, prove nothing and
 -- answer no. `sink` is nil for the 707 shape, which names a library rather than
