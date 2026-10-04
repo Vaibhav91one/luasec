@@ -63,6 +63,10 @@ describe("a dangling symlink to a place inside the image that is simply not ther
       os.execute("rm -rf " .. q(dir))
       assert_match(out, "could not resolve symlink", out)
       assert_match(out, "coverage gap", out)
+      -- BOTH of them. The `/proc/..` one is the load-bearing half: drop the
+      -- `..` guard and it matches the `/proc/` prefix and goes quiet, so a spec
+      -- that only asserted "some gap" would never notice.
+      assert_match(out, "and 1 more", out)
       assert_equal(code, 1, out)
    end)
 end)
@@ -101,6 +105,10 @@ describe("a directory inside the image that merely starts with a runtime root's 
       os.execute("rm -rf " .. q(dir))
       assert_match(out, "could not resolve symlink", out)
       assert_match(out, "coverage gap", out)
+      -- All FOUR, not merely one. Asserting only that a gap appeared would
+      -- still pass with three of the four quietly exempted, which is the way
+      -- this very exemption was too wide to begin with.
+      assert_match(out, "and 3 more", out)
       assert_equal(code, 1, out)
    end)
 end)
@@ -114,6 +122,19 @@ describe("a dangling link into an ordinary directory under /tmp", function()
       -- harness runs where TMPDIR points into /tmp (Linux CI) or elsewhere.
       local dir = tree("tmp_ordinary")
       os.execute("ln -s /tmp/luasec-absent-dir/handler.lua " .. q(dir .. "/bin/linked.lua"))
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_match(out, "could not resolve symlink", out)
+      assert_match(out, "coverage gap", out)
+      assert_equal(code, 1, out)
+   end)
+
+   it("still reports for an /etc link into /tmp that is not one the boot scripts create", function()
+      -- Only /etc/localtime and /etc/TZ are known to be written on every boot.
+      -- They are two named cases, not a shape, so an arbitrary /etc link into
+      -- /tmp is an ordinary missing file until a real image says otherwise.
+      local dir = tree("tmp_unknown_etc")
+      os.execute("ln -s /tmp/luasec-absent-dir/handler.lua " .. q(dir .. "/etc/handler.lua"))
       local out, code = harness.cli({dir})
       os.execute("rm -rf " .. q(dir))
       assert_match(out, "could not resolve symlink", out)
