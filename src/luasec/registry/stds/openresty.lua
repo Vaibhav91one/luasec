@@ -3,11 +3,23 @@
 return {
    name = "openresty",
    sources = {
-      {pattern = "ngx.var.*", id = "ngx.var", name = "nginx variable", confidence = "high"},
+      -- A blanket over every nginx variable, and not every one of them is
+      -- attacker-influenced: $pid, $hostname, $status and $msec are the
+      -- server's own. One pattern cannot promise influence for each member it
+      -- covers, so the claim made here is the weaker one -- the value is
+      -- influenced, not proven attacker data -- which is what the LuCI
+      -- dispatcher entry point claims about data inferred rather than read.
+      {pattern = "ngx.var.*", id = "ngx.var", name = "nginx variable", confidence = "medium"},
       {pattern = "ngx.req.get_uri_arg", id = "ngx.req.get_uri_arg",
          name = "request query argument", confidence = "certain"},
       {pattern = "ngx.req.get_uri_arg.*", id = "ngx.req.get_uri_arg",
          name = "request query argument", confidence = "certain"},
+      -- The plural getters are different functions from the singular ones and
+      -- were undeclared, so the documented idiom -- read the whole args table,
+      -- then take a column -- matched no source at all. The confidence is the
+      -- singular form's for the singular form's reason: it reads the request.
+      {pattern = "ngx.req.get_uri_args", id = "ngx.req.get_uri_args",
+         name = "request query argument table", confidence = "certain"},
       {pattern = "ngx.req.get_post_args", id = "ngx.req.get_post_args",
          name = "request body", confidence = "certain"},
       {pattern = "ngx.req.get_headers", id = "ngx.req.get_headers",
