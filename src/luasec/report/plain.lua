@@ -1,4 +1,5 @@
 -- Human readable report.
+local contract = require "luasec.report.findings"
 local score = require "luasec.report.score"
 local categories = require "luasec.rules.categories"
 local plain = {}
@@ -9,12 +10,24 @@ function plain.severity_rank(severity)
    return SEVERITY_ORDER[severity] or 0
 end
 
-local function location(finding, opts)
-   local location = (finding.file or "<source>") .. ":" .. tostring(finding.line) .. ":" .. tostring(finding.column)
+-- `path:line:column`, or nil when the finding names no file a reader can open.
+--
+-- The finding that matters here is the one about the run rather than about a
+-- place in it: the aggregate gap over an image whose symlinks all resolve to
+-- nothing, a tree that hit the walk bound, a directory that would not list.
+-- Those carry the scanned directory, and `dir:1:1` is formatted so that
+-- `vim +{line} {file}` or an editor's "jump to location" will try to open it -
+-- there is nothing there a reader can be sent to. SARIF makes the same call
+-- and omits the location; printing one here would have the two formats
+-- disagreeing about a finding they otherwise report identically.
+local function location(finding, opts, memo)
+   local file = contract.open_file(finding, memo)
+   if not file then return nil end
+   local place = file .. ":" .. tostring(finding.line) .. ":" .. tostring(finding.column)
    if opts.ranges then
-      location = location .. "-" .. tostring(finding.end_column)
+      place = place .. "-" .. tostring(finding.end_column)
    end
-   return location
+   return place
 end
 
 --- The closing "Score: ..." line for a findings list.
@@ -37,9 +50,11 @@ end
 function plain.render(report, opts)
    opts = opts or {}
    local buffer = {}
+   local memo = {}
 
    for _, finding in ipairs(report) do
-      local text = location(finding, opts) .. ": "
+      local place = location(finding, opts, memo)
+      local text = place and (place .. ": ") or ""
       text = text .. string.format("[%s] %s: %s", finding.code, finding.severity, finding.message or "")
       if finding.cwe and finding.cwe ~= "CWE-0" then
          text = text .. " (" .. finding.cwe .. ")"
