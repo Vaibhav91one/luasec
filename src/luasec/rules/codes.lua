@@ -141,6 +141,14 @@ register {code = "728", severity = "medium", cwe = "CWE-1333",
    message = "untrusted data used as a search pattern ({name})",
    fields = {"sink", "source", "sources", "trace"}}
 
+register {code = "730", severity = "high", cwe = "CWE-93", confidence = "high",
+   message = "untrusted data written into an HTTP header or URI ({name})",
+   fields = {"sink", "source", "sources", "trace", "snippet"}}
+
+register {code = "731", severity = "high", cwe = "CWE-444", confidence = "high",
+   message = "untrusted data written into an HTTP subrequest ({name})",
+   fields = {"sink", "source", "sources", "trace", "snippet"}}
+
 -- ---------------------------------------------------------------- 7xx payload
 
 register {code = "741", severity = "critical", cwe = "CWE-94",

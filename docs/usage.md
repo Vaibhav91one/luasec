@@ -144,8 +144,17 @@ bin/luasec --std +openwrt+luci test/fixtures/firmware/uci_tainted_value.lua
 ### openresty
 
 OpenResty / ngx_lua. Sources are nginx request variables (`ngx.var.*`,
-`ngx.req.get_headers`, `ngx.req.get_body_data`), sinks are `ngx.exec` and
-`ngx.pty.spawn`. The bundled luacheck `ngx` standard is already loaded for name
+`ngx.req.get_headers`, `ngx.req.get_body_data`).
+
+Sinks that execute are `ngx.exec` and `ngx.pty.spawn`. Sinks that write
+attacker data back into the HTTP message are `ngx.resp.set_header`,
+`ngx.req.set_header`, `ngx.req.set_uri`, `ngx.req.set_uri_args` and
+`ngx.redirect`, reported as `730` (CRLF injection, CWE-93), and
+`ngx.location.capture`, reported as `731` (request smuggling, CWE-444). These
+fire only on a proven taint flow, so writing a header from a local variable
+holding a constant is not a finding.
+
+The bundled luacheck `ngx` standard is already loaded for name
 checks; this profile only attaches the security meaning.
 
 ```sh
