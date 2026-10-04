@@ -260,6 +260,22 @@ local function best_match(list, path)
    return best
 end
 
+-- best_match restricted by a predicate on the entry. A sink declares which
+-- position it is matched in: `kind = "assign"` entries are targets and every
+-- other kind is a callee, so the two can share one declaration list without
+-- either matcher being able to return the other's entries.
+local function best_match_where(list, path, accepts)
+   local best
+   for _, entry in ipairs(list) do
+      if accepts(entry) and util.wild_match(entry.pattern, path) then
+         if not best or specificity(entry) < specificity(best) then
+            best = entry
+         end
+      end
+   end
+   return best
+end
+
 -- Find the first matching source declaration for a callee path.
 function platform_api.match_source(path)
    return best_match(platform_sources, path) or best_match(default_sources, path)
@@ -314,8 +330,26 @@ function platform_api.match_global_source(name)
    return nil
 end
 
+-- An entry with no `kind` is a callee, which is what `check_sink` has always
+-- matched. An `assign` entry declares a target and is not a callee, so it is
+-- excluded here and not only in match_assign_sink: that keeps `ngx.header` from
+-- ever being returned for a call, and it is what makes call matching provably
+-- unchanged by the presence of an assignment sink.
+local function is_callee_sink(entry)
+   return (entry.kind or "shell") ~= "assign"
+end
+
 function platform_api.match_sink(path)
-   return best_match(default_sinks, path)
+   return best_match_where(default_sinks, path, is_callee_sink)
+end
+
+-- The assignment-shaped sink a target's base path matches, or nil. Kept
+-- deliberately separate from match_sink: the two answer different questions
+-- (is this expression called, or written to) and sharing one matcher is how a
+-- target would end up being matched as a callee.
+function platform_api.match_assign_sink(path)
+   return best_match_where(default_sinks, path,
+      function(entry) return entry.kind == "assign" end)
 end
 
 function platform_api.match_propagator(path)
