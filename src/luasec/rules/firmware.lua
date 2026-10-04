@@ -1089,6 +1089,42 @@ local function execution_sink(path)
    return nil
 end
 
+-- Is the command a call executes fixed before the program runs?
+--
+-- This asks `const_eval` the question 701 asks before it will report, and 701's
+-- silence on the same line is the disagreement this answers: one of two codes
+-- looking at one construct has to say the command cannot be injected. When
+-- every argument at the call site folds, nothing at all reaches the command,
+-- so what the handler exposes is a fixed command rather than an injection
+-- point.
+--
+-- The test is the whole argument list rather than the index the sink registry
+-- declares for the command, and that is a deliberate narrowing. A declared
+-- index is a claim about the API's signature; `nixio.exec` is registered as
+-- taking its command first, but the shell form `nixio.exec("/bin/sh", "-c", c)`
+-- takes it third, so asking about argument 1 alone would fold `"/bin/sh"` and
+-- downgrade a handler that passes request data in the third. Requiring every
+-- argument to fold is a weaker downgrade and the safe direction. 701's blind
+-- spot there is an omission -- it reports nothing. Repeating it as an assertion
+-- here would go the other way and cost a real one: the handler passing request
+-- data in the third argument would be downgraded to medium and reported as a
+-- literal, which loses the high finding rather than inventing it.
+--
+-- A call with no arguments, and a hole in the argument list, prove nothing and
+-- answer no. `sink` is nil for the 707 shape, which names a library rather than
+-- a command and so has no argument to fold.
+local function literal_command(ctx, node, sink)
+   if not sink then return false end
+   local from = node.tag == "Invoke" and 3 or 2
+   local count = 0
+   for index = from, #node do
+      local argument = node[index]
+      if type(argument) ~= "table" or not ctx.is_constant(argument) then return false end
+      count = count + 1
+   end
+   return count > 0
+end
+
 -- The first execution sink inside a function, as the dataflow pass's own view of
 -- that function sees it: the lines the function owns, so a sink in a nested
 -- closure belongs to the closure and a sink in a wrapper belongs to the wrapper.
@@ -1111,17 +1147,19 @@ end
 -- for the handler that encloses it, which is true of anything the closure's own
 -- registration would have said.
 local function sink_in_body(ctx, function_node)
-   local found, escape
+   local found, escape, literal
    local function visit(node, depth)
       if found or depth > 200 or type(node) ~= "table" then return end
       if node.tag == "Call" or node.tag == "Invoke" then
          local path = call_path(ctx, node)
          if path then
-            local kind = execution_sink(path)
+            local kind, sink = execution_sink(path)
             if kind and not engine_reported(ctx, node, "709")
                   and not engine_reported(ctx, node, "710") then
                if kind == "exec" then
-                  found = {path = path, node = node}
+                  local hit = {path = path, node = node,
+                     literal = literal_command(ctx, node, sink)}
+                  if hit.literal then literal = literal or hit else found = hit end
                   return
                end
                escape = escape or {path = path, node = node}
@@ -1143,7 +1181,7 @@ local function sink_in_body(ctx, function_node)
    end
 
    visit(function_node, 0)
-   return found, escape
+   return found or escape or literal
 end
 
 -- Memoized per context, and the memo is what keeps a function registered twice
@@ -1157,10 +1195,10 @@ local function first_sink(ctx, function_node, state)
       sink_memo_ctx, sink_memo = ctx, {}
    end
 
-   local found, escape
+   local found, escape, literal
    local lines = callgraph.index_lines(ctx.chstate)[function_node]
    if not lines then
-      found, escape = sink_in_body(ctx, function_node)
+      found = sink_in_body(ctx, function_node)
    end
    for _, line in ipairs(lines or {}) do
       for _, item in ipairs(line.items) do
@@ -1170,17 +1208,26 @@ local function first_sink(ctx, function_node, state)
                local callee = node.tag == "Invoke" and node or node[1]
                local path = callee and taint_engine.callee_path(callee, item, state) or nil
                if path then
-                  local kind = execution_sink(path)
+                  local kind, sink = execution_sink(path)
                   -- A sink whose flow is already proven is 709's finding; the
                   -- walk carries on to an unproven one rather than stopping.
                   if kind and not engine_reported(ctx, node, "709")
                         and not engine_reported(ctx, node, "710") then
-                     local hit = {path = path, node = node}
                      if kind == "exec" then
-                        found = hit
-                        break
+                        local hit = {path = path, node = node,
+                           literal = literal_command(ctx, node, sink)}
+                        -- A handler that also reaches a sink whose command can
+                        -- hold data is that finding, wherever in the body the
+                        -- literal sits, so the walk carries on to one.
+                        if hit.literal then
+                           literal = literal or hit
+                        else
+                           found = hit
+                           break
+                        end
+                     else
+                        escape = escape or {path = path, node = node}
                      end
-                     escape = escape or hit
                   end
                end
             end
@@ -1189,9 +1236,8 @@ local function first_sink(ctx, function_node, state)
       if found then break end
    end
 
-   found = found or escape
-   sink_memo[function_node] = found
-   return found
+   sink_memo[function_node] = found or escape or literal
+   return sink_memo[function_node]
 end
 
 -- The function a value hands over, when the value is one. A handler written as
@@ -1474,6 +1520,37 @@ local function detect_exposed_handler(ctx)
 
    local returned_names, returned_tables = returned_by_file(ctx)
 
+   -- The strength of a 724 finding, which is 724's registered high when the
+   -- command can hold request data and a lower pair when it cannot.
+   --
+   -- The exposure is the same either way: a hook the framework runs on a
+   -- submitted form, a method anyone on the network can call. What a literal
+   -- command removes is the injection, and with it the reason to read this as a
+   -- remotely reachable RCE. Reporting it as `high` anyway is what made 724 the
+   -- second-largest family in the corpus measurement and trained an operator to
+   -- skim the code that is right.
+   --
+   -- Severity goes to medium and confidence to low. The finding is still made -
+   -- an exposed root command is worth a look, and an operator who gates on
+   -- `--severity-threshold high` is exactly the one who should not have to read
+   -- it - but the confidence is low because "nothing can be injected" is a
+   -- property this rule inferred by folding an expression, not a flow it
+   -- proved.
+   local function exposure_of(function_node, anchor, key, sink)
+      local extra = {
+         name = function_node.name or key,
+         exposed_as = key,
+         sink = sink.path,
+         note = "",
+      }
+      if sink.literal then
+         extra.severity = "medium"
+         extra.confidence = "low"
+         extra.note = " - the command is a literal, so this is an exposure, not an injection"
+      end
+      ctx:emit("724", anchor, extra)
+   end
+
    for _, method in ipairs(methods) do
       local is_ubus = (method.table and ubus_tables[method.table])
          or (method.object and objects[method.object])
@@ -1490,11 +1567,7 @@ local function detect_exposed_handler(ctx)
          local function_node = function_of_value(method.value, globals)
          local sink = function_node and first_sink(ctx, function_node, state)
          if sink then
-            ctx:emit("724", method.anchor, {
-               name = function_node.name or method.key,
-               exposed_as = method.key,
-               sink = sink.path,
-            })
+            exposure_of(function_node, method.anchor, method.key, sink)
          end
       end
    end
@@ -1508,11 +1581,7 @@ local function detect_exposed_handler(ctx)
       end
       local sink = function_node and first_sink(ctx, function_node, state)
       if sink then
-         ctx:emit("724", action.anchor, {
-            name = function_node.name or action.key,
-            exposed_as = action.key,
-            sink = sink.path,
-         })
+         exposure_of(function_node, action.anchor, action.key, sink)
       end
    end
 end
