@@ -18,9 +18,39 @@ return {
    sinks = {
       {pattern = "ngx.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "ngx.pty.spawn", code = "701", kind = "exec", arg = {1}},
-      {pattern = "ngx.redirect", code = "728", kind = "pattern", arg = {1}},
       {pattern = "ngx.re.find", code = "728", kind = "pattern", arg = {2}},
       {pattern = "ngx.re.gsub", code = "728", kind = "pattern", arg = {2}},
+      -- CVE-2020-36309 (lua-nginx-module < 0.10.16): the API allows unsafe
+      -- characters in an argument used to mutate a URI or a request or response
+      -- header. Which message the bytes land in is what differs:
+      --   response side - ngx.resp.set_header and ngx.redirect write what the
+      --     client parses, so a CRLF splits one response into two.
+      --   request side - ngx.req.set_header, ngx.req.set_uri and
+      --     ngx.req.set_uri_args rewrite the request this handler forwards, so
+      --     the CRLF lands on the upstream request, not on the response.
+      -- Same defect, same fix: the value must not reach the message unescaped.
+      {pattern = "ngx.resp.set_header", code = "730", kind = "header",
+         arg = {2}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_header", code = "730", kind = "header",
+         arg = {2}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_uri", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_uri_args", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      -- ngx.redirect writes a Location header, so it is response side. It used
+      -- to be declared as a search-pattern sink: a tainted target was reported
+      -- as 728/CWE-1333 when the argument was merely non-constant, and as
+      -- 709/CWE-78 command execution when it was tainted. It runs no command.
+      {pattern = "ngx.redirect", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      -- CVE-2020-11724 (OpenResty < 1.15.8.4, patched in 9ab38e8). The fix stops
+      -- the subrequest from inheriting the parent's Content-Length and crafts
+      -- its own, so before it a capture could carry a Content-Length and a
+      -- Transfer-Encoding that an upstream proxy and nginx disagreed about. The
+      -- second argument is that options table, and a tainted body or header in
+      -- it is the caller reaching that framing.
+      {pattern = "ngx.location.capture", code = "731", kind = "subrequest",
+         arg = {2}, taint_code = "731", taint_only = true},
    },
    propagators = {
       {pattern = "ngx.re.gsub", arg = {1}},
