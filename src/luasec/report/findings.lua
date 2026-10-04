@@ -142,6 +142,51 @@ function findings.fingerprint(finding)
    return table.concat({finding.code, finding.name, finding.file}, ":")
 end
 
+-- Whether `path` names a directory. Opening it is not the test: POSIX open(2)
+-- with O_RDONLY on a directory succeeds on both platforms this ships on, and
+-- the read behind it is what fails with EISDIR. So the read is the probe.
+--
+-- Only a positive answer decides anything. A path that cannot be opened at all
+-- is not called a directory here, because it cannot be told apart from a file
+-- that was scanned from stdin or written somewhere this run cannot see, and
+-- unanchoring one of those costs a real location to guard against a
+-- hypothetical platform whose fopen refuses a directory.
+local function is_directory(path, memo)
+   local cached = memo and memo[path]
+   if cached ~= nil then return cached end
+   local answer = false
+   local handle = io.open(path, "rb")
+   if handle then
+      answer = not handle:read(0)
+      handle:close()
+   end
+   if memo then memo[path] = answer end
+   return answer
+end
+
+--- The file a consumer can open for this finding, or nil when it names none.
+--
+-- Not every finding is about a place in the scanned tree. The aggregate gap
+-- over an image whose symlinks all resolve to nothing is about the whole run,
+-- and the walk bound and an unlistable directory are too; those carry the
+-- scanned directory as their `file`, because the directory is what the run was
+-- given. A directory is not a location - nothing opens it - so a format that
+-- renders one is publishing a pointer to nowhere, and the finding that says
+-- "this run did not fully read your firmware" becomes the one finding a reader
+-- cannot get to.
+--
+-- A renderer asks this before emitting a navigable location, rather than
+-- reading `finding.file` itself, so plain and SARIF cannot drift apart on what
+-- counts as a place. `memo` is an optional table held for the length of one
+-- render: findings arrive grouped by file, so a report of ten thousand
+-- findings in a hundred files probes a hundred paths rather than ten thousand.
+function findings.open_file(finding, memo)
+   local file = finding.file
+   if file == nil or file == "" then return nil end
+   if is_directory(file, memo) then return nil end
+   return file
+end
+
 --- Every finding of a report, in report order, on the contract.
 function findings.normalize(report, status)
    local out = {}
