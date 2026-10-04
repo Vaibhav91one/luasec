@@ -21,14 +21,14 @@ end
       assert_equal(codes(report), "709", "uci.get is a source under the openwrt profile")
    end)
 
-   it("leaves the same code silent without the profile", function()
+   it("proves no flow for the same code without the profile", function()
       local report = api.check_source([[
 local function go()
    os.execute("ping " .. uci.get("system", "hostname"))
 end
 ]])
-      assert_equal(codes(report), "708",
-         "without the profile there is no source, so only the exposure is reported")
+      assert_equal(codes(report), "701,708",
+         "without the profile there is no source, so the exposure and the sink are reported and no flow is")
    end)
 
    it("composes profiles", function()
