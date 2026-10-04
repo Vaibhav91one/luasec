@@ -144,9 +144,11 @@ registered code has a doc row.
 
 - One issue = one branch `issue/<n>-<slug>` = one PR. Body starts with `Closes #<n>`.
 - Squash merge. An agent never merges its own PR.
-- The orchestrator merges, and only once all four hold: the verifier's verdict is a
-  pass, `make ci-verify` is green locally, Actions is green on the PR, and the PR
-  touches only the paths its issue declares.
+- The orchestrator merges, and only once all four hold: the verifier's verdict on
+  **that PR** is a pass, `make ci-verify` is green locally **with
+  `PRECISION_REQUIRE_CORPUS=1`** (without it the target prints `PASS` while skipping the
+  corpus measurement entirely, and a skipped measurement is not evidence), Actions is
+  green on the PR, and the PR touches only the paths its issue declares.
 - The orchestrator merges one PR at a time, in issue order, with
   `gh pr merge --squash --delete-branch`. Never two against `main` at once, and never
   a merge commit: squash is what keeps one issue mapped to one commit, which is what
