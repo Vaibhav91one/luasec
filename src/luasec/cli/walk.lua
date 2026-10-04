@@ -127,14 +127,16 @@ end
 -- Run a command with an untrusted path, without the path ever being part of the
 -- command text.
 --
--- luasec: ignore 702,708
+-- luasec: ignore 702,708 [push]
 -- Accepted, and worth saying why. This does hand a command to a shell, which is
 -- what the 702 reports - the command is not a constant - and the exposure 708
 -- names, and luasec found it by scanning itself. What makes it
 -- safe is the three lines below: the untrusted path never appears in the command
 -- text, and the only variable in it, $p, comes from a temporary file we wrote.
 -- The report of a suppression is itself a small safety net: this comment is
--- written, it names both codes, and it is above the function.
+-- written, it names both codes, and it opens a region that closes below the
+-- function - a bare `ignore` is file-wide, which for a suppression this broad
+-- would silence every later 702 in this file as well.
 --
 -- Lua's %q escapes only " and \, so a directory named '/tmp/$(cmd)' would
 -- otherwise run a command substitution inside luasec itself, and SECURITY.md says
@@ -153,6 +155,7 @@ local function popen_with_path(command, path)
       'p="$(cat %s; printf x)" || exit 0; p="${p%%x}"; %s', string.format("%q", tmp), command)
    return io.popen(command_text, "r"), tmp
 end
+-- luasec: pop
 
 -- How much one scan root is allowed to resolve to, and the environment variable
 -- that moves the number.

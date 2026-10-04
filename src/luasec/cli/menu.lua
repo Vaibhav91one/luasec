@@ -60,7 +60,7 @@ function menu.recommended(list)
    return "s"
 end
 
--- luasec: ignore 701,708  the stty commands are constant mode switches, never user input
+-- luasec: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
 local function read_line(context, tty, prompt)
    context.out:write(prompt)
    flush(context.out)
@@ -69,6 +69,7 @@ local function read_line(context, tty, prompt)
    if tty then os.execute(STTY_RAW) end
    return line
 end
+-- luasec: pop
 
 local function trim(text)
    return text:match("^%s*(.-)%s*$")
@@ -176,11 +177,11 @@ local ACTIONS = {
    i = do_install,
 }
 
+-- luasec: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
 function menu.run(list, context)
    context.out = context.out or io.stdout
    context.err = context.err or io.stderr
    local tty = term.is_tty(0)
-   -- luasec: ignore 701,708  the stty command is a constant mode switch, never user input
    if tty then os.execute(STTY_RAW) end
    local function loop()
       while true do
@@ -202,9 +203,9 @@ function menu.run(list, context)
    end
    -- An error inside an action must never leave the terminal in single-key mode.
    local ok, failure = pcall(loop)
-   -- luasec: ignore 701,708  the stty command is a constant mode switch, never user input
    if tty then os.execute(STTY_COOKED) end
    if not ok then context.err:write("luasec: the menu stopped: " .. tostring(failure) .. "\n") end
 end
+-- luasec: pop
 
 return menu
