@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- 708 no longer replaces the 701 at the sink it names. An exported function whose execution sink is fed by something the file cannot fold is now reported twice: the 708 for the fact that nothing in this file feeds it, and the 701 for the command itself, which is what an operator acts on. The exposure pass and the shape-only pass used to share one "already reported" table, so the 708 suppressed the 701 at its own sink; the 708 message now says whose argument is unfed rather than naming the sink. Over the firmware corpora this restores 32 findings at 701 and 4 at 704, including `luci-app-lxc/controller/lxc.lua:70`, six dispatcher-supplied arguments interpolated into a shell command with no quoting. No file that was clean became dirty; 708 itself is unchanged at 36 (#225).
+
 ## 0.4.0 - 2026-10-03
 
 - A profile may declare `validators` (an IP/host/number check used as a guard). A command flow guarded by one is kept but reported one confidence step lower with a `guarded_by` field and a message note, instead of at full confidence: a static pass cannot prove the check rejects every metacharacter, so the judgement is left to a reviewer or the `fix` agent. The cgilua std declares the CGILua IP/host validators (#218).

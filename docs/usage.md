@@ -398,16 +398,18 @@ bin/luasec --summary test/fixtures/firmware
 ```
 
 ```
-Summary: 42 findings in 13 files
-Severity: high 24, medium 18
-Confidence: high 6, medium 29, low 7
+Summary: 48 findings in 13 files
+Severity: high 30, medium 18
+Confidence: high 6, medium 29, low 13
 Codes:
   726  7  self-modifying or destructive operation
-  708  6  execution sink in an exported function that nothing in this file feeds
+  708  6  exported execution sink whose argument nothing in this file feeds
   724  6  function containing an execution sink is exposed as an RPC handler
   728  6  untrusted data used as a search pattern
   725  5  sandbox or global environment manipulated
   721  4  write to flash or firmware configuration with untrusted data
+  701  3  command execution with a non-constant argument
+  702  3  pipe opened with a non-constant command
   723  3  sensitive file read by path literal
   727  2  unbounded string growth can exhaust memory
   749  2  persistence installed by the script
@@ -416,14 +418,14 @@ Files with the most findings:
   6  test/fixtures/firmware/destructive.lua
   6  test/fixtures/firmware/dynamic_pattern.lua
   6  test/fixtures/firmware/sandbox_escape.lua
+  6  test/fixtures/firmware/ubus_method.lua
   5  test/fixtures/firmware/self_modify.lua
-  4  test/fixtures/firmware/ubus_method.lua
+  5  test/fixtures/firmware/ubus_two_sinks.lua
+  4  test/fixtures/firmware/unregistered_helper.lua
   3  test/fixtures/firmware/sensitive_read.lua
-  3  test/fixtures/firmware/ubus_two_sinks.lua
   2  test/fixtures/firmware/flash_write.lua
   2  test/fixtures/firmware/unbounded_growth.lua
-  2  test/fixtures/firmware/unregistered_helper.lua
-Score: 0/100 (critical) - exec 7, firmware 33, payload 2
+Score: 0/100 (critical) - exec 13, firmware 33, payload 2
 ```
 
 ### Progress
@@ -975,10 +977,12 @@ Total: 1 finding (1 critical)
 Score: 75/100 (needs work) - exec 1
 ```
 
-Without `--whole-program`, the same directory reports a 708: the source
-(`http.formvalue`, in `handler.lua`) and the sink (`os.execute`, in `util.lua`)
-are in different files, and without cross-file resolution the sink in the
-exported function nothing in its file feeds is reported as an exposed sink.
+Without `--whole-program`, the same directory reports a 701 and a 708 at that
+sink: the source (`http.formvalue`, in `handler.lua`) and the sink
+(`os.execute`, in `util.lua`) are in different files, so without cross-file
+resolution the command is reported as built from a value the file cannot fold
+(`701`) and the exported function is reported as an exposure nothing in its file
+feeds (`708`). With `--whole-program` the proven flow replaces both.
 
 `--whole-program` is slower and opt-in, and it holds every file's syntax tree
 until the cross-file pass: over `corpus/` (566 files) it peaks at about 190MB
@@ -1033,15 +1037,20 @@ What each step is:
   a target: `renameNode` in `mesh/rename.lua` receives `request`.
 
 Without `--whole-program` each file is analyzed alone: the page has no sink, and
-the two library functions have sinks nothing in their own file feeds, so they are
-reported as exposed (`708`) rather than as proven flows (`709`):
+the two library functions have sinks nothing in their own file feeds. Each of
+those sinks carries two findings, because they are two facts: the command is
+built from a value the file cannot fold (`701`), and the value that reaches it
+lives in a file this run never read (`708`). Neither replaces the other, and
+neither is a proven flow (`709`) - that needs a visible source:
 
 ```
-test/fixtures/cgilua_example/lib/gui_net.lua:5:1: [708] high: execution sink in an exported function that nothing in this file feeds (gui.net.trace.set) (CWE-78) [source: ] [exposed as gui.net.trace.set]
-test/fixtures/cgilua_example/mesh/rename.lua:1:1: [708] high: execution sink in an exported function that nothing in this file feeds (renameNode) (CWE-78) [source: ] [exposed as renameNode]
+test/fixtures/cgilua_example/lib/gui_net.lua:5:1: [708] high: exported execution sink whose argument nothing in this file feeds (gui.net.trace.set) (CWE-78) [source: ] [exposed as gui.net.trace.set]
+test/fixtures/cgilua_example/lib/gui_net.lua:6:4: [701] high: command execution with a non-constant argument (util.runShellCmd) (CWE-78) [source: ]
+test/fixtures/cgilua_example/mesh/rename.lua:1:1: [708] high: exported execution sink whose argument nothing in this file feeds (renameNode) (CWE-78) [source: ] [exposed as renameNode]
+test/fixtures/cgilua_example/mesh/rename.lua:2:4: [701] high: command execution with a non-constant argument (os.execute) (CWE-78) [source: ]
 
-Total: 2 findings (2 high)
-Score: 94/100 (good) - exec 2
+Total: 4 findings (4 high)
+Score: 88/100 (needs work) - exec 4
 ```
 
 ### What a CGILua scan does not follow

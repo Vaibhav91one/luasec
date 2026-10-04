@@ -1,6 +1,6 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
-local assert_equal, assert_true = harness.assert_equal, harness.assert_true
+local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
 local api = require "luasec.api"
 
@@ -110,8 +110,8 @@ local function go(host)
    os.execute("ping " .. host)
 end
 ]])
-      assert_equal(codes(report), "708",
-         "an untraceable argument in an exported function is an exposure, not silence")
+      assert_equal(codes(report), "701,708",
+         "an untraceable argument in an exported function is an exposure, and the sink is still reported")
    end)
 end)
 
@@ -630,6 +630,37 @@ function cb.run()
    status = cb(function() last_error = nil end)
 end
 ]])
+   end)
+end)
+
+describe("an exposed sink and the sink itself", function()
+   it("reports a non-constant command in an exported function as 701 as well as 708", function()
+      local report = api.check_source([[
+function handler(cmd)
+   os.execute("/bin/echo " .. cmd)
+end
+return handler
+]])
+      assert_equal(codes(report), "701,708",
+         "the sink report and the exposure are two facts about one sink, and neither replaces the other")
+   end)
+
+   it("says the 708 is about the argument, not about the sink the 701 reports", function()
+      local report = api.check_source([[
+function handler(cmd)
+   os.execute("/bin/echo " .. cmd)
+end
+return handler
+]])
+      local exposure
+      for _, finding in ipairs(report) do
+         if finding.code == "708" then exposure = finding end
+      end
+      assert_true(exposure, "the exported sink is an exposure")
+      assert_match(exposure.message, "argument",
+         "the message has to name what nothing feeds: " .. exposure.message)
+      assert_match(exposure.message, "this file",
+         "and it has to say the limit is this file: " .. exposure.message)
    end)
 end)
 

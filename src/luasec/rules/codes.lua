@@ -78,10 +78,18 @@ register {code = "706", severity = "high", cwe = "CWE-94",
 register {code = "707", severity = "high", cwe = "CWE-94",
    message = "LuaJIT FFI escape hatch used ({name})"}
 
--- Severity follows the sink it replaces, so it is registered as high; the
--- emitted finding copies the severity of the code it stands in for.
+-- Registered high because most of the sinks it names are high, and the emitted
+-- finding carries the severity of the sink it is about - an argument this file
+-- cannot trace into a shell is a worse thing to have than one it cannot trace
+-- into a destructive file operation.
+--
+-- The words are about the argument, not about the sink. This is reported beside
+-- the sink's own 701 - which says the command is built from something the file
+-- cannot fold - so a message whose subject is "execution sink" reads as a second
+-- opinion on the sink, and the operator cannot tell which of the two to act on.
+-- What 708 knows and 701 does not is where the value came from: not this file.
 register {code = "708", severity = "high", cwe = "CWE-78",
-   message = "execution sink in an exported function that nothing in this file feeds ({name})"}
+   message = "exported execution sink whose argument nothing in this file feeds ({name})"}
 
 register {code = "709", severity = "critical", cwe = "CWE-78", confidence = "high",
    message = "untrusted data reaches command execution ({name})",

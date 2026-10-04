@@ -263,9 +263,10 @@ local function cover_and_expose(result, opts)
    if result.final or not chstate then return result end
    local findings = result.findings
 
-   -- Locations already explained by a stronger finding: a proven flow or an
-   -- exposed sink. The shape-only finding at such a location says less, so it is
-   -- dropped rather than reported twice.
+   -- Locations already explained by a stronger finding: a proven flow. The
+   -- shape-only finding at such a location says less, so it is dropped rather
+   -- than reported twice. An exposure does NOT go in this table - see the 708
+   -- loop below for why it used to and does not any more.
    local covered = {}
    for _, finding in ipairs(findings) do
       if finding.code == "709" or finding.code == "710" or finding.code == "743" then
@@ -287,16 +288,30 @@ local function cover_and_expose(result, opts)
          return exposed.sink_line .. ":" .. math.max(1, start)
       end
 
+      -- One sink that nothing in this file feeds is one fact, so a second
+      -- exposure at the same sink is not reported again. That guard used to come
+      -- from the `covered` table above, and sharing that table IS the bug:
+      -- `covered` is read by the shape-only pass below, so recording an
+      -- exposure there made 708 suppress the 701 at its own sink. An exposure
+      -- says what this file can see about the sink's argument; the 701 says the
+      -- command is built from something this file cannot fold. The second is
+      -- true of the sink whatever the first is, and it is the finding an
+      -- operator acts on, so 708 is not a substitute for it and does not stand
+      -- in its way.
+      local exposed_at = {}
       for _, exposed in ipairs(interprocedural.exposed_sinks(chstate, opts)) do
          local key = sink_key(exposed)
-         if not (key and covered[key]) then
+         if not (key and (covered[key] or exposed_at[key])) then
             if key then
-               covered[key] = true
+               exposed_at[key] = true
             end
 
             local spec = codes.get("708")
-            -- 708 replaces the shape-only finding at this sink, so it carries
-            -- that sink's severity rather than a lower one of its own.
+            -- Calibrated to the sink this exposure names rather than raised flat:
+            -- an argument this file cannot trace into a shell is a worse thing to
+            -- have than one it cannot trace into a destructive file operation.
+            -- The 701 at that sink is reported in its own right and carries its
+            -- own severity; this only decides how loudly 708 itself speaks.
             local sink_spec = codes.get(exposed.code)
             local col = math.max(1, (exposed.function_node.offset or 1)
                - (chstate.line_offsets[exposed.function_node.line] or 0) + 1)

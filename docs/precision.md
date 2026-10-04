@@ -31,7 +31,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-229 findings over 566 files, 101 of them carrying at least one (18%), after six
+265 findings over 566 files, 101 of them carrying at least one (18%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
@@ -50,7 +50,7 @@ Hand-audited sample by code:
 | Code | Count | Assessment |
 | --- | --- | --- |
 | 724 RPC handler | 28 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
-| 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed |
+| 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Its count did not move in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same 36 sinks are reported and 32 of them now carry their 701 as well |
 | 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
 | 901 parse failure | 10 | true: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed |
 | 727 unbounded growth | 14 | true after narrowing: string accumulation in a loop with no visible ceiling |
@@ -58,10 +58,10 @@ Hand-audited sample by code:
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
 | 709 injection | 5 | true, and the one that matters. Two are new with #58, both previously missed only because the sink's result was assigned: `luci-app-cshark/controller/cshark.lua:73`, `local res = os.execute("kill -TERM " .. pid)` where `pid` is read from the world-writable `/tmp/cshark-luci.pid`; and `luci-app-wol/model/cbi/wol.lua:85`, `local p = io.popen(cmd .. " 2>&1")` where `cmd` carries form input (with a 712 beside it: part of it is quoted, part is not) |
-| 701 shape-only | 25 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked |
+| 701 shape-only | 57 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked. Up from 25 in #225: an exported sink used to be reported as a 708 *instead of* its 701, and 32 of these are the ones that suppression was eating - every one of them is a sink the tool already reported in the same file when it was not exported, and no file that was clean became dirty |
 | 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
 | 702 env manipulation | 21 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
-| 704 unencrypted transport | 17 | true: a request body over plain HTTP, including loadfile/load calls whose result is used |
+| 704 dynamic load | 21 | true: `dofile`/`loadfile`/`load` of a path the file cannot fold to a constant, including calls whose result is used. Up from 17 in #225, for the same reason as 701: four dynamic loads inside exported functions were being masked by the 708 at the same sink. (The neighbouring 703 and 702 rows carry labels from an older catalogue; the counts are the measured ones and those two labels are a separate fix.)
 | 705 dynamic require | 19 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment |
 | 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
 | 712 partial quote | 1 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression |
@@ -128,6 +128,14 @@ Two more came from reading the findings rather than the rules:
     `log_it(s)` writing "user's input" counted as quoting.
 13. **The sanitizer fact never reached a report.** A correctly quoted command was
     indistinguishable from an unquoted one at identical severity and exit code.
+14. **708 replaced the 701 at the sink it named.** The exposure pass marked the
+    sink's location "already reported" in the same table the shape-only pass
+    reads, so the 708 and the 701 could not both stand. Thirty-six sinks were
+    affected: the command was built from a value the file cannot fold, and the
+    report said only that nothing in this file fed it. That is how
+    `luci-app-lxc/controller/lxc.lua:70` — six dispatcher-supplied arguments
+    interpolated into a shell command with no quoting — came back with one
+    low-confidence note about exposure and no finding for the sink. #225.
 
 ## Reproducing this
 
