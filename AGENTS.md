@@ -153,8 +153,12 @@ registered code has a doc row.
   `make tdd-proof` reads.
 - A PR with no behavior change (dead code, documentation) is labelled `type:chore` or `type:docs`, which skips the TDD proof; the label is reviewed like code, and a PR that changes behavior never carries it.
 - Do not touch files outside your issue's declared owned paths.
-- `main` stays protected regardless: never force-push, never rewrite published history,
-  never close an issue nobody opened.
+- `main` stays protected regardless: never push to `main`, never force-push, never
+  rewrite published history, never close an issue nobody opened.
+- If any of the four conditions fails, the orchestrator stops and reports. It never
+  merges with `--admin`, never re-runs a gate hoping for a different answer, and never
+  works around a refusal. A blocked merge is a result to report, not a problem to route
+  around.
 
 ## Verifier subagent
 
