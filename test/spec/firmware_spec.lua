@@ -607,6 +607,25 @@ return object
          "ffi.cdef is how the escape is set up; the command is what runs")
    end)
 
+   it("reports a handler whose command is a literal as an exposure, not an injection", function()
+      -- The CBI declaration for "restart this service". The command is fixed
+      -- before the program runs, so there is nothing to inject: what is left is
+      -- the exposure, which is worth knowing and is not a high-severity RCE.
+      local report = api.check_source([[
+m = Map("telephony", "VoIP")
+m.on_after_commit = function()
+   luci.sys.call("/etc/init.d/telephony restart")
+end
+return m
+]], {std = "+luci"})
+      local found = with_code(report, "724")
+      assert_equal(#found, 1, "a literal command is still an exposed sink, so it is still reported")
+      assert_equal(found[1].severity, "medium",
+         "nothing can reach the command, so this is not the high-severity finding")
+      assert_equal(found[1].confidence, "low")
+      assert_match(found[1].message, "the command is a literal", found[1].message)
+   end)
+
    it("reports the exposure from the command line, naming the entry point", function()
       local out, code = harness.cli({"--std", "+openwrt",
          "test/fixtures/firmware/ubus_method.lua"})
