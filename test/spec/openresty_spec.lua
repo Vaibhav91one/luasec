@@ -110,4 +110,73 @@ describe("openresty profile", function()
          .. #report .. " findings, " .. #found .. " of them 730")
       assert_equal(found[1].source, "ngx.req.get_headers")
    end)
+
+   -- ngx.header[k] = v is an assignment to an index target, not a call, so no
+   -- call-pattern sink can match it. The value position -- v -- is where
+   -- untrusted data reaches the header message, and it is the same defect 730
+   -- already names for the call form.
+
+   it("reports a request parameter assigned into a response header as 730", function()
+      local report = fixture("header_assignment_tainted.lua", {std = "openresty"})
+      local found = with_code(report, "730")
+      assert_equal(#found, 1, "one header assignment, so one 730: "
+         .. #report .. " findings, " .. #found .. " of them 730")
+      assert_equal(found[1].sink, "ngx.header")
+      assert_equal(found[1].source, "ngx.req.get_uri_arg")
+      -- The assignment is influenced exactly as the call form is, so it carries
+      -- the same confidence and severity rather than a guess.
+      assert_equal(found[1].confidence, "certain")
+      assert_equal(found[1].severity, "high")
+      assert_equal(found[1].cwe, "CWE-93")
+   end)
+
+   it("says nothing when a constant is assigned into ngx.header", function()
+      local report = fixture("header_assignment_literal.lua", {std = "openresty"})
+      assert_equal(#report, 0,
+         "a constant header value is the normal case; only proven request data "
+         .. "is a finding: " .. #report .. " findings")
+   end)
+
+   it("reports both the call form and the assignment form of one header write", function()
+      local report = fixture("header_both_forms.lua", {std = "openresty"})
+      local found = with_code(report, "730")
+      -- Neither shape may suppress the other: #227's call sink and this
+      -- assignment sink are independent matchers on independent positions.
+      assert_equal(#found, 2, "one call form plus one assignment form, so two 730: "
+         .. #report .. " findings, " .. #found .. " of them 730")
+      local sinks = {}
+      for _, entry in ipairs(found) do sinks[entry.sink] = true end
+      assert_true(sinks["ngx.resp.set_header"] == true,
+         "the call form still fires alongside the assignment form")
+      assert_true(sinks["ngx.header"] == true,
+         "the assignment form fires alongside the call form")
+   end)
+
+   it("leaves the same header assignment silent without the std", function()
+      local report = fixture("header_assignment_tainted.lua")
+      assert_equal(#with_code(report, "730"), 0,
+         "no 730 without the std, so the assignment sink belongs to the profile")
+   end)
+
+   -- A tainted KEY is a different question from a tainted value and is
+   -- explicitly out of scope rather than silently uncovered: the value position
+   -- is the sink, because the key is the attacker choosing WHICH header while
+   -- the program still chooses the bytes in it. These two specs pin that
+   -- written decision so it cannot drift into looking covered.
+
+   it("says nothing about a tainted key assigned to a constant header value", function()
+      local report = fixture("header_assignment_tainted_key.lua", {std = "openresty"})
+      assert_equal(#report, 0,
+         "a tainted key with a constant value chooses the header name, not the "
+         .. "header bytes, so it is documented out of scope: " .. #report .. " findings")
+   end)
+
+   it("still reports the value when both the key and the value of ngx.header are tainted", function()
+      local report = fixture("header_assignment_tainted_key_both.lua", {std = "openresty"})
+      local found = with_code(report, "730")
+      assert_equal(#found, 1,
+         "the value position is the sink and it is tainted: " .. #report
+         .. " findings, " .. #found .. " of them 730")
+      assert_equal(found[1].source, "ngx.req.get_uri_arg")
+   end)
 end)
