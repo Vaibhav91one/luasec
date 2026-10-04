@@ -163,8 +163,11 @@ end
 
 -- The Function node a callee was bound to, when the binding is visible. A
 -- variable rebound thousands of times tells us nothing, so the search stops.
--- A global has no binding to follow at all, so the definitions this file
--- publishes under that name are what the call reached.
+-- A global has no binding to follow at all, so a function this file publishes
+-- under that name is taken as what the call reached. That is the last FUNCTION
+-- written to the name, not the last write: a later `f = 5` does not evict an
+-- earlier `function f()`. A stale read can only leave a function in place where
+-- there is none, which suppresses; it cannot invent one.
 local function defined_function(call, index)
    local callee = call[1]
    if type(callee) ~= "table" or callee.tag ~= "Id" then return nil end
