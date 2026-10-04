@@ -111,6 +111,59 @@ describe("obfuscated code loaders", function()
    end)
 end)
 
+-- A `load` or `loadstring` the file defines itself is a different function with a
+-- different meaning, so what its body does decides the reading. Stock upstream
+-- LuCI ships one: cbi.lua defines `load` as its own module loader over `loadfile`
+-- and every call to it in that file is module loading, not a payload.
+describe("a loader name the file shadows", function()
+   it("reports no 741 when the shadowing load resolves to loadfile and so is a module loader", function()
+      local report = fixture("module_loader")
+      assert_equal(#with_code(report, "741"), 0,
+         "a load that compiles a module off disk is module loading, not a hidden payload: "
+            .. codes(report))
+      assert_true(#with_code(report, "703") >= 1,
+         "the name is still a dynamic-evaluation sink, so it is still reported: " .. codes(report))
+   end)
+
+   -- The negative. Silencing every shadowed `load` would delete the rule instead
+   -- of correcting it: this one decodes a blob and its definition hands that blob
+   -- to the standard `loadstring`, which is the backdoor shape exactly.
+   it("still reports 741 critical when a shadowing load is handed a decoded blob and loads it", function()
+      local report = fixture("shadowed_backdoor")
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "a shadowed name must not switch the rule off: " .. codes(report))
+      assert_equal(found[1].name, "load", "the finding names the call as the file wrote it")
+      assert_equal(found[1].severity, "critical",
+         "the definition reaches loadstring itself, so the evaluation is not a guess")
+      local names = {}
+      for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
+      assert_equal(table.concat(names, " -> "), "base64decode -> load",
+         "the trace names the decoder and the loader")
+   end)
+
+   it("reports a decoded blob handed to the standard, unshadowed load as 741 critical", function()
+      local report = api.check_source([[
+local encoded = "b2NobyBoaQ=="
+local payload = base64decode(encoded)
+local chunk = load(payload, "=stage")
+]])
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "expected one 741, got " .. codes(report))
+      assert_equal(found[1].severity, "critical",
+         "the standard load is the interpreter's, so a decoded chunk reaching it is the worst case")
+   end)
+
+   it("reports a shadowing load whose body shows no evaluation as high rather than critical", function()
+      local report = fixture("shadowed_unknown")
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "the name and the decode chain still say something: " .. codes(report))
+      assert_equal(found[1].severity, "high",
+         "the definition never reaches a loader, so only the name says it evaluates code")
+      assert_equal(found[1].confidence, "low",
+         "the chain is a heuristic about a shadowed name, so it is not reported as more than shape")
+   end)
+end)
+
 describe("loaders fed values the program never decoded", function()
    it("reports neither 741 nor 743 for a loader given a parameter, a concatenation, a plain field or a request", function()
       local report = fixture("undecoded_loader")

@@ -37,6 +37,15 @@ local loaders = {
    dofile = true,
 }
 
+-- The loaders that compile a file off disk. A definition whose body reaches one
+-- of these is loading a module or a script by name, which is a different act
+-- from handing a chunk of text to the interpreter: the text was already on disk
+-- in the open, and nothing decoded it on the way.
+local file_loaders = {
+   loadfile = true,
+   dofile = true,
+}
+
 -- The APIs that execute what they are given. A decoded value reaching one of
 -- these is a 743 even when no loader was named: the payload ran either way.
 local exec_sinks = {
@@ -226,8 +235,9 @@ end
 
 -- Forward declarations: the shape test and the chain walk are mutually
 -- recursive, and both read the per-file index, so their order in this file is
--- not significant.
-local trace_of, shape_of, subtree_has, base_key_of
+-- not significant. `walk_program` is declared here because the shadow reading
+-- below it also has to look inside a function body.
+local trace_of, shape_of, subtree_has, base_key_of, walk_program
 
 -- Does this subtree read a byte out of a string, or fold one? `c:byte()`,
 -- `string.byte(s)` and `bit.band` are how a blob is shifted into a character.
@@ -489,6 +499,69 @@ local function loader_of(ctx, call)
    return nil
 end
 
+-- ------------------------------------------------------------ shadowed names
+--
+-- `load` and `loadstring` are names a file may define for itself. When it does,
+-- the call reached that definition and not the standard library, so the name no
+-- longer settles what happened and the definition has to. luci-base's cbi.lua
+-- does exactly this: it defines `load` as its own module loader over `loadfile`,
+-- so every call to `load` in that file loads a module off disk.
+--
+-- Only globals count. A `local function load` is bound through the variable and
+-- `defined_function` already reads it; a global published as `function load()` or
+-- `load = function()` has no binding to follow, which is the whole gap.
+
+-- Every global this file binds to a function, by the name it binds it to.
+local function shadowed_functions(ctx)
+   local index = {}
+   local lines = ctx.chstate and ctx.chstate.lines
+   for _, line in ipairs(lines or {}) do
+      for _, item in ipairs(line.items or {}) do
+         if item.tag == "Set" or item.tag == "OpSet" then
+            for position, target in ipairs(item.lhs or {}) do
+               local value = item.rhs and item.rhs[position]
+               if type(value) == "table" and value.tag == "Function"
+                     and target.tag == "Id" and not target.var
+                     and type(target[1]) == "string" then
+                  index[target[1]] = value
+               end
+            end
+         end
+      end
+   end
+   return index
+end
+
+-- What a definition this file shadows the standard library with does:
+--   "file"     it reaches loadfile or dofile, so it loads a file by name
+--   "code"     it reaches load or loadstring, so it hands text to the interpreter
+--   "unread"   it shows neither, so the name is all the evidence there is
+-- or nil when this file does not define that name at all. The answer is kept on
+-- the definition: one body is walked once, however many times it is called.
+local function shadow_kind(ctx, name, shadowed)
+   local definition = shadowed[name]
+   if not definition then return nil end
+   if definition.kind then return definition.kind end
+
+   local reached = {}
+   walk_program({definition}, function(node)
+      if node.tag == "Call" or node.tag == "Invoke" then
+         local label = callee_label(ctx, node)
+         if not label then return end
+         if not reached.file and (file_loaders[label] or file_loaders[last_segment(label)]) then
+            reached.file = true
+         elseif not reached.code and loaders[label] then
+            reached.code = true
+         end
+      end
+   end, MAX_BODY_NODES)
+   -- A file loader is read first: a definition that compiles a script off disk is
+   -- module loading even if it can also reach the interpreter somewhere else.
+   local kind = reached.file and "file" or reached.code and "code" or "unread"
+   definition.kind = kind
+   return kind
+end
+
 -- A stable key for the table an `a.b` access names. A global is named by its
 -- path; a local is named by the variable object itself, so two locals that
 -- happen to share a name are still told apart and a write is only ever matched
@@ -546,10 +619,19 @@ end
 -- 741: a code loader handed a decoded value.
 detectors[#detectors + 1] = function(ctx)
    local index = build_index(ctx)
+   local shadowed = shadowed_functions(ctx)
 
    ctx:each_call(function(call)
       local loader = loader_of(ctx, call)
       if not loader then return end
+
+      -- The name may not be the standard library's. When this file defines it,
+      -- the definition is what the call reached, so it is read first: a loader
+      -- that compiles a file off disk has not been handed a decoded payload and
+      -- this rule is about decoded payloads.
+      local shadow = shadow_kind(ctx, callee_label(ctx, call), shadowed)
+      if shadow == "file" then return end
+
       local argument = payload_argument(ctx, call)
       if not argument then return end
 
@@ -566,6 +648,23 @@ detectors[#detectors + 1] = function(ctx)
       end
 
       trace[#trace + 1] = {kind = "sink", name = loader, line = call.line}
+
+      -- A shadowed name whose definition shows no evaluation at all leaves the
+      -- name itself as the only evidence that code was evaluated, which is not
+      -- the same as having watched a hidden payload reach the interpreter. The
+      -- finding is still raised, because the decode chain is real, but it is
+      -- raised as the heuristic it is.
+      if shadow == "unread" then
+         ctx:emit("741", call, {
+            name = loader,
+            trace = trace,
+            snippet = ctx:snippet(call),
+            severity = "high",
+            confidence = "low",
+         })
+         return
+      end
+
       ctx:emit("741", call, {
          name = loader,
          trace = trace,
@@ -667,7 +766,7 @@ end
 -- function that owns it, whether it sits in statement position, and whether it
 -- is the last statement of the body it closes. Linear in the size of the file:
 -- each node is handed to `visit` once and descended once.
-local function walk_program(ast, visit, max_depth)
+walk_program = function(ast, visit, max_depth)
    local descend_node
 
    local function descend_list(list, owner, in_statement, depth)
