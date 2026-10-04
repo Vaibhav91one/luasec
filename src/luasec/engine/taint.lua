@@ -44,6 +44,7 @@ end
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
 local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint
+local check_assignment_sink
 
 -- ------------------------------------------------------------ taint sets
 -- A taint set is a set of descriptors keyed by id so union is cheap and
@@ -1097,6 +1098,81 @@ local function check_sink(node, item, state, chstate, opts)
    end
 end
 
+-- Check one assignment against the sink registry, for a sink declared with
+-- `kind = "assign"`.
+--
+-- This is the target position, which check_sink cannot see: that one is handed a
+-- Call and reads a callee off it, and an assignment has no callee. So it is a
+-- separate walk rather than a branch inside check_sink -- bolting it on there
+-- would mean every existing call sink ran against target-shaped nodes, which is
+-- the change most likely to break a rule that works today.
+--
+-- For `target[k] = v` the target's BASE is matched, not the whole target: the
+-- base names the thing being written (`ngx.header`), while `k` is the key. Only
+-- the VALUE position is the sink, because that is the only part of the statement
+-- the program hands to the HTTP message; `arg` counts right-hand sides here,
+-- where it counts arguments on a call.
+check_assignment_sink = function(item, state, chstate, opts)
+   for index, lhs in ipairs(item.lhs or {}) do
+      if lhs.tag == "Index" and lhs[1] then
+         local path = callee_path(lhs[1], item, state, 0)
+         local sink = path and platform_api.match_assign_sink(path)
+         -- `arg` counts right-hand sides here where it counts arguments on a
+         -- call, so {1} is the value this target is written with. An entry that
+         -- names no position pairs each target with the right-hand side at the
+         -- same position, which is what a single assignment means anyway.
+         local position = (sink and sink.arg or {})[1] or index
+         local value = sink and (item.rhs or {})[position]
+         if value then
+            local value_taint = live_only(taint_of_expr(value, item, state, 0))
+            if not set_is_empty(value_taint) then
+               local sources = set_list(value_taint)
+               for _, descriptor in ipairs(sources) do
+                  descriptor.display_id = (descriptor.id:gsub("|quoted$", ""))
+               end
+               local source = sources[1]
+               -- The confidence is the source's own, exactly as check_sink
+               -- reports it for the same flow through the call form: an
+               -- assignment into a header is influenced on the same evidence a
+               -- call is, and lowering it here would be a guess about a shape
+               -- rather than about the data.
+               local guard
+               for _, descriptor in ipairs(sources) do
+                  if descriptor.validated_by then guard = descriptor.validated_by break end
+               end
+               local confidence = source.confidence
+                  or code_confidence(sink.taint_code or sink.code)
+               if guard then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+               local channels = channels_of(sources)
+               -- The finding is located on the TARGET, so the column points at
+               -- the thing written to rather than at the bytes; the snippet is
+               -- the value, which is what the reader needs to see.
+               local finding = emit(state,
+                  {code = sink.taint_code or sink.code, pattern = sink.pattern},
+                  lhs, chstate, {
+                     name = path,
+                     confidence = confidence,
+                     source = source.display_id or source.id,
+                     sources = sources,
+                     trace = build_trace(value, sources),
+                     snippet = snippet_at(chstate, value),
+                     channels = #channels > 0 and channels or nil,
+                  })
+               if finding and #channels > 0 then
+                  finding.message = finding.message
+                     .. (" [reachable from: %s]"):format(table.concat(channels, ", "))
+               end
+               if finding and guard then
+                  finding.guarded_by = guard
+                  finding.message = finding.message
+                     .. (" (guarded by %s; verify it rejects the metacharacters)"):format(guard)
+               end
+            end
+         end
+      end
+   end
+end
+
 -- A call that writes request data to a declared store: recorded on the state as
 -- a fact the pairing after the scan matches against store reads. Not a finding
 -- by itself: a value at rest runs nothing.
@@ -1222,6 +1298,11 @@ local function propagate(chstate, state, opts)
                for _, rhs_node in ipairs(item.rhs or {}) do
                   check_calls_in(rhs_node, item, state, chstate, opts)
                end
+
+               -- An assignment to a declared target (`ngx.header[k] = v`). This is checked
+               -- here rather than in the call pass above, which cannot see it: an
+               -- assignment has no callee, which is the whole reason this exists.
+               check_assignment_sink(item, state, chstate, opts)
 
                -- Field writes (`M.cmd = x`) never appear in set_variables, because
                -- only plain locals get a value object there.
@@ -1437,6 +1518,11 @@ function taint.run(chstate, opts, existing_state)
                for _, rhs_node in ipairs(item.rhs or {}) do
                   check_calls_in(rhs_node, item, state, chstate, opts)
                end
+               -- Approximate mode reports the same sinks the exact pass does,
+               -- less precisely. An assignment sink omitted here would make one
+               -- handler report 730 in a small file and stay silent in a large
+               -- one, for no reason a reader of the output could see.
+               check_assignment_sink(item, state, chstate, opts)
                for index, lhs_node in ipairs(item.lhs or {}) do
                   local written = item.rhs and item.rhs[index]
                   if written and lhs_node.var then
