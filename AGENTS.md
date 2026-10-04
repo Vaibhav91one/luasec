@@ -122,11 +122,24 @@ reproducible.
 
 | Range | Meaning |
 | --- | --- |
+| 012 | unreadable `-- luasec:` suppression directive |
 | 701-712 | command execution / dynamic code sinks |
-| 721-728 | firmware-specific (flash, uci chain, sandbox escape, DoS) |
+| 721-729 | firmware-specific (flash, uci chain, sandbox escape, DoS, store hop) |
 | 741-750 | payload / backdoor patterns |
 | 801-805 | artifact / bytecode |
-| 901-903 | meta (parse failed, unsupported dialect, dialect mismatch) |
+| 901-904 | meta (901-903 parse failed, unsupported dialect, dialect mismatch; 904 analysis degraded on a large file, results approximate, never threshold-filterable) |
+
+Every registered code is in this table. The ranges contain gaps because not
+every number in them is registered.
+
+Codes that mean a file was **not fully analyzed** rather than clean are never
+filtered out by `--severity-threshold` and always fail the run: `012`, `801`,
+`803`, `805`, `901`, `902`, `904`. That is a set, not a property of one code -
+`904` is only the newest member of it - and `src/luasec/rules/degraded.lua` is
+the single list of them, read by the exit code, the threshold exemption and the
+baseline. `903` is deliberately not in it: it reports an API the configured Lua
+standard does not have, a statement about the profile rather than a gap in what
+was read.
 
 The 0xx-6xx range is luacheck's vocabulary and a luasec code must not collide with
 one it uses. The reserved set is enumerated in
@@ -138,15 +151,31 @@ luacheck's.
 Every code carries `severity` (critical/high/medium/low), `confidence`
 (certain/high/medium/low), and `cwe` where a CWE applies. Codes are registered in
 `src/luasec/rules/codes.lua` and documented in `docs/rules.md`; a spec asserts every
-registered code has a doc row.
+registered code has a doc row. That spec covers `docs/rules.md` only - it cannot
+read the table above - so when you add a code, update this table in the same PR or
+nothing will tell you it is stale.
 
 ## Commit / PR conventions
 
 - One issue = one branch `issue/<n>-<slug>` = one PR. Body starts with `Closes #<n>`.
-- Squash merge. Do not merge your own PR; the orchestrator merges after verification.
+- Squash merge. An agent never merges its own PR.
+- The orchestrator merges, and only once all four hold: the verifier's verdict on
+  **that PR** is a pass, `make ci-verify` is green locally **with
+  `PRECISION_REQUIRE_CORPUS=1`** (without it the target prints `PASS` while skipping the
+  corpus measurement entirely, and a skipped measurement is not evidence), Actions is
+  green on the PR, and the PR touches only the paths its issue declares.
+- The orchestrator merges one PR at a time, in issue order, with
+  `gh pr merge --squash --delete-branch`. Never two against `main` at once, and never
+  a merge commit: squash is what keeps one issue mapped to one commit, which is what
+  `make tdd-proof` reads.
 - A PR with no behavior change (dead code, documentation) is labelled `type:chore` or `type:docs`, which skips the TDD proof; the label is reviewed like code, and a PR that changes behavior never carries it.
 - Do not touch files outside your issue's declared owned paths.
-- Never push to `main`, never create merge commits, never run `gh pr merge`.
+- `main` stays protected regardless: never push to `main`, never force-push, never
+  rewrite published history, never close an issue nobody opened.
+- If any of the four conditions fails, the orchestrator stops and reports. It never
+  merges with `--admin`, never re-runs a gate hoping for a different answer, and never
+  works around a refusal. A blocked merge is a result to report, not a problem to route
+  around.
 
 ## Verifier subagent
 
