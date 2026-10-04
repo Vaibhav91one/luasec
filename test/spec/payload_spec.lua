@@ -173,6 +173,89 @@ describe("loaders fed values the program never decoded", function()
    end)
 end)
 
+-- A global this file binds to a function has no local binding to follow, so
+-- until now the trace walk could not see it and the call fell through to the
+-- shape-only branch. Reading the definition fixes a real false positive. The
+-- whole cost of that is one chance to read too much, so the negatives below
+-- come first and are what the correction has to survive.
+describe("a loader argument this file produces with a global function", function()
+   -- The negative that decides the change. `section_body` is never bound here,
+   -- so there is no definition to find in either direction and the value is
+   -- genuinely unreadable. A fix that resolved every name to something would
+   -- silence this and turn 741 into a code that never fires.
+   it("still reports 741 critical when the argument is a call this file does not define", function()
+      local report = fixture("undefined_argument_loader")
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "the unreadable call is reported: " .. codes(report))
+      assert_equal(found[1].severity, "critical",
+         "an unreadable chain into the interpreter is the worst case, not a hint")
+      local names = {}
+      for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
+      assert_equal(table.concat(names, " -> "), "section_body -> loadstring",
+         "the trace names the call we cannot read and the loader it reached")
+   end)
+
+   -- Resolving the global must not silence a global that really does decode.
+   -- The chain is readable once the definition is, so the finding is raised on
+   -- that chain rather than on shape alone.
+   it("still reports 741 critical for a global decoder this file defines, naming its body in the trace", function()
+      local report = fixture("global_decoder_loader")
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "a global this file defines is still reachable: " .. codes(report))
+      assert_equal(found[1].severity, "critical")
+      local names = {}
+      for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
+      assert_equal(table.concat(names, " -> "),
+         "unpack_blob -> byte building -> loadstring",
+         "the trace reads the global's body, so the chain is evidence rather than shape")
+   end)
+
+   -- The positive the issue was filed for: luadoc compiles a template it is
+   -- holding in the open. A string transform is not a decode step.
+   it("reports no 741 when a global function statement this file defines only transforms the string", function()
+      local report = fixture("global_transform_loader")
+      assert_equal(#with_code(report, "741"), 0,
+         "rewriting a template into source is not hiding a payload: " .. codes(report))
+      assert_true(#with_code(report, "703") >= 1,
+         "the loader is still a dynamic-evaluation sink and 703 still speaks about it: " .. codes(report))
+   end)
+
+   -- Order inside the file does not bind a global: the definition is read
+   -- wherever it appears, because a global called at load time is the same
+   -- binding whether the statement was written above or below it.
+   it("reports no 741 when the global function statement is written below the call", function()
+      local report = api.check_source([[
+local function compile (source)
+   return loadstring (translate (source), "=chunk")
+end
+
+function translate (s)
+   return (s:gsub("<%%(.-)%%>", "<?lua %1 ?>"))
+end
+]])
+      assert_equal(#with_code(report, "741"), 0,
+         "the definition is this file's whatever side of the call it is written on: " .. codes(report))
+   end)
+
+   -- A global bound to something this file cannot read as a function is not a
+   -- definition. `transform` is assigned whatever `make_transform` returns, and
+   -- whether that is a function is exactly the thing we do not know.
+   it("still reports 741 critical when a global is bound to a value we cannot read as a function", function()
+      local report = api.check_source([[
+transform = make_transform()
+
+local f = loadstring(transform(config.section))
+]])
+      local found = with_code(report, "741")
+      assert_equal(#found, 1, "a global bound to the unknown is still unreadable: " .. codes(report))
+      assert_equal(found[1].severity, "critical")
+      local names = {}
+      for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
+      assert_equal(table.concat(names, " -> "), "transform -> loadstring",
+         "binding a name is not the same as being able to read what it holds")
+   end)
+end)
+
 describe("decoded data reaching an execution sink", function()
    it("reports a hex-decoded blob handed to os.execute as 743 critical, naming the sink", function()
       local report = fixture("decoded_exec")
