@@ -94,11 +94,15 @@ local function validate(name, declaration)
                   .. type(entry.code))
          end
          if entry.arg ~= nil then
-            assert(type(entry.arg) == "table",
-               "every " .. name .. "." .. key .. " entry needs arg as a list of positions")
-            for _, position in ipairs(entry.arg) do
-               assert(type(position) == "number",
-                  "every " .. name .. "." .. key .. " arg entry must be a number")
+            -- "*" is "every parameter, and the vararg": an entry point whose
+            -- arity is set by the request path rather than by its signature.
+            assert(entry.arg == "*" or type(entry.arg) == "table",
+               "every " .. name .. "." .. key .. " entry needs arg as a list of positions, or \"*\"")
+            if type(entry.arg) == "table" then
+               for _, position in ipairs(entry.arg) do
+                  assert(type(position) == "number",
+                     "every " .. name .. "." .. key .. " arg entry must be a number")
+               end
             end
          end
          if key == "entry_points" and entry.file ~= nil then

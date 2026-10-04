@@ -31,11 +31,32 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-265 findings over 566 files, 101 of them carrying at least one (18%), after six
+261 findings over 566 files, 101 of them carrying at least one (18%), after six
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
 embedded.
+
+Two changes moved this number since the last release, and neither is a
+regression.
+
+**#226** modelled the LuCI dispatcher's arguments, so twelve sinks that used to
+report "here is a dangerous call, nothing feeds it" now report the flow that
+feeds them, and the weaker shape-only and exposed-sink findings those twelve
+replaced are no longer reported beside them. Fifteen findings left, fourteen
+arrived, and the fourteen are the stronger kind.
+
+**#225** stopped 708 from *replacing* the 701 at the sink it names. An exported
+function whose execution sink is fed by something the file cannot fold was
+getting one finding, the 708, and nothing at all for the sink itself. 708 still
+reports "nothing in this file feeds it"; the 701 reports what is built into the
+command, and both are true of the same line. Thirty-three findings arrived, 29
+at 701 and 4 at 704, every one of them a sink already being reported as an
+exposure. 708 is unmoved at 33, because the fix is that it no longer
+*replaces* the sink report rather than that it reports less. Three of the sites
+#225 restores were also among the nine #226 turned into a 709, which is why
+this reads 29 where #225 measured 32 against the previous main. No file that
+was clean became dirty.
 
 This number has been wrong three times, each time because the headline was
 edited by hand and the per-code table was not. `test/spec/precision_spec.lua`
@@ -49,22 +70,22 @@ Hand-audited sample by code:
 
 | Code | Count | Assessment |
 | --- | --- | --- |
-| 724 RPC handler | 28 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field |
-| 708 exposed sink | 36 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Its count did not move in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same 36 sinks are reported and 32 of them now carry their 701 as well |
+| 724 RPC handler | 25 | true: a LuCI controller method that reaches an execution sink and is dispatched from a page. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field. Down 3 from 28 with #226: the three controller methods that now carry a real flow to their sink (`startstop`, `lxc_create`, `iface_reconnect`) report a 709 instead of the weaker "exposed, nothing feeds it" |
+| 708 exposed sink | 33 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well |
 | 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
 | 901 parse failure | 10 | true: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed |
 | 727 unbounded growth | 14 | true after narrowing: string accumulation in a loop with no visible ceiling |
 | 707 FFI escape | 9 | true: LuaJIT source |
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 5 | true: a decoder feeding `loadstring` |
-| 709 injection | 5 | true, and the one that matters. Two are new with #58, both previously missed only because the sink's result was assigned: `luci-app-cshark/controller/cshark.lua:73`, `local res = os.execute("kill -TERM " .. pid)` where `pid` is read from the world-writable `/tmp/cshark-luci.pid`; and `luci-app-wol/model/cbi/wol.lua:85`, `local p = io.popen(cmd .. " 2>&1")` where `cmd` carries form input (with a 712 beside it: part of it is quoted, part is not) |
-| 701 shape-only | 57 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked. Up from 25 in #225: an exported sink used to be reported as a 708 *instead of* its 701, and 32 of these are the ones that suppression was eating - every one of them is a sink the tool already reported in the same file when it was not exported, and no file that was clean became dirty |
+| 709 injection | 17 | true, and the one that matters. Up from 5 with #226, which modelled the arguments `luci.dispatcher` calls a controller method with — the LuCI handlers this corpus is full of were previously reported as "exposed, nothing feeds it". Nine of the twelve are sites that carried a shape-only 701/702 instead (`adblock:75`, `cshark:56`, `diag:36`, `mwan3:102`, `network:302`, `network:412`, `status:65`, `status:85`, `system:183`); three are flows nothing reported at all before (`ddns:310`, `lxc:70`, `network:272`). All twelve name their source, and all twelve are `medium`: an entry point makes an argument reachable, it does not prove the dispatcher that reaches it is itself reachable. The pre-existing five are unchanged, including the two from #58 (`cshark.lua:73`, `wol.lua:85`) |
+| 701 shape-only | 51 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked. Down 3 to 22 with #226, then up to 51 with #225: that is where this row stops being an undercount. An exported sink used to be reported as a 708 *instead of* its 701, and 29 of these are the ones that suppression was eating. Each one is the same shape-only finding the tool already reports in the same file when the sink is not exported, and no file that was clean became dirty |
 | 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
-| 702 env manipulation | 21 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression |
-| 704 dynamic load | 21 | true: `dofile`/`loadfile`/`load` of a path the file cannot fold to a constant, including calls whose result is used. Up from 17 in #225, for the same reason as 701: four dynamic loads inside exported functions were being masked by the 708 at the same sink. (The neighbouring 703 and 702 rows carry labels from an older catalogue; the counts are the measured ones and those two labels are a separate fix.)
+| 702 env manipulation | 15 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression. Down 6 from 21 with #226: those six sites now report a 709 naming the source |
+| 704 dynamic load | 21 | true: `dofile`/`loadfile`/`load` of a path the file cannot fold to a constant, including calls whose result is used. Up 4 from 17 with #225, for the same reason as 701: four dynamic loads inside exported functions were being masked by the 708 at the same sink. (The neighbouring 703 and 702 rows carry labels from an older catalogue; the counts are the measured ones and those two labels are a separate fix.) |
 | 705 dynamic require | 19 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment |
 | 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
-| 712 partial quote | 1 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression |
+| 712 partial quote | 3 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression. Up 2 from 1 with #226: at `diag:36` and `network:412` the tool can now see both halves of the command, so it reports which part was quoted |
 | 725 env escape | 1 | true after 725 was narrowed from every setfenv to the dangerous ones |
 
 ## What the corpus fixed
@@ -130,12 +151,12 @@ Two more came from reading the findings rather than the rules:
     indistinguishable from an unquoted one at identical severity and exit code.
 14. **708 replaced the 701 at the sink it named.** The exposure pass marked the
     sink's location "already reported" in the same table the shape-only pass
-    reads, so the 708 and the 701 could not both stand. Thirty-six sinks were
-    affected: the command was built from a value the file cannot fold, and the
-    report said only that nothing in this file fed it. That is how
-    `luci-app-lxc/controller/lxc.lua:70` — six dispatcher-supplied arguments
-    interpolated into a shell command with no quoting — came back with one
-    low-confidence note about exposure and no finding for the sink. #225.
+    reads, so the 708 and the 701 could not both stand. The command was built
+    from a value the file cannot fold, and the report said only that nothing in
+    this file fed it. `luci-app-lxc/controller/lxc.lua:70` - six
+    dispatcher-supplied arguments interpolated into a shell command with no
+    quoting - came back with one low-confidence note about exposure and nothing
+    about the sink. #225, 33 findings over this corpus.
 
 ## Reproducing this
 
@@ -213,5 +234,5 @@ corpus. Naming the value in a qualifying name gets the report either way.
   escape rewritten to one of the same length and analysed. The rest are
   reported rather than guessed at, which is the right behaviour, but it is 10
   findings an operator has to learn to read.
-- **708 is 36 findings and "mostly true" is not a number.** The claim has not
+- **708 is 33 findings and "mostly true" is not a number.** The claim has not
   been re-audited since the review fix.

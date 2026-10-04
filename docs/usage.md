@@ -119,8 +119,23 @@ Score: 94/100 (good) - firmware 1
 ### luci
 
 The LuCI web interface, which adds HTTP request parameters (`luci.http.formvalue`)
-as sources with `certain` confidence and a dispatch-tree exposure sink (`724`).
-Combine it with `openwrt` to scan a full LuCI web handler.
+and the request environment (`luci.http.getenv`, which is how a handler reads
+`REMOTE_ADDR` and the `HTTP_*` headers) as sources with `certain` confidence, and
+a dispatch-tree exposure sink (`724`).
+
+It also declares the dispatcher's own calling convention. `luci.dispatcher`
+resolves `/admin/luci/<module>/<action>/<segment>...` and calls the module's
+exported function as `stem_action(node, <every URL segment>)`, so in a
+**controller file** (`*/controller/*.lua`) every argument a function is called
+with — including its vararg — is request data. Those arguments are declared as
+entry points at `medium` confidence, not `certain`: the profile asserts the
+dispatcher calls them with the request path, which it does not assert that
+anything calls the dispatcher. Without them a real LuCI handler reports as a
+`708` "exposed sink, nothing feeds it" even when it is exploitable.
+
+A handler is matched by its path, so a file that merely happens to contain
+similar code outside `controller/` is not affected. Combine with `openwrt` to
+scan a full LuCI web handler.
 
 ```sh
 bin/luasec --std +openwrt+luci test/fixtures/firmware/uci_tainted_value.lua

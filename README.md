@@ -378,11 +378,11 @@ tree:
 
 | | |
 | --- | --- |
-| Findings | **265** across 101 files (18%) |
-| Severity | 11 critical, 210 high, 14 medium, 30 low |
-| `709` untrusted data → execution | 5 |
-| `724` execution sink exposed as an RPC handler | 28 |
-| `708` exposed sink, input not visible in this file | 36 |
+| Findings | **261** across 101 files (18%) |
+| Severity | 23 critical, 194 high, 14 medium, 30 low |
+| `709` untrusted data → execution | 17 |
+| `724` execution sink exposed as an RPC handler | 25 |
+| `708` exposed sink, input not visible in this file | 33 |
 | Hardcoded credentials (`747`) | **0** — see below |
 
 The per-code table is in [docs/precision.md](docs/precision.md).
