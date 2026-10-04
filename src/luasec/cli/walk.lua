@@ -543,11 +543,12 @@ local function cannot_be_lua(path)
    return false
 end
 
--- Directories whose contents are runtime state of a MOUNTED system rather than
+-- Directories whose CONTENTS are runtime state of a MOUNTED system rather than
 -- bytes the image carries. The kernel synthesises everything under /proc, /sys
 -- and /dev when the image is booted, and /tmp is scratch the boot scripts fill
--- in, so no extraction of any firmware contains them: a link into one of these
--- is a structural property of every rootfs, not ground this walk failed to read.
+-- in, so no extraction of any firmware carries contents for them (images do
+-- ship the directories, empty): a link into one of these is a structural
+-- property of every rootfs, not ground this walk failed to read.
 local RUNTIME_STATE_ROOTS = {"/proc", "/sys", "/dev", "/tmp"}
 
 -- Whether a link target names runtime state rather than a place inside the image.
@@ -560,13 +561,24 @@ local RUNTIME_STATE_ROOTS = {"/proc", "/sys", "/dev", "/tmp"}
 -- recovering it would mean mounting the image, which this tool does not do.
 --
 -- Only an ABSOLUTE target can land here. A relative target stays inside the
--- image by construction, and a target with a `..` climbs back out of the root the
--- operator pointed at, so neither is runtime state by this test.
+-- image by construction, so it is not runtime state by this test.
 local function names_runtime_state(target)
    if not target or target:sub(1, 1) ~= "/" then return false end
    -- "//proc" is the same directory as "/proc" to every kernel, and a symlink
    -- target spelled that way is not an attempt to name something else.
    local normalized = "/" .. target:gsub("^/+", "")
+   -- A target carrying `..` is never exempt, whatever it starts by spelling:
+   -- `/tmp/../usr/lib/absent.lua` is a place inside the image that simply is not
+   -- there, and reading only the leading `/tmp/` would lose the gap. This is the
+   -- same answer the walk already gives such a target upstream, where a `..`
+   -- target is never counted as resolving inside the root, so this keeps one
+   -- meaning of `..` across the walk rather than two. Rejecting rather than
+   -- collapsing the path is deliberate: collapsing needs the link's own
+   -- directory to mean anything, and erring toward reporting is the safe
+   -- direction for a finding whose whole meaning is that something was missed.
+   for segment in normalized:gmatch("[^/]+") do
+      if segment == ".." then return false end
+   end
    for _, root in ipairs(RUNTIME_STATE_ROOTS) do
       if normalized == root or normalized:sub(1, #root + 1) == root .. "/" then return true end
    end

@@ -50,6 +50,21 @@ describe("a dangling symlink to a place inside the image that is simply not ther
       assert_match(out, "coverage gap", out)
       assert_equal(code, 1, out)
    end)
+
+   it("still reports when the target climbs out of a runtime directory and back into the image", function()
+      -- `/tmp/../usr/lib/absent.lua` is a place the image could have carried and
+      -- does not, whatever runtime root it starts by spelling. Reading only the
+      -- leading `/tmp/` would exempt it and lose the gap.
+      local dir = tree("inside_image_dotdot")
+      os.execute("mkdir -p " .. q(dir .. "/usr/lib") .. " " .. q(dir .. "/bin"))
+      os.execute("ln -s /tmp/../usr/lib/absent.lua " .. q(dir .. "/usr/lib/handler.lua"))
+      os.execute("ln -s /proc/../usr/lib/other.lua " .. q(dir .. "/usr/lib/second.lua"))
+      local out, code = harness.cli({dir})
+      os.execute("rm -rf " .. q(dir))
+      assert_match(out, "could not resolve symlink", out)
+      assert_match(out, "coverage gap", out)
+      assert_equal(code, 1, out)
+   end)
 end)
 
 describe("the score of a scan whose only unresolvable links point at runtime state", function()
