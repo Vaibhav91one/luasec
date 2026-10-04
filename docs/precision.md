@@ -52,7 +52,7 @@ getting one finding, the 708, and nothing at all for the sink itself. 708 still
 reports "nothing in this file feeds it"; the 701 reports what is built into the
 command, and both are true of the same line. Thirty-three findings arrived, 29
 at 701 and 4 at 704, every one of them a sink already being reported as an
-exposure. 708 is unmoved at 33, because the fix is that it no longer
+exposure. 708 is unmoved at 33 there, because the fix is that it no longer
 *replaces* the sink report rather than that it reports less. Three of the sites
 #225 restores were also among the nine #226 turned into a 709, which is why
 this reads 29 where #225 measured 32 against the previous main. No file that
@@ -234,5 +234,5 @@ corpus. Naming the value in a qualifying name gets the report either way.
   escape rewritten to one of the same length and analysed. The rest are
   reported rather than guessed at, which is the right behaviour, but it is 10
   findings an operator has to learn to read.
-- **708 is 33 findings and "mostly true" is not a number.** The claim has not
+- **708 is 32 findings and "mostly true" is not a number.** The claim has not
   been re-audited since the review fix.
