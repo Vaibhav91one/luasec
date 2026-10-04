@@ -31,8 +31,11 @@ local ARITH = {
    pow = function(a, b) return a ^ b end,
 }
 
-local function fold(node, depth)
+local fold_local
+
+local function fold(node, depth, seen)
    depth = depth or 0
+   seen = seen or {}
    if depth > 32 or type(node) ~= "table" then
       return false, nil
    end
@@ -47,21 +50,23 @@ local function fold(node, depth)
          or tag == "True" or tag == "False" then
       return true, node[1]
    elseif tag == "Paren" then
-      return fold(node[1], depth + 1)
+      return fold(node[1], depth + 1, seen)
+   elseif tag == "Id" then
+      return fold_local(node, depth + 1, seen)
    elseif tag == "Op" then
       local operator = node[1]
       local right_node = node[3]
 
       if not right_node then
          -- Unary: the value is the operand, so folding depends only on it.
-         local ok, value = fold(node[2], depth + 1)
+         local ok, value = fold(node[2], depth + 1, seen)
          if not ok or operator ~= "unm" then return false, nil end
          if type(value) ~= "number" then return false, nil end
          return ok, -value
       end
 
-      local ok_left, left = fold(node[2], depth + 1)
-      local ok_right, right = fold(right_node, depth + 1)
+      local ok_left, left = fold(node[2], depth + 1, seen)
+      local ok_right, right = fold(right_node, depth + 1, seen)
       if not (ok_left and ok_right) then return false, nil end
 
       if operator == "concat" then
@@ -84,20 +89,55 @@ local function fold(node, depth)
       end
       local fname = callee[2][1]
       if not foldable_string_calls[fname] then return false, nil end
-      return fold_call(fname, node, depth)
+      return fold_call(fname, node, depth, seen)
    end
 
    return false, nil
+end
+
+-- Chase a local to its definition.
+--
+-- `resolve_locals` attaches the variable to every Id that reads it, and the
+-- variable carries the list of values ever assigned to it. Folding follows that
+-- list only when it is a single entry initialising the declaration itself: a
+-- second assignment anywhere -- a reassignment in a branch, in a loop, or in a
+-- closure -- makes the value at the use site unknown, and `701` fires on any
+-- argument that is not provably constant, so giving up here is the whole point.
+--
+-- Only the declaration's own initialiser counts. `local X` followed by `X = "a"`
+-- has one assignment, but it is not guaranteed to have run at the use site.
+--
+-- `seen` holds the variables already on this fold's path, so definitions that
+-- name each other -- `local X = X` resolves the initialiser Id to the very
+-- variable being resolved -- terminate instead of recursing.
+--
+-- A local bound to a table is not folded. `local M = {}; M.cmd = "lit"` needs a
+-- write set for M to answer "is M.cmd still the literal", and writes through an
+-- index, a metatable or a function are invisible to a per-variable reaching
+-- definition. Table state stays dynamic, which is the safe direction.
+fold_local = function(node, depth, seen)
+   local var = node.var
+   if not var or seen[var] then return false, nil end
+
+   local values = var.values
+   if not values or #values ~= 1 then return false, nil end
+   local definition = values[1]
+   if not definition.node or definition.var_node ~= var.node then return false, nil end
+
+   seen[var] = true
+   local ok, value = fold(definition.node, depth, seen)
+   seen[var] = nil
+   return ok, value
 end
 
 -- Only the string library calls that take constant arguments are folded, and
 -- results are length-capped so a crafted constant cannot make us allocate.
 local MAX_FOLDED = 4096
 
-local function fold_call(fname, node, depth)
+local function fold_call(fname, node, depth, seen)
    local args = {}
    for i = 2, #node do
-      local ok, value = fold(node[i], depth + 1)
+      local ok, value = fold(node[i], depth + 1, seen)
       if not ok then return false, nil end
       args[#args + 1] = value
    end
