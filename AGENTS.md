@@ -67,7 +67,7 @@ Test names describe behavior, not mechanism:
 
     make            # build lua + vendor + test
     make test       # run all specs
-    make ci-verify  # full gate: vendor-verify, upstream luacheck specs, our specs, adversarial
+    make ci-verify  # full local suite, kept for release: not the per-PR merge gate
     make tdd-proof BASE HEAD   # reverse-apply src/ only, run new tests, expect failure
     make ci         # what GitHub Actions runs
 
@@ -160,10 +160,20 @@ nothing will tell you it is stale.
 - One issue = one branch `issue/<n>-<slug>` = one PR. Body starts with `Closes #<n>`.
 - Squash merge. An agent never merges its own PR.
 - The orchestrator merges, and only once all four hold: the verifier's verdict on
-  **that PR** is a pass, `make ci-verify` is green locally **with
-  `PRECISION_REQUIRE_CORPUS=1`** (without it the target prints `PASS` while skipping the
-  corpus measurement entirely, and a skipped measurement is not evidence), Actions is
+  **that PR** is a pass, the specs that PR touches are green locally, Actions is
   green on the PR, and the PR touches only the paths its issue declares.
+  The local leg is deliberately the **subset**, not `make ci-verify`: Actions'
+  `gate` job runs every step `ci-verify` runs and adds `tdd-proof` and
+  `selfscan`, so the full run is duplicated work costing roughly 45 minutes per PR
+  against a targeted spec's ~18 seconds. `test/run.lua` takes spec files as well
+  as directories, so run the touched specs directly. A subset cannot catch a spec
+  the PR did not touch breaking, which is acceptable **because CI runs the whole
+  suite anyway** - the local run is an optimisation and must never be the thing
+  that decides. Keep `make ci-verify` for release, and any local `make precision`,
+  that one included, is evidence only under **`PRECISION_REQUIRE_CORPUS=1`**:
+  without it the target prints `PASS` while skipping the corpus measurement
+  entirely, and a skipped measurement is not evidence (#233). CI avoids that trap
+  by running `make corpus` first.
 - The orchestrator merges one PR at a time, in issue order, with
   `gh pr merge --squash --delete-branch`. Never two against `main` at once, and never
   a merge commit: squash is what keeps one issue mapped to one commit, which is what
