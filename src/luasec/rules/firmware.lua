@@ -1217,8 +1217,12 @@ local function first_sink(ctx, function_node, state)
                         -- A handler that also reaches a sink whose command can
                         -- hold data is that finding, wherever in the body the
                         -- literal sits, so the walk carries on to one.
-                        if hit.literal then literal = literal or hit else found = hit end
-                        if found then break end
+                        if hit.literal then
+                           literal = literal or hit
+                        else
+                           found = hit
+                           break
+                        end
                      else
                         escape = escape or {path = path, node = node}
                      end
