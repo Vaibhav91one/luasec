@@ -163,14 +163,22 @@ end
 
 -- The Function node a callee was bound to, when the binding is visible. A
 -- variable rebound thousands of times tells us nothing, so the search stops.
-local function defined_function(call)
+-- A global has no binding to follow at all, so the definitions this file
+-- publishes under that name are what the call reached.
+local function defined_function(call, index)
    local callee = call[1]
-   if type(callee) ~= "table" or callee.tag ~= "Id" or not callee.var then return nil end
-   local seen = 0
-   for _, value in ipairs(callee.var.values or {}) do
-      seen = seen + 1
-      if value.node and value.node.tag == "Function" then return value.node end
-      if seen >= MAX_BINDINGS then break end
+   if type(callee) ~= "table" or callee.tag ~= "Id" then return nil end
+   if callee.var then
+      local seen = 0
+      for _, value in ipairs(callee.var.values or {}) do
+         seen = seen + 1
+         if value.node and value.node.tag == "Function" then return value.node end
+         if seen >= MAX_BINDINGS then break end
+      end
+      return nil
+   end
+   if type(callee[1]) == "string" and index and index.globals then
+      return index.globals[callee[1]]
    end
    return nil
 end
@@ -425,7 +433,7 @@ trace_of = function(ctx, node, depth, index)
 
       -- A function this file defines is judged by what its body does, which is
       -- stronger evidence than what it is called, so that is asked first.
-      local defined = defined_function(node)
+      local defined = defined_function(node, index)
       if defined then
          local shape = shape_of(ctx, defined, index)
          if shape then
@@ -462,12 +470,12 @@ end
 -- reshape transparently, and is not a declared source: the chain behind it is
 -- not readable here. That is a statement about what we can see, not about what
 -- the function does, so a finding built on it is only ever low confidence.
-local function opaque_call(ctx, node)
+local function opaque_call(ctx, node, index)
    if type(node) ~= "table" or (node.tag ~= "Call" and node.tag ~= "Invoke") then return nil end
    local label = callee_label(ctx, node)
    if not label or transparent[label] then return nil end
    if platform_api.match_source(label) then return nil end
-   if defined_function(node) then return nil end
+   if defined_function(node, index) then return nil end
    return label
 end
 
@@ -499,20 +507,32 @@ local function loader_of(ctx, call)
    return nil
 end
 
--- ------------------------------------------------------------ shadowed names
+-- ------------------------------------------------------------ global definitions
 --
--- `load` and `loadstring` are names a file may define for itself. When it does,
--- the call reached that definition and not the standard library, so the name no
--- longer settles what happened and the definition has to. luci-base's cbi.lua
--- does exactly this: it defines `load` as its own module loader over `loadfile`,
--- so every call to `load` in that file loads a module off disk.
+-- A file may bind a name to a function for itself. Nothing local is involved, so
+-- there is no variable binding to follow: the definition has to be found by name.
+-- Two questions are asked of it, and both are answered from one scan.
 --
--- Only globals count. A `local function load` is bound through the variable and
--- `defined_function` already reads it; a global published as `function load()` or
--- `load = function()` has no binding to follow, which is the whole gap.
+-- `shadow_kind` reads it when the name is a loader's own. `load` and `loadstring`
+-- are names a file may define for itself; when it does, the call reached that
+-- definition and not the standard library, so the name no longer settles what
+-- happened and the definition has to. luci-base's cbi.lua does exactly this: it
+-- defines `load` as its own module loader over `loadfile`, so every call to
+-- `load` in that file loads a module off disk.
+--
+-- `defined_function` reads it for any other name, when the question is what the
+-- loader was handed rather than what the loader is. luadoc's `translate` is the
+-- case that matters: a global function statement that rewrites a template into
+-- source, which is not a decode step and used to be invisible for want of a
+-- binding to follow.
+--
+-- Only globals count here, and only ones bound to a function. A `local function`
+-- is bound through the variable and `defined_function` reads it there; a global
+-- assigned the result of a call is bound to something we cannot read as a
+-- function, which is not a definition at all.
 
 -- Every global this file binds to a function, by the name it binds it to.
-local function shadowed_functions(ctx)
+local function global_functions(ctx)
    local index = {}
    local lines = ctx.chstate and ctx.chstate.lines
    for _, line in ipairs(lines or {}) do
@@ -584,9 +604,12 @@ end
 
 -- What one file hands the chain walk: every `base.field = value` write, so a
 -- decoded value parked in a module field is still traceable when the loader
--- reads it back, and a cache of the function shapes judged so far.
+-- reads it back, every global the file binds to a function, so a global
+-- function statement is as readable as a local one, and a cache of the
+-- function shapes judged so far.
 local function build_index(ctx)
    local index = {writes = {}, shapes = {}, bases = {}, next_base = 1}
+   index.globals = global_functions(ctx)
    ctx:each_node(function(node)
       -- A write statement is `tag, {targets...}, {values...}`; the parser keeps
       -- no names on the parts, so the slots are read by position.
@@ -619,7 +642,6 @@ end
 -- 741: a code loader handed a decoded value.
 detectors[#detectors + 1] = function(ctx)
    local index = build_index(ctx)
-   local shadowed = shadowed_functions(ctx)
 
    ctx:each_call(function(call)
       local loader = loader_of(ctx, call)
@@ -629,7 +651,7 @@ detectors[#detectors + 1] = function(ctx)
       -- the definition is what the call reached, so it is read first: a loader
       -- that compiles a file off disk has not been handed a decoded payload and
       -- this rule is about decoded payloads.
-      local shadow = shadow_kind(ctx, callee_label(ctx, call), shadowed)
+      local shadow = shadow_kind(ctx, callee_label(ctx, call), index.globals)
       if shadow == "file" then return end
 
       local argument = payload_argument(ctx, call)
@@ -641,7 +663,7 @@ detectors[#detectors + 1] = function(ctx)
          -- No readable chain. A call this file does not define is still a
          -- payload we cannot see, but shape alone is all we have, so it is
          -- reported as shape and never as more.
-         local label = opaque_call(ctx, argument)
+         local label = opaque_call(ctx, argument, index)
          if not label then return end
          trace = {{kind = "call", name = label, line = call.line}}
          confidence = "low"

@@ -206,7 +206,7 @@ describe("a loader argument this file produces with a global function", function
       local names = {}
       for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
       assert_equal(table.concat(names, " -> "),
-         "unpack_blob -> byte building -> loadstring",
+         "unpack_blob -> byte arithmetic -> loadstring",
          "the trace reads the global's body, so the chain is evidence rather than shape")
    end)
 
@@ -253,6 +253,45 @@ local f = loadstring(transform(config.section))
       for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
       assert_equal(table.concat(names, " -> "), "transform -> loadstring",
          "binding a name is not the same as being able to read what it holds")
+   end)
+end)
+
+-- 743 reads the same walk but has no shape-only fallback, so the widening
+-- reaches it differently and it must be stated rather than left to move
+-- silently. Resolving a global gives the walk a body to read where it had none,
+-- so 743 can gain findings. What it gains is a chain that was there all along
+-- and could not be followed: a decoder this file defines, running a command.
+describe("a sink fed through a global function this file defines", function()
+   it("reports 743 for a decoded value out of a global decoder the file defines", function()
+      local report = api.check_source([[
+function shed_bytes (text)
+   local out = {}
+   for index = 1, #text do
+      out[index] = text:byte(index) - 32
+   end
+   return string.char(unpack(out))
+end
+
+os.execute(shed_bytes(blob))
+]])
+      local found = with_code(report, "743")
+      assert_equal(#found, 1, "the decoder is readable now, so the chain is: " .. codes(report))
+      assert_equal(found[1].severity, "critical")
+      local names = {}
+      for _, step in ipairs(found[1].trace) do names[#names + 1] = step.name end
+      assert_equal(table.concat(names, " -> "), "shed_bytes -> byte arithmetic -> os.execute")
+   end)
+
+   it("reports no 743 for a global function statement that only rewrites the command", function()
+      local report = api.check_source([[
+function rewrite (command)
+   return (command:gsub("<%%(.-)%%>", "<?lua %1 ?>"))
+end
+
+os.execute(rewrite(stage))
+]])
+      assert_equal(#with_code(report, "743"), 0,
+         "rewriting a command this file is holding is not a decoded payload: " .. codes(report))
    end)
 end)
 
