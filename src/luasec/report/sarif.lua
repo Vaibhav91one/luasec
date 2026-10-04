@@ -72,20 +72,26 @@ function sarif.render(report, opts)
    opts = opts or {}
    local s = score.summarize(report or {})
    local results = {}
+   local memo = {}
 
    for _, finding in ipairs(report) do
-      local uri = finding.file ~= "" and finding.file or "source.lua"
+      -- A physical location names a file. A finding that names a directory -
+      -- the aggregate gap over an image whose symlinks all resolve to nothing,
+      -- a tree that hit the walk bound - names something no consumer can open,
+      -- so it gets no `locations` key at all rather than one that resolves to
+      -- nothing. The schema leaves `locations` optional for exactly this: the
+      -- result still carries its rule, its level and its message, so a code
+      -- scanning UI lists it, it simply cannot be clicked through to a file.
+      local file = contract.open_file(finding, memo)
+      -- An empty `file` is the other way a finding has no place, and there the
+      -- old placeholder still stands: nothing in it claims to be a scanned file.
+      local unnamed = finding.file == nil or finding.file == ""
+      local uri = file or (unnamed and "source.lua" or nil)
 
       local result = {
          ruleId = finding.code,
          level = level_for(finding),
          message = {text = finding.message ~= "" and finding.message or finding.code},
-         locations = {{
-            physicalLocation = {
-               artifactLocation = {uri = uri},
-               region = step_region(finding, {line = finding.line}, true),
-            },
-         }},
          -- `primaryLocationLineHash` is a hash of the line, so it moves with the
          -- line. `luasecFinding` is the finding's identity: code, name and file,
          -- with no line in it, so a statement that moved is the same finding to
@@ -104,6 +110,15 @@ function sarif.render(report, opts)
          },
       }
 
+      if uri then
+         result.locations = {{
+            physicalLocation = {
+               artifactLocation = {uri = uri},
+               region = step_region(finding, {line = finding.line}, true),
+            },
+         }}
+      end
+
       if finding.status then
          -- The schema's own vocabulary for this: a result the baseline did not
          -- have is "new", one the baseline had and the run no longer has is
@@ -111,7 +126,7 @@ function sarif.render(report, opts)
          result.baselineState = finding.status == "fixed" and "absent" or "new"
       end
 
-      if finding.trace and #finding.trace > 0 then
+      if uri and finding.trace and #finding.trace > 0 then
          local locations = {}
          for order, step in ipairs(finding.trace) do
             -- `importance` is the schema's own vocabulary for which steps of a
