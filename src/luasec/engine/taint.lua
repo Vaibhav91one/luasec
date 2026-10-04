@@ -711,6 +711,11 @@ taint_of_expr = function(node, item, state, depth)
       return result
    elseif tag == "Paren" then
       return taint_of_expr(node[1], item, state, depth + 1)
+   elseif tag == "Dots" then
+      -- A `...` read is a read of the vararg parameter. resolve_locals gave it
+      -- the same var object the signature carries, so an entry point that taints
+      -- its vararg reaches `{...}`, `select("#", ...)` and `...` alike.
+      return taint_of_var(node, item, state)
    elseif tag == "Table" then
       local result = new_set()
       for _, pair_node in ipairs(node) do
@@ -1287,20 +1292,36 @@ function taint.run(chstate, opts, existing_state)
             local entry = platform_api.match_entry_point(name, chstate.file_path)
                or platform_api.match_entry_point(name:match("[^.:]+$") or name, chstate.file_path)
             if entry then
-               local vars = taint.formals_of(function_node)
-               for _, position in ipairs(entry.arg or {1}) do
+               local vars, vararg = taint.formals_of(function_node)
+               local positions = entry.arg or {1}
+               local every = positions == "*"
+               if every then
+                  -- Every parameter, and the vararg: a dispatcher whose arity is
+                  -- the request path does not have a fixed one.
+                  positions = {}
+                  for position = 1, #vars do positions[position] = position end
+               end
+               local function seed(var, label)
+                  local existing = state.param_taint[var] or {}
+                  state.param_taint[var] = existing
+                  set_add(existing, {
+                     channel = entry.channel,
+                     id = "entry:" .. name .. ":" .. label,
+                     name = label,
+                     line = function_node.line,
+                     confidence = entry.confidence or "medium",
+                  })
+               end
+               for _, position in ipairs(positions) do
                   local var = vars[position]
                   if var then
-                     local existing = state.param_taint[var] or {}
-                     state.param_taint[var] = existing
-                     set_add(existing, {
-                        channel = entry.channel,
-                        id = "entry:" .. name .. ":" .. position,
-                        name = "entry-point argument " .. position .. " of " .. name,
-                        line = function_node.line,
-                        confidence = entry.confidence or "medium",
-                     })
+                     seed(var, "entry-point argument " .. position .. " of " .. name)
                   end
+               end
+               -- `function(...)` has no formal at position 1, so a position list
+               -- alone would leave it untainted however long it is.
+               if every and type(vararg) == "table" then
+                  seed(vararg, "entry-point vararg of " .. name)
                end
             end
          end
@@ -1414,13 +1435,16 @@ function taint.run(chstate, opts, existing_state)
    return state.findings
 end
 
--- Formal parameters of a function node.
+-- Formal parameters of a function node. The vararg is a parameter like any
+-- other: resolve_locals gives its `...` node in the body the same var object the
+-- signature carries, so it is returned as a third value rather than as a
+-- boolean. `function(a, ...)` has two formals, and only the second is varargs.
 taint.formals_of = function(function_node)
    local args = function_node[1] or {}
    local vars, varargs = {}, false
    for _, arg in ipairs(args) do
       if arg.tag == "Dots" then
-         varargs = true
+         varargs = arg.var or true
       elseif arg.var then
          vars[#vars + 1] = arg.var
       end
