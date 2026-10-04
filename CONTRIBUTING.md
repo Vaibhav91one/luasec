@@ -33,8 +33,11 @@ drift.
 - `make test` passes and `make tdd-proof BASE HEAD` shows the new tests
   failing without the change. A PR with no behavior change carries the
   `type:chore` or `type:docs` label, which skips the TDD proof.
-- Squash merge. Do not merge your own PR. Never push to `main`, never create
-  merge commits, never run `gh pr merge`.
+- Squash merge, and only by the orchestrator. An agent never merges its own PR;
+  the orchestrator merges only once all four conditions in
+  [AGENTS.md](AGENTS.md) hold - a verifier pass, a green `make ci-verify`, green
+  Actions, and a diff confined to the issue's declared paths. Never push to
+  `main`, never create merge commits. If a condition fails, stop and say so.
 
 ## Adding a rule code
 

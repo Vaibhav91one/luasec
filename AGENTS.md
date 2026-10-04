@@ -143,10 +143,24 @@ registered code has a doc row.
 ## Commit / PR conventions
 
 - One issue = one branch `issue/<n>-<slug>` = one PR. Body starts with `Closes #<n>`.
-- Squash merge. Do not merge your own PR; the orchestrator merges after verification.
+- Squash merge. An agent never merges its own PR.
+- The orchestrator merges, and only once all four hold: the verifier's verdict on
+  **that PR** is a pass, `make ci-verify` is green locally **with
+  `PRECISION_REQUIRE_CORPUS=1`** (without it the target prints `PASS` while skipping the
+  corpus measurement entirely, and a skipped measurement is not evidence), Actions is
+  green on the PR, and the PR touches only the paths its issue declares.
+- The orchestrator merges one PR at a time, in issue order, with
+  `gh pr merge --squash --delete-branch`. Never two against `main` at once, and never
+  a merge commit: squash is what keeps one issue mapped to one commit, which is what
+  `make tdd-proof` reads.
 - A PR with no behavior change (dead code, documentation) is labelled `type:chore` or `type:docs`, which skips the TDD proof; the label is reviewed like code, and a PR that changes behavior never carries it.
 - Do not touch files outside your issue's declared owned paths.
-- Never push to `main`, never create merge commits, never run `gh pr merge`.
+- `main` stays protected regardless: never push to `main`, never force-push, never
+  rewrite published history, never close an issue nobody opened.
+- If any of the four conditions fails, the orchestrator stops and reports. It never
+  merges with `--admin`, never re-runs a gate hoping for a different answer, and never
+  works around a refusal. A blocked merge is a result to report, not a problem to route
+  around.
 
 ## Verifier subagent
 
