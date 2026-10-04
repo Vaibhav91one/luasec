@@ -428,10 +428,39 @@ local function taint_of_var(node, item, state)
    return result
 end
 
+-- A source declared as a dotted path is untrusted input however the script
+-- writes it. `ngx.req.get_uri_arg("q")` reaches match_source through the call
+-- path; `local ua = ngx.var.http_user_agent` is a read, and a read consults no
+-- matcher, so the same declaration meant two different things depending on
+-- punctuation. callee_path already resolves the whole chain -- `ngx` -> `ngx.var`
+-- -> `ngx.var.http_user_agent` -- so the value position needs nothing new from
+-- the resolver, only the lookup the call position had.
+--
+-- The guard is the matcher, not the node's shape. `foo.bar` is the same Index
+-- node as `ngx.var.http_user_agent`; what separates them is that no profile
+-- declares `foo.bar` as a source. Matching any Index instead would report every
+-- global field read in every file, so the path is resolved first and the
+-- declaration decides, exactly as it does in call position.
+local function source_of_value(node, item, state, depth)
+   if not (node[2] and node[2].tag == "String") then return nil end
+   local path = callee_path(node, item, state, (depth or 0) + 1)
+   if not path then return nil end
+   local source = platform_api.match_source(path)
+   if not source then return nil end
+   return {
+      id = source.id, name = source.name,
+      line = node.line, confidence = source.confidence,
+      channel = source.channel,
+   }
+end
+
 local function taint_of_index(node, item, state, depth)
    local result = new_set()
    set_union_into(result, taint_of_expr(node[1], item, state, depth + 1))
    set_union_into(result, taint_of_expr(node[2], item, state, depth + 1))
+
+   local read = source_of_value(node, item, state, depth)
+   if read then set_add(result, read) end
 
    -- Table field taint: t.cmd = x, then use t.cmd
    local fields = table_fields_of(node[1], item, state)
