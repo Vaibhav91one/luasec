@@ -958,7 +958,7 @@ local function check_sink(node, item, state, chstate, opts)
       end
       local source = sources[1]
       local taint_spec = {
-         code = kind == "dyncode" and "710" or "709",
+         code = sink.taint_code or (kind == "dyncode" and "710" or "709"),
          kind = kind,
          pattern = sink.pattern,
       }
@@ -1047,7 +1047,13 @@ local function check_sink(node, item, state, chstate, opts)
 
    -- No known taint, but is the argument actually constant? If we cannot prove
    -- it is, the call is still an execution sink fed by something unknown.
-   if opts.report_dynamic_sinks == false then return end
+   --
+   -- A sink may opt out with `taint_only`. For an API that takes a value on every
+   -- call -- writing a header, capturing a subrequest -- a merely non-constant
+   -- argument is the normal case rather than a finding, so only a proven taint
+   -- flow is reported. Left reporting it, every `set_header` from a local
+   -- variable would read as an untrusted write.
+   if sink.taint_only or opts.report_dynamic_sinks == false then return end
 
    for _, index in ipairs(sink.arg or {1}) do
       local arg = args[index]

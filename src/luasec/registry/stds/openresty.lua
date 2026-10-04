@@ -18,9 +18,28 @@ return {
    sinks = {
       {pattern = "ngx.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "ngx.pty.spawn", code = "701", kind = "exec", arg = {1}},
-      {pattern = "ngx.redirect", code = "728", kind = "pattern", arg = {1}},
       {pattern = "ngx.re.find", code = "728", kind = "pattern", arg = {2}},
       {pattern = "ngx.re.gsub", code = "728", kind = "pattern", arg = {2}},
+      -- CVE-2020-36309. A header value or a rewritten URI is written into the
+      -- HTTP message verbatim, so a CRLF in it is a response-splitting header.
+      {pattern = "ngx.resp.set_header", code = "730", kind = "header",
+         arg = {2}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_header", code = "730", kind = "header",
+         arg = {2}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_uri", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      {pattern = "ngx.req.set_uri_args", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      -- ngx.redirect writes a Location header. It used to be declared as a search
+      -- pattern sink, so a tainted target was reported as 728/CWE-1333 when the
+      -- argument was merely non-constant and as 709/CWE-78 command execution when
+      -- it was tainted. Neither was true: it writes a header and runs nothing.
+      {pattern = "ngx.redirect", code = "730", kind = "header",
+         arg = {1}, taint_code = "730", taint_only = true},
+      -- CVE-2020-11724. The second argument is the subrequest options table; a
+      -- tainted body or header in it lets the caller frame the upstream request.
+      {pattern = "ngx.location.capture", code = "731", kind = "subrequest",
+         arg = {2}, taint_code = "731", taint_only = true},
    },
    propagators = {
       {pattern = "ngx.re.gsub", arg = {1}},
