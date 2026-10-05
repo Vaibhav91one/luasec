@@ -18,6 +18,37 @@ local interprocedural = {}
 local MAX_ITERATIONS = 8
 
 -- Mark a call site's arguments as tainted in the callee's parameter values.
+--
+-- A callee's vararg is a formal like any other, and binding to it is what makes
+-- a forward reach: `function action_run(...) execute_command(cb, ...) end` hands
+-- the dispatcher's URL path to `execute_command`, and nothing downstream of that
+-- was tainted while the binding stopped at the positional formals a
+-- `function(...)` does not have.
+--
+-- The confidence of a descriptor is unchanged by the hop, and that is the whole
+-- decision rather than a default. Two things make it safe to say so:
+--
+--   * The binding is demand-driven. What lands here is written to
+--     `param_taint[callee vararg]`, which `taint_of_expr` consults only when the
+--     callee's body actually evaluates a `...`. A callee that discards the value
+--     binds nothing that is ever read, so no claim is made on its behalf --
+--     `function g(a, ...) return a end` called as `g(clean, tainted)` leaves `a`
+--     clean, and that is specified rather than assumed.
+--   * The confidence describes the *source*, not the path. `high` says the data
+--     is what `http.formvalue` returned; `medium` says it is what a profile
+--     declares a dispatcher argument to be. A forward does not change what the
+--     data is, only where it is read. Every discount this codebase applies
+--     (`filter_split`, `check_validator`) is for evidence that the value was
+--     *neutralised on the way to the sink*, and forwarding is not that.
+--
+-- What a hop does cost is index precision: the callee chooses which element of
+-- its vararg to read, and it may choose one the caller cannot reach, so
+-- `select(1, ...)` after `run("/usr/bin/true", untrusted)` is a claim this model
+-- cannot make exact. That imprecision belongs to the *vararg*, not to the
+-- forwarding -- #226 accepts it unpaid for `{...}` inside the handler itself --
+-- so charging for it again per hop would price a path length instead of a piece
+-- of missing evidence, and would report a three-hop firmware dispatcher below a
+-- one-hop one for no difference in what is known.
 local function bind_call(state, chstate, site)
    local function_node = site.callee
    if not taint_engine.line_of_function(chstate, function_node) then return false end
@@ -26,21 +57,51 @@ local function bind_call(state, chstate, site)
    local arguments = site.args
    local bound = false
 
+   -- Fold an argument's taint into one formal, at most once per descriptor. A
+   -- descriptor already there is not news, which is what keeps a function that
+   -- forwards the same vararg to two callees from reporting one finding twice.
+   local function bind_into(var, arg)
+      local arg_taint = taint_engine.of_expr(state, arg, site.item)
+      if next(arg_taint) == nil then return end
+      local existing = state.param_taint[var]
+      if not existing then
+         existing = {}
+         state.param_taint[var] = existing
+      end
+      for _, descriptor in pairs(arg_taint) do
+         if not existing[descriptor.id] then
+            existing[descriptor.id] = descriptor
+            bound = true
+         end
+      end
+   end
+
    for index, var in ipairs(vars) do
       local arg = arguments[index]
       if not arg then break end
-      local arg_taint = taint_engine.of_expr(state, arg, site.item)
-      if next(arg_taint) ~= nil then
-         local existing = state.param_taint[var]
-         if not existing then
-            existing = {}
-            state.param_taint[var] = existing
-         end
-         for _, descriptor in pairs(arg_taint) do
-            if not existing[descriptor.id] then
-               existing[descriptor.id] = descriptor
-               bound = true
-            end
+      bind_into(var, arg)
+   end
+
+   -- Everything the callee takes beyond its last positional formal is its
+   -- vararg, in one bag. A `...` *anywhere* in the call is in that bag too: in
+   -- Lua the forwarded values fill the remaining positional formals and then run
+   -- on into `...`, so `sink_fn("a", "b", ...)` reaches `sink_fn`'s vararg even
+   -- though the `...` sits at a position the callee names. Whether it really
+   -- does depends on how many values the caller's vararg holds, which is not
+   -- knowable here -- the same over-approximation every positional binding makes.
+   --
+   -- `formals_of` hands back `true` rather than a var when resolve_locals gave
+   -- the signature no var object; there is nothing to bind to in that case and
+   -- writing to `param_taint[true]` would be a second, unrelated key.
+   if type(varargs) == "table" then
+      -- `f(..., ...)` hands the same node over twice. bind_into is idempotent,
+      -- so the second fold is a no-op rather than a second finding, and the
+      -- alternative -- a seen-set allocated per call site on every one of the
+      -- eight iterations -- buys nothing this does not already have.
+      for index = 1, #arguments do
+         local arg = arguments[index]
+         if index > #vars or arg.tag == "Dots" then
+            bind_into(varargs, arg)
          end
       end
    end
