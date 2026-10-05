@@ -13,30 +13,83 @@ local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec"}
 -- Extensions that are definitely not Lua. A firmware tree is mostly web assets
 -- and translations, and scanning them produced hundreds of findings that were
 -- all noise.
+--
+-- `.t` and `.stp` are here for a stronger reason (#288). A Test::Nginx `.t` spec
+-- is a Perl program with Lua inside heredocs, and a SystemTap `.stp` probe is
+-- C-like probe syntax that opens with `function`. Neither is Lua, so the content
+-- must not be allowed to overrule the suffix - which is what the old sniff did,
+-- reading the first 512 bytes for an opener and finding one in
+-- `use Test::Nginx::Socket::Lua`. Over the corpus every `.t` spec failed to
+-- parse, and those failures were the tool describing its own mistake.
 local NOT_LUA_EXTENSIONS = {
    ".js", ".uc", ".json", ".po", ".pot", ".css", ".lp", ".xml", ".svg",
    ".png", ".jpg", ".gif", ".woff", ".woff2", ".ttf", ".map", ".conf", ".sh",
    ".py", ".md", ".txt", ".ucode", ".patch", ".diff", ".pem", ".cer", ".p8",
    ".luadoc", ".awk", ".h", ".hpp", ".c", ".pl", ".dts", ".yml", ".yaml",
    ".pc", ".mk", ".rules", ".list", ".in", ".spec",
+   ".t", ".stp",
 }
 
--- Names that are not Lua whatever they contain.
--- Keys are plain lowercased base names, matched exactly.
+-- Names that are not Lua whatever they contain, matched exactly. Keys are plain
+-- lowercased base names.
 local NOT_LUA_NAMES = {
-   ["makefile"] = true, ["gnumakefile"] = true, ["kbuild"] = true,
-   ["kconfig"] = true, ["readme"] = true, ["license"] = true, ["copying"] = true,
-   ["authors"] = true, ["changelog"] = true, ["changes"] = true, ["news"] = true,
-   ["configure"] = true, ["install"] = true, ["todo"] = true,
+   ["license"] = true, ["copying"] = true, ["authors"] = true, ["changes"] = true,
+   ["news"] = true, ["configure"] = true, ["install"] = true, ["todo"] = true,
+}
+
+-- ...and names that are not Lua whatever a distribution appends to them.
+--
+-- A makefile is a makefile whether it is spelled Makefile, GNUmakefile,
+-- makefile.dist, Makefile.am or Makefile.in, and two of those spellings were
+-- the only ones an exact-match table held. Same for README and CHANGELOG, which
+-- grow variants like `readme.old` and `CHANGELOG-1.2`. Matching the family
+-- rather than one spelling is what keeps this from being a list of the cases
+-- someone has already hit - the same argument that decides `.git/` below.
+local NOT_LUA_NAME_FAMILIES = {
+   "makefile", "gnumakefile", "kbuild", "kconfig", "readme", "changelog",
 }
 
 -- Content markers of files that are not Lua whatever they are called. A patch
 -- file starts with a diff header and a key with a PEM banner; both begin with
 -- runs of dashes, which a Lua comment also does.
+--
+-- The mailbox markers that used to be here - `Index:`, `From `, `Subject:` -
+-- were doing the job the `#` rule below now does properly, since all three are
+-- lines that start with a letter and none of them opens like Lua.
 local NOT_LUA_HEADS = {
-   "^diff %-%- ", "^%-%-%-%- ", "^%+%+%+ ", "^@@ ", "^Index: ", "^From ",
-   "^Subject:", "^%-%-%-%-%-BEGIN", "^%-%-%-%-%-%-%-BEGIN", "^#!.*%b()$",
+   "^diff %-%- ", "^%-%-%-%- ", "^%+%+%+ ", "^@@ ",
+   "^%-%-%-%-%-BEGIN", "^%-%-%-%-%-%-%-BEGIN",
 }
+
+-- A directory the walk never descends into, whatever is in it.
+--
+-- `.git/` is the case, and the reason it is a directory rather than a name is
+-- that it is a category: a packfile, a loose object, an index and a packed-refs
+-- are all not source in any language, `packed-refs` can be renamed, a packfile
+-- can have any name at all, and every git checkout has one. A name in the table
+-- above would have passed a test named for #288 and fixed nothing (#288).
+--
+-- The measured cost of not having it: `looks_like_lua` accepted any file whose
+-- first 512 bytes contained `lua`, so `corpus/lua-nginx-module/.git/packed-refs`
+-- was read as Lua - true today, because of the branches `luajit-1203` and
+-- `luajit-20240815`, and false for eight other checkouts. The frozen corpus
+-- measurement therefore depended on which branches upstream happened to have
+-- when `make corpus` cloned.
+--
+-- The component, not the spelling: `vendor/pkg.git` in a firmware package is
+-- ordinary source and is still walked.
+local GIT_DIR = ".git"
+
+local function is_git_dir(path)
+   return (path:match("([^/]+)$") or path) == GIT_DIR
+end
+
+-- True for a path with `.git` as one of its directory components, so that a
+-- file named explicitly under one is refused the same way a walk finds it.
+local function under_git_dir(path)
+   return path:find("/" .. GIT_DIR .. "/", 1, true) ~= nil
+      or path:sub(1, #GIT_DIR + 1) == GIT_DIR .. "/"
+end
 
 -- Extensionless scripts that are Lua: a CGI handler in cgi-bin, a Lua
 -- interpreter shebang, a LuCI module.
@@ -65,6 +118,52 @@ local LUA_OPENERS = {
    "^%a+%s*=%s*function", "^do$", "^local%s+function",
 }
 
+-- The interpreters a `#!` line may name and still mean this is Lua: lua, any
+-- versioned spelling of it, LuaJIT, and OpenResty's `resty`.
+local LUA_INTERPRETER = "^lua[jt]?[%w%.%-]*$"
+
+-- Is this shebang line naming a Lua interpreter?
+--
+-- `#!/usr/bin/lua`, `#!/usr/bin/env lua`, `#!/usr/local/bin/lua5.1`,
+-- `#!/usr/bin/luajit`. `env` is the word that hands the decision on, so the
+-- interpreter is whichever word follows it - and a word following `env` that is
+-- not Lua means the file is not Lua, which is the answer the old rule could
+-- never give: it asked whether the first 512 bytes contained `lua` somewhere, so
+-- a shell script that copied a file called `luasocket.cat.tmp` was Lua.
+local function shebang_names_lua(first_line)
+   local words = {}
+   -- Past the `#!`: `#!/usr/bin/lua` is one word, and taking the whole line as
+   -- a word list would find no interpreter in it.
+   for word in first_line:sub(3):gmatch("%S+") do words[#words + 1] = word end
+   if #words == 0 then return false end
+   if words[1]:match("[^/]+$") == "env" then
+      -- `env -S`, `env -i FOO=bar lua`: the interpreter is the first word that
+      -- is not an option and does not look like an assignment.
+      for index = 2, #words do
+         local word = words[index]
+         if not word:match("^%-") and not word:match("=") then
+            return word:match("[^/]+$"):match(LUA_INTERPRETER) ~= nil
+         end
+      end
+      return false
+   end
+   return words[1]:match("[^/]+$"):match(LUA_INTERPRETER) ~= nil
+end
+
+-- Bytes that cannot occur in Lua source text. A NUL is the one every binary
+-- format in a firmware image has inside its first block, and the C0 controls
+-- bar tab, newline, carriage return and form feed catch the compressed and
+-- packed ones whose header happens to be ASCII.
+--
+-- This is checked before the opener list, and it is the answer to a binary that
+-- opens with `return ` or `function `: the old sniff read an opener out of the
+-- first 512 bytes and stopped looking, so a packed format with a text header was
+-- parsed as Lua and reported as a parse failure on a file with no Lua in it.
+local function is_binary(head)
+   return head:find("\0", 1, true) ~= nil
+      or head:find("[\1-\8\11\12\14-\31\127]") ~= nil
+end
+
 -- A template page counts as Lua only when it holds a Lua block, which means
 -- reading the whole file. Past 2 MiB the page is skipped rather than read.
 local TEMPLATE_MAX_BYTES = 2000000
@@ -85,13 +184,28 @@ local function template_file_has_lua(path)
 end
 
 -- Is this file Lua? An extension decides it when it is one we know. Otherwise
--- the content must look like Lua: a shebang naming lua, or an opener that a web
--- asset or a translation file would not have.
+-- the FIRST LINE decides (#288), never 512 bytes of it:
+--
+--   - a `#!` line names the interpreter, and anything but Lua is not Lua;
+--   - any other line beginning with `#` is not Lua, because Lua's line comment
+--     is `--` and a `#` first line is a file in some other language's comment
+--     syntax or a vim modeline. This is the rule that stops a git packed-refs
+--     index, which opens `# pack-refs with:`, from being read as Lua whenever an
+--     upstream branch is named `lua-something`;
+--   - anything else has to open like Lua.
+--
+-- The 512 bytes are still read, because a binary is only recognisable by its
+-- bytes and an opener can sit inside them; what changed is that they are now
+-- checked for being text first and that a `#` in the first line of a file that
+-- is not a shebang ends the question.
 local function looks_like_lua(path)
+   if under_git_dir(path) then return false end
+
    local name = path:match("([^/]+)$") or path
-   if NOT_LUA_NAMES[name:lower()] or name:lower():match("^readme[%a-z0-9_.-]*$")
-         or name:lower():match("^changelog[%a-z0-9_.-]*$") then
-      return false
+   local lower_name = name:lower()
+   if NOT_LUA_NAMES[lower_name] then return false end
+   for _, family in ipairs(NOT_LUA_NAME_FAMILIES) do
+      if lower_name:match("^" .. family .. "[%w_%.%-]*$") then return false end
    end
 
    if template.is_template_path(path) and path:lower():sub(-3) ~= ".lp" then
@@ -107,16 +221,14 @@ local function looks_like_lua(path)
    local head = handle:read(512)
    handle:close()
    if not head or head == "" then return false end
-   if head:sub(1, 1) == "#" then
-      return head:find("lua") ~= nil
-   end
+   if is_binary(head) then return false end
+
+   local first_line = head:match("^([^\n]*)")
+   if first_line:sub(1, 2) == "#!" then return shebang_names_lua(first_line) end
+   if first_line:sub(1, 1) == "#" then return false end
+
    for _, marker in ipairs(NOT_LUA_HEADS) do
-      if head:match(marker) then
-         if marker == "^#!.*%b()$" then
-            return head:find("lua") ~= nil
-         end
-         return false
-      end
+      if head:match(marker) then return false end
    end
    for _, opener in ipairs(LUA_OPENERS) do
       if head:match(opener) then return true end
@@ -396,8 +508,23 @@ local LINK_BRANCH =
    .. 'else printf "l\\0%s\\0x\\0" "$x"; fi '
    .. 'done\' _ {} +'
 
-local ONE_PASS = 'find -H "$p" \\( ' .. FILE_BRANCH .. ' \\) -o \\( ' .. UNREADABLE_BRANCH
-   .. ' \\) -o \\( ' .. LINK_BRANCH .. ' \\) 2>/dev/null'
+-- The `.git` directory, pruned before any branch below runs.
+--
+-- `-name .git -prune` rather than `-type d -name .git -prune`, because in a
+-- worktree or a submodule `.git` is a FILE holding `gitdir: ...`, and the file
+-- case is exactly the one a suffix list cannot help with. `-prune` is true for
+-- a file too, so one predicate covers both and neither reaches a branch below.
+--
+-- Nothing under a pruned `.git` is counted as ground the walk failed to cover,
+-- and that is deliberate rather than convenient: a `.git` we cannot read is not
+-- a gap in a scan of a firmware tree, it is git's own metadata, and the same
+-- reasoning RUNTIME_PSEUDO_ROOTS below applies to /proc. Saying so here is what
+-- keeps `make precision` from reporting a coverage gap for a corpus whose
+-- checkouts have one.
+local GIT_PRUNE_BRANCH = '-name ' .. GIT_DIR .. ' -prune'
+
+local ONE_PASS = 'find -H "$p" ' .. GIT_PRUNE_BRANCH .. ' -o \\( ' .. FILE_BRANCH
+   .. ' \\) -o \\( ' .. UNREADABLE_BRANCH .. ' \\) -o \\( ' .. LINK_BRANCH .. ' \\) 2>/dev/null'
 
 -- Run one find pass and read what it printed. Returns the records, whether the
 -- pass printed more of them than the budget allows, and find's exit status, which
@@ -694,7 +821,13 @@ local function expand_root(root)
                -- ground and is not walked a second time.
                local answer = verdict[link.path]; if answer and answer.inside then covered = true end
             end
-            if not covered and not walked[link.dir] then
+            -- A link that lands on a `.git` directory is not queued. The prune
+            -- in the find pass covers a `.git` inside a directory being walked,
+            -- but this link is resolved to one physical path by the link branch
+            -- and reaches the queue as a root of its own, where no prune runs:
+            -- `find -H "$p" -name .git -prune` on `tree/link` never sees the
+            -- name, because the path it was handed is not spelled that way.
+            if not covered and not walked[link.dir] and not is_git_dir(link.dir) then
                walked[link.dir] = true
                if charge(state, 1) then break end
                queue[#queue + 1] = link.dir
@@ -825,7 +958,21 @@ function walk.collect(paths)
    local files, seen, errors = {}, {}, {}
 
    for _, path in ipairs(paths) do
-      if is_dir(path) then
+      -- A `.git` named on the command line is skipped the same way a walk finds
+      -- it, and quietly.
+      --
+      -- Quiet is the deliberate half of this. Every other thing the walk does not
+      -- read - a directory it cannot open, a link it cannot resolve, a tree that
+      -- outgrew the limit - becomes a 901 and a non-zero exit, because each is
+      -- ground this scan was asked for and did not cover. A `.git` is not that:
+      -- it is git's own metadata, present in every checkout and in every
+      -- extracted repository, and there is no Lua in a packfile index to lose.
+      -- Reporting a coverage gap for it would be an alarm about nothing, and the
+      -- acceptance criterion of #288 is that nothing anywhere names a path under
+      -- one. An operator who wants the directories that were skipped asked a
+      -- different question, and this is not the answer to it.
+      local git_metadata = is_git_dir(path) or under_git_dir(path)
+      if not git_metadata and is_dir(path) then
          local listed, list_error = expand_root(path)
          local skipped = path
          if not listed then
@@ -845,12 +992,12 @@ function walk.collect(paths)
             end
          end
          end
-      elseif file_exists(path) then
+      elseif not git_metadata and file_exists(path) then
          if not seen[path] then
             seen[path] = true
             files[#files + 1] = path
          end
-      else
+      elseif not git_metadata then
          return nil, "no such file: " .. path
       end
    end

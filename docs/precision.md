@@ -72,11 +72,16 @@ verify names the entry and prints both hex values instead of reporting arithmeti
 `test/spec/corpus_spec.lua` fails if that verify is ever removed from the path or
 moved behind the analyzer.
 
-691 is how many `.lua` files `make corpus` collects. 964 is how many paths
+691 is how many `.lua` files `make corpus` collects. 706 is how many paths
 luasec selects from them and analyzes, the difference being the extensionless
 CGI handlers and generated scripts a firmware image carries, plus the non-`.lua`
-files the walk admits inside the OpenResty checkouts (see below). The headline
-counts what was analyzed, because that is what produced the findings.
+files the walk admits inside the OpenResty checkouts. That was 964 until #288
+and is 706 now, and the 258 paths the walk gave up were **250 Test::Nginx `.t`
+specs, 2 `.git/packed-refs`, and six pieces of tooling** — a SystemTap `.stp`
+probe, a C lexer generator, a `makefile.dist` and three shell scripts. **Not one
+of them was a `.lua` file:** the walk selected 687 `.lua` files before #288 and
+selects the same 687 after it. The headline counts what was analyzed, because
+that is what produced the findings.
 
 Command:
 
@@ -128,37 +133,65 @@ untrusted bodies, JWT signing and claim validation, and an FFI layer written by
 people who are not writing a firmware CGI script, which is exactly what this tool
 most needed to be checked against.
 
-Two caveats a reader should not have to discover by reading the table:
+Two caveats a reader should not have to discover by reading the table. Both
+were written before #288 and both are shorter now, because the defect they
+describe is fixed rather than moved:
 
-1. **Most of the Test::Nginx `.t` files in the new checkouts are Perl, and the
-   walk reads them as Lua.** `lua-resty-core` and `lua-nginx-module` ship their
-   test suites as `.t` specs written in Perl with Lua inside heredocs, and the walk
-   has no `.t` in its not-Lua list. **Every parse failure, unsupported dialect and
-   dialect mismatch the new entries contribute is on a file that is not Lua — all
-   of them, and none on a `.lua` file.** That is a walker defect rather than a
-   property of OpenResty; it is filed as **#288** and it is the first thing to fix
-   before reading anything else in the OpenResty rows, because it accounts for
-   roughly half of what those entries contribute to this table.
-2. **`lua-nginx-module` is a C project.** Its four `.lua` files are Test::Nginx
-   helper libraries under `t/lib/`, not the `ngx` API, which is C. It is in the
-   corpus because its `.t` specs exercise `ngx.exec` and the subrequest sinks
-   #227 added — not because it ships Lua that runs in production.
+1. ~~**Most of the Test::Nginx `.t` files in the new checkouts are Perl, and the
+   walk reads them as Lua.**~~ **Fixed by #288.** `lua-resty-core` and
+   `lua-nginx-module` ship their test suites as `.t` specs written in Perl, the
+   walk had no `.t` in its not-Lua list, and it sniffed the first 512 bytes of a
+   file for an opener — so it found `lua` in `use Test::Nginx::Socket::Lua` and
+   read 250 Perl programs as Lua. Every parse failure, unsupported dialect and
+   dialect mismatch those two entries contributed was on a file that is not Lua.
+   `.t` is now in the not-Lua list and the content no longer gets to overrule a
+   suffix. **What this cost is stated in full below**: 436 of the 466 parse and
+   dialect failures went away, and so did 89 findings in six other codes that
+   were real detections inside the Lua those specs carry in heredocs. That is a
+   coverage loss, it is named there file by file, and it is filed as its own
+   issue rather than absorbed into this number.
+2. **`lua-nginx-module` is a C project, and after #288 it contributes nothing at
+   all to this table.** Its four `.lua` files are Test::Nginx helper libraries
+   under `t/lib/`, not the `ngx` API, which is C. They carried 0 findings before
+   this change and carry 0 now, so the entry's entire measured surface used to be
+   its `.t` specs — 377 findings, every one of them either a parse failure on
+   Perl or a lexical-scan detection inside a heredoc. **That leaves
+   `lua-nginx-module` with nothing to contribute to a false-positive measurement,
+   and the honest reading is that the entry should be reconsidered or replaced by
+   a deployed `nginx.conf`** — which is the same gap #262 named for the whole
+   OpenResty queue and which nothing upstream ships to clone.
 
-The `.git/packed-refs` of two checkouts is read as Lua too, because whether
-`looks_like_lua` accepts one depends on whether the word `lua` appears in its first
-512 bytes, which depends on which branches upstream had at clone time. An earlier
-draft of this change removed those findings by relocating the git directories
-outside the corpus, and that was reverted on purpose: it hides the evidence, fixes
-nothing, and a corpus quietly shaped to stop tripping a defect makes that defect
-harder to find next time.
+The `.git/packed-refs` caveat that used to stand here is **closed by #288**. It
+was the same defect wearing a worse hat: the walk never descended into `.git/`, so
+whether it read a packed-refs index at all depended on whether the word `lua`
+appeared in its first 512 bytes — true for `lua-nginx-module` and
+`lua-resty-core`, false for the other eight, and a function of which branches
+upstream happened to have when `make corpus` cloned. It now never descends into
+`.git/`, which is a category rather than a case: `packed-refs` can be renamed, a
+packfile can have any name, and every checkout has one. An earlier draft of #262
+removed those two findings by relocating the git directories outside the corpus,
+and that was reverted on purpose — it hides the evidence, fixes nothing, and a
+corpus quietly shaped to stop tripping a defect makes that defect harder to find
+next time.
 
 ## Result
 
-1136 findings over 964 files, 403 of them carrying at least one (42%), after nine
+611 findings over 706 files, 145 of them carrying at least one (20%), after nine
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
 embedded.
+
+**#288** moved this number down by 525, and it is the only change recorded here
+that has ever taken a finding away. 436 of them are 901/902/903 on files that are
+not Lua at all — 94% of every parse and dialect failure this corpus produces, and
+the single largest source of wrong numbers in the tool. The other 89 are real
+detections inside the Lua that Test::Nginx specs carry in heredocs, which is a
+coverage loss this change caused rather than a defect it fixed. **Every one of
+the 525 is named in "What #288 took away" below**, because "the count went down
+by 436" and "it went down by 436, of which 89 were FFI and command-execution
+findings in nginx's own test suite" are different facts and only one of them
+should be in the record.
 
 **#262** moved this number, and not one finding of the increase is in code that
 was already here. Six OpenResty repositories joined the corpus, pinned to
@@ -168,9 +201,8 @@ representativeness question and what the new entries do and do not buy are in
 "What #262 added, and what it did not" above. **What they buy is FFI and
 crypto/encoding false-positive surface, not request-handler flow** — they
 contribute nothing to 704, 708, 709, 710, 712 or 724, because a library is not a
-request handler. A large share of the new findings are in files that are not Lua
-at all, which is #288 rather than anything about OpenResty, and it is named here
-because the table below cannot be read correctly without it.
+request handler. A large share of the findings they added were in files that are
+not Lua at all, which was #288 and is now fixed rather than caveated.
 
 **#268** moved this number by one, in the one direction a security tool is allowed
 to. The OpenWrt profile declared one of the three functions nixio's process
@@ -269,6 +301,92 @@ headline and the table disagree, and if a sentence claims a count for the corpus
 as it stands now that `scripts/precision-golden.lua` contradicts. The command
 above is here so the number can be reproduced rather than believed.
 
+## What #288 took away
+
+525 findings, 1136 → 611, and this is the only entry in this document that takes
+any away. Both halves are named, because the honest version of this section is
+not "the walker got fixed" and it is not "436 noise findings went away" either.
+
+### The control: the four entries that were already here did not move
+
+| | before | after |
+| --- | --- | --- |
+| `luci`, `luci-1806`, `openwrt-packages`, `luajit` | 248 | **248** |
+| 701 | 49 | **49** |
+| 708 | 22 | **22** |
+| 709 | 23 | **23** |
+| 901 | 10 | **10** |
+| 903 | 20 | **20** |
+
+Identical for every code, not only these: `luci` 32, `luci-1806` 153, `luajit` 63
+and `openwrt-packages` 0, finding for finding and line for line. Those four carry
+no `.t` file and no `.git`, which is exactly why they are the control — if a rule
+had changed rather than a file selection, this table is where it would show.
+
+### The 436 that were never information
+
+All 436 are 901/902/903, and none is on a file that is Lua:
+
+| On what | 901 | 902 | 903 | total |
+| --- | --- | --- | --- | --- |
+| 250 Test::Nginx `.t` specs, which are Perl | 250 | 6 | 171 | 427 |
+| 2 `.git/packed-refs` | 2 | 0 | 0 | 2 |
+| `lua-nginx-module/util/gen-lexer-c`, a C program | 1 | 0 | 1 | 2 |
+| `lua-resty-jwt/ci`, `ci-coverage`, shell scripts | 2 | 0 | 0 | 2 |
+| `luasocket/makefile.dist` | 1 | 0 | 0 | 1 |
+| `luasocket/test/cgi/cat`, a shell script | 1 | 0 | 0 | 1 |
+| `lua-nginx-module/tapset/ngx_lua.stp`, a probe | 1 | 0 | 0 | 1 |
+
+This is the whole of the 901/902/903 the corpus produces now except the 30 that
+are real: 10 parse failures and 20 dialect mismatches, all in `luajit`, all
+predating #262.
+
+### The 89 that were real, and what this cost
+
+**These are genuine detections inside Lua that Test::Nginx specs carry in heredocs,
+and this change removed them.** luasec lexed the whole Perl file and the tokens
+inside `--- response` and `--- config` blocks are the Lua the spec actually runs,
+so `ffi.cdef` inside a heredoc is the same `ffi.cdef` the tool reports everywhere
+else. Excluding `.t` gave them up. Every one, by code and file:
+
+| Code | Count | Files |
+| --- | --- | --- |
+| 707 FFI escape | 55 | `lua-nginx-module/t/099-c-api.t` 27, `t/146-malloc-trim.t` 9, `t/192-lua-block-conf-dump.t` 3, `t/138-balancer.t` 3, `t/025-codecache.t` 1, `lua-resty-core/t/pipe.t` 6, `t/socket-tcp-setoption.t` 4, `t/require.t` 2 |
+| 701 shape-only | 17 | `lua-nginx-module/t/063-abort.t` 9, `t/163-signal.t` 3, `t/153-semaphore-hup.t` 1, `lua-resty-core/t/pipe.t` 2, `t/pipe-stdout.t` 1, `t/stream/process-type-hup.t` 1 |
+| 711 backtick shell | 6 | `lua-nginx-module/t/060-lua-memcached.t` 1, `t/061-lua-redis.t` 1, `t/191-pipe-proc-quic-close-crash.t` 1, `lua-resty-core/t/process-type-privileged-agent.t` 2, `t/stream/process-type-privileged-agent.t` 1 |
+| 702 env manipulation | 5 | `lua-nginx-module/t/192-lua-block-conf-dump.t` 2, `t/159-sa-restart.t` 1, `lua-resty-core/t/ssl-session-fetch.t` 2 |
+| 703 dynamic code | 5 | `lua-nginx-module/t/081-bytecode.t` 2, `t/002-content.t` 1, `t/023-rewrite/sanity.t` 1, `t/024-access/sanity.t` 1 |
+| 705 dynamic require | 1 | `lua-nginx-module/t/086-init-by.t` 1 |
+
+Of the 711 row, all 6 were **false** — `my $pwd = \`pwd\`;` is a Perl backtick in
+a Perl harness, and the row is now 0 for the reason it should be. Of the 707, 701,
+702, 703 and 705 rows, **all 83 were real**: 55 FFI uses of `ngx_http_lua_shared_dict_get`,
+`ngx_http_lua_find_zone`, `ffi.cdef`, `ffi.string`, `ffi.C.malloc`/`free`, and 17
+`os.execute`/`io.popen` calls on arguments the file cannot fold. They are gone from
+this table because the file they live in is Perl and the walker no longer claims
+otherwise.
+
+**This is a regression my own fix caused, stated as one rather than absorbed into
+the total.** The trade is 436 findings that were never information for 83 that
+were, and the right side of that trade is still the right side: 436 findings that
+say "this is not Lua" from a tool that said "this is Lua" teach a reader nothing
+and cost a security tool its credibility on every other row. But the cost is real
+and it is not recovered by this change. Reading the Lua out of Test::Nginx heredocs
+is a capability rather than a file-type fix, it is filed as **#291**, and it is the
+one thing in this document that would bring any of the 83 back.
+
+### What this does to `lua-nginx-module`
+
+It contributes **zero findings now**, down from 377, because its four `.lua` files
+never carried any. That is the honest answer to "is its `.t` surface worth keeping
+now that #288 makes it real rather than accidental": it was worth having while it
+was noise, because 377 findings in an entry are measurement even when they are the
+wrong measurement, and 250 Perl files parsed as Lua is what finally made the walker
+defect visible. It is not worth keeping now that it is accurate, because an entry
+that measures nothing falsifies nothing. The replacement is the gap this queue has
+named since #262 — a deployed `nginx.conf` with a `content_by_lua_block` — and
+nothing upstream ships one to clone.
+
 
 
 Hand-audited sample by code:
@@ -278,23 +396,23 @@ Hand-audited sample by code:
 | 724 RPC handler | 25 | true, at two strengths. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field. Down 3 from 28 with #226: the three controller methods that now carry a real flow to their sink (`startstop`, `lxc_create`, `iface_reconnect`) report a 709 instead of the weaker "exposed, nothing feeds it". Unmoved in count by #238 and down 17 in severity: 17 of the 25 are a CBI hook running a literal command, which is this corpus's spelling of "restart this service", and they now report at `medium`/low confidence instead of `high`. The 8 that stay `high` all reach a sink whose command is built from something that does not fold - `ddns`'s `CTRL.luci_helper` is the clearest - and they keep the registered severity |
 | 708 exposed sink | 22 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well. Down 2 with #281, from `ccache.lua`'s `_load_sane`, which is a `local function` whose only call - `local modcons = _load_sane(encoded)` - was invisible to `callgraph.call_sites` because it is an assignment and not a whole statement, so the file read as one that never fed it. #281 also *tightened* this rule rather than only widening it: a resolved call now withholds 708 only when it passes an argument the file cannot fold to a constant, because for an exported handler - whose real callers are in another file, since LuCI registers it by name - an in-file call proves nothing about the path an attacker would take. Under the looser rule `luci-splash`'s `call(cmd)`, which `os.execute`s its argument and is called twice with string literals, lost its 708 and gained no 709, which is silence on a reachable sink; the tightened rule keeps it |
 | 747 hardcoded secret | 15 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because the four firmware entries contain no hardcoded credential. **#262 moved this off zero, and every one of the 15 is a false positive** — see below. |
-| 901 parse failure | 268 | true for the ten that were here before #262: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed. All 258 that #262 added are the opposite case — **files that are not Lua at all**, which the walk selected and the parser then could not read Up hard with #262, which added the six OpenResty checkouts: **all 258 of the new ones are on files that are not Lua** (250 Test::Nginx `.t` specs written in Perl, 2 `.git/packed-refs`, a `.stp` probe, a Makefile and two shell scripts). None is on a `.lua` file. See #288 below. |
+| 901 parse failure | 10 | true for the ten that were here before #262: real Lua the parser still rejects, all in `luajit`. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed. #262 added 258 more and **all 258 were files that are not Lua at all** — 250 Test::Nginx `.t` specs written in Perl, 2 `.git/packed-refs`, a `.stp` probe, a Makefile, two shell scripts and a C program — which the walk selected and the parser then correctly could not read. **#288 took all 258 back**, and this row is the ten it always was. |
 | 727 unbounded growth | 16 | true after narrowing: string accumulation in a loop with no visible ceiling. Up 2 with #262, both in `luasocket`. |
-| 707 FFI escape | 401 | true: LuaJIT source, and with #262 the first non-LuaJIT FFI in the corpus Up hard with #262, which added `lua-resty-core` — **that entry is the FFI layer the `ngx.*` API is built on, so it is FFI by construction**, and 337 of the increase are its `.lua` files. The OpenResty entries are the first thing this corpus has contained that this rule could be checked against at all; before them this row was LuaJIT only. |
-| 903 dialect mismatch | 192 | true but mislabelled. The ten that predate #262 are all the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API; that part of the row is unmoved and still wrong. #262 added the other 172, 171 of them Test::Nginx `.t` specs the walk read as Lua (#288) and the rest from `lua-nginx-module`'s `util/gen-lexer-c`, a C program Up hard with #262 for the same reason as 901: 171 of the increase are Test::Nginx `.t` specs. The ten that predate it are unchanged. |
+| 707 FFI escape | 346 | true: LuaJIT source, and with #262 the first non-LuaJIT FFI in the corpus Up hard with #262, which added `lua-resty-core` — **that entry is the FFI layer the `ngx.*` API is built on, so it is FFI by construction**, and 337 of the increase are its `.lua` files. The OpenResty entries are the first thing this corpus has contained that this rule could be checked against at all; before them this row was LuaJIT only. **Down 55 with #288, and this is the one row where that change cost something real**: all 55 are `ffi.cdef`, `ffi.string`, `ffi.C.malloc`/`free`, `ffi.C.ngx_http_lua_shared_dict_get` and `ffi.C.ngx_http_lua_find_zone` inside the `--- response` heredocs of Test::Nginx specs in `lua-nginx-module` and `lua-resty-core`. They were found only because luasec lexed a Perl file end to end, and they are named one file at a time in "What #288 took away". 327 of the 346 that remain are `lua-resty-core`'s and `lua-resty-jwt`'s own `.lua` files. |
+| 903 dialect mismatch | 20 | Down from 192 with #288: the 172 #262 added were Test::Nginx `.t` specs and a C lexer generator the walk read as Lua. What remains is the ten that predate #262 - 5.3 bitwise operators under `--std luajit`, still mislabelled. |
 | 741 obfuscated loader | 0 | was 5, and all 5 were false. Down 2 with #235: `luci-base`'s `cbi.lua` defines `load` as its own module loader over `loadfile`, so `load(node, name)` at line 581 is module loading, not a hidden payload. Down 2 more with #256: `defined_function` resolved local bindings only, so a **global function statement the file defines** had no binding to follow and the walk could not read it. `luadoc`'s `lp.lua:104` is `loadstring(translate(s))` where `translate` is defined 61 lines earlier as a global `function translate(s)` and only rewrites template markup — one site, counted twice because the corpus holds two checkouts of openluci/luci (`corpus/luci` and `corpus/luci-1806`) and `lp.lua` is byte-identical between them (`cmp` clean). The same double-counting is why #235's drop was 2 and not 1: the CBI file appears in both checkouts, as `luci-base` in one and `luci-compat` in the other. **The 1 that remains is a different defect and is still wrong.** `genlibbc.lua:145` is the LuaJIT build tool handing the output of `transform_lua` to the standard `load`. It is not the #256 class: `transform_lua` is a `local function` (`genlibbc.lua:48`), which `defined_function` already resolved — the finding comes from `shape_of` reading `string.gsub(code, "PAIRS%((.-)%)", function(var) ... end)` inside it as a substitution decode, and that shape is a real decoder shape rather than a gap. So the column was 5 findings over 3 sites before #235, 3 over 2 after it, and 1 over 1 after #256 |
 | 709 injection | 23 | true, and the one that matters. Up from 5 with #226, which modelled the arguments `luci.dispatcher` calls a controller method with — the LuCI handlers this corpus is full of were previously reported as "exposed, nothing feeds it". Nine of the twelve are sites that carried a shape-only 701/702 instead (`adblock:75`, `cshark:56`, `diag:36`, `mwan3:102`, `network:302`, `network:412`, `status:65`, `status:85`, `system:183`); three are flows nothing reported at all before (`ddns:310`, `lxc:70`, `network:272`). All twelve name their source, and all twelve are `medium`: an entry point makes an argument reachable, it does not prove the dispatcher that reaches it is itself reachable. Up 5 more with #265, which declared the shell form of `nixio.exec` (`admin/system.lua:416` and `:446`, `mini/system.lua:233`, `failsafe/failsafe.lua:170` and `:200`) — five call sites, five findings, none of which was previously reported by any code. Up 1 more with #268, which declared the other two functions nixio's process module exports (`nixio.execp` and `nixio.exece`): `luci-app-nlbwmon/luasrc/controller/nlbw.lua:46`, where the archive entry names read out of an uploaded backup by `io.popen("/bin/tar -tzf %s" % tmp)` at `:179` reach `execve("/bin/tar", {..., unpack(files)})` at `:207`. The pre-existing five are unchanged, including the two from #58 (`cshark.lua:73`, `wol.lua:85`) |
-| 701 shape-only | 67 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked. Down 3 to 22 with #226, then up to 51 with #225: that is where this row stops being an undercount. An exported sink used to be reported as a 708 *instead of* its 701, and 29 of these are the ones that suppression was eating. Each one is the same shape-only finding the tool already reports in the same file when the sink is not exported, and no file that was clean became dirty. Up 18 with #262, 17 of them in Test::Nginx `.t` files read as Lua and one in `luasocket`'s `src/ftp.lua`. |
-| 703 file write | 25 | true: writes outside /tmp and /var/run, including sinks nested in expressions. Up 8 with #262, all in the new OpenResty entries. |
-| 702 env manipulation | 19 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression. Down 6 from 21 with #226: those six sites now report a 709 naming the source. Up 5 with #262, all in Test::Nginx `.t` files. |
+| 701 shape-only | 50 | Down 17 with #288, all in Test::Nginx `.t` specs (#291) - real detections in Lua embedded in Perl; the loss is recorded there, not absorbed here. |
+| 703 file write | 20 | Down 5 with #288, all in Test::Nginx `.t` specs (#291), the same recorded loss. |
+| 702 env manipulation | 14 | Down 5 with #288, all in Test::Nginx `.t` specs (#291). |
 | 704 dynamic load | 21 | true: `dofile`/`loadfile`/`load` of a path the file cannot fold to a constant, including calls whose result is used. Up 4 from 17 with #225, for the same reason as 701: four dynamic loads inside exported functions were being masked by the 708 at the same sink. (The neighbouring 703 and 702 rows carry labels from an older catalogue; the counts are the measured ones and those two labels are a separate fix.) |
-| 705 dynamic require | 23 | true after the rule was un-inverted; see below. Now also catches dynamic require in a local assignment. Up 4 with #262, all in the new OpenResty entries. |
+| 705 dynamic require | 22 | Down 1 with #288, in a Test::Nginx `.t` spec (#291). |
 | 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
 | 712 partial quote | 3 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression. Up 2 from 1 with #226: at `diag:36` and `network:412` the tool can now see both halves of the command, so it reports which part was quoted |
 | 725 env escape | 2 | true after 725 was narrowed from every setfenv to the dangerous ones. Up 1 with #262: `lua-resty-jwt`'s `lib/resty/jwt-validators.lua`, which replaces an environment for a claim-validation closure |
 | 728 search pattern | 1 | a single finding, and it is the only one in the whole corpus: `lua-resty-jwt`'s `lib/resty/jwt-validators.lua:93`, `string.match(val, pattern)` inside `string_match_function`. That function is reached from `opt_check(pattern, ...)` and `opt_any_of(patterns, ...)` — the `pattern` is supplied by the *application's own* `jwt:verify()` options, and `val` is the claim out of the token. Reported as untrusted data used as a search pattern, the untrusted argument is the one being matched, not the one being matched against. The class is real — `string.match` does treat its second argument as a pattern — but this instance is the rule binding to the wrong parameter, and it is in the one entry added for exactly this shape |
-| 711 backtick shell | 6 | new to this table, and **all 6 are false**. Every one is a Perl backtick in a Test::Nginx `.t` file that the walk read as Lua: `lua-nginx-module/t/060-lua-memcached.t:13` and `:061-lua-redis.t:15` are `my $pwd = \`pwd\`;`, and `lua-resty-core`'s three are the same idiom in `t/process-type-privileged-agent.t`. They are #288 again — the walk has no `.t` in its not-Lua list — and they are the reason 902 is non-zero. Recorded here rather than filtered, because a rule that fires on Perl syntax is a fact about the tool and the corpus that exposed it |
-| 902 unsupported dialect | 6 | new to this table and non-zero only because of #288: all 6 are Test::Nginx `.t` files in `lua-nginx-module` and `lua-resty-core` that parse as Lua far enough to run but use a construct the configured standard does not have. Like 901 and most of 903, this is the walk reading a Perl harness, not a dialect gap in Lua anyone writes |
+| 711 backtick shell | 0 | **Now 0.** All 6 were Perl backticks inside Test::Nginx `.t` specs the walk read as Lua; #288 stopped reading them. There was never a real finding here. |
+| 902 unsupported dialect | 0 | **Now 0.** All 6 were Test::Nginx `.t` specs - a Perl file cannot be an unsupported Lua dialect. |
 
 ## What the corpus fixed
 
