@@ -395,7 +395,7 @@ Hand-audited sample by code:
 | --- | --- | --- |
 | 724 RPC handler | 25 | true, at two strengths. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field. Down 3 from 28 with #226: the three controller methods that now carry a real flow to their sink (`startstop`, `lxc_create`, `iface_reconnect`) report a 709 instead of the weaker "exposed, nothing feeds it". Unmoved in count by #238 and down 17 in severity: 17 of the 25 are a CBI hook running a literal command, which is this corpus's spelling of "restart this service", and they now report at `medium`/low confidence instead of `high`. The 8 that stay `high` all reach a sink whose command is built from something that does not fold - `ddns`'s `CTRL.luci_helper` is the clearest - and they keep the registered severity |
 | 708 exposed sink | 22 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well. Down 2 with #281, from `ccache.lua`'s `_load_sane`, which is a `local function` whose only call - `local modcons = _load_sane(encoded)` - was invisible to `callgraph.call_sites` because it is an assignment and not a whole statement, so the file read as one that never fed it. #281 also *tightened* this rule rather than only widening it: a resolved call now withholds 708 only when it passes an argument the file cannot fold to a constant, because for an exported handler - whose real callers are in another file, since LuCI registers it by name - an in-file call proves nothing about the path an attacker would take. Under the looser rule `luci-splash`'s `call(cmd)`, which `os.execute`s its argument and is called twice with string literals, lost its 708 and gained no 709, which is silence on a reachable sink; the tightened rule keeps it |
-| 747 hardcoded secret | 15 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because the four firmware entries contain no hardcoded credential. **#262 moved this off zero, and every one of the 15 is a false positive** — see below. |
+| 747 hardcoded secret | 15 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because the four firmware entries contain no hardcoded credential. **#262 moved this off zero, and every one of the 15 is a false positive** — see below. **#290 left the count at 15 and moved every one of them to `low`**, which is the whole of that change on this corpus and the reason its table and its golden file did not move: fourteen sit in `corpus/luasocket/test/`, where they are a URL parser's own parse fixtures, and one is at `corpus/luasocket/src/ftp.lua:30`, the default an anonymous FTP login sends. |
 | 901 parse failure | 10 | true for the ten that were here before #262: real Lua the parser still rejects, all in `luajit`. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed. #262 added 258 more and **all 258 were files that are not Lua at all** — 250 Test::Nginx `.t` specs written in Perl, 2 `.git/packed-refs`, a `.stp` probe, a Makefile, two shell scripts and a C program — which the walk selected and the parser then correctly could not read. **#288 took all 258 back**, and this row is the ten it always was. |
 | 727 unbounded growth | 16 | true after narrowing: string accumulation in a loop with no visible ceiling. Up 2 with #262, both in `luasocket`. |
 | 707 FFI escape | 346 | true: LuaJIT source, and with #262 the first non-LuaJIT FFI in the corpus Up hard with #262, which added `lua-resty-core` — **that entry is the FFI layer the `ngx.*` API is built on, so it is FFI by construction**, and 337 of the increase are its `.lua` files. The OpenResty entries are the first thing this corpus has contained that this rule could be checked against at all; before them this row was LuaJIT only. **Down 55 with #288, and this is the one row where that change cost something real**: all 55 are `ffi.cdef`, `ffi.string`, `ffi.C.malloc`/`free`, `ffi.C.ngx_http_lua_shared_dict_get` and `ffi.C.ngx_http_lua_find_zone` inside the `--- response` heredocs of Test::Nginx specs in `lua-nginx-module` and `lua-resty-core`. They were found only because luasec lexed a Perl file end to end, and they are named one file at a time in "What #288 took away". 327 of the 346 that remain are `lua-resty-core`'s and `lua-resty-jwt`'s own `.lua` files. |
@@ -558,12 +558,44 @@ shipping `ADMIN_PASSWORD = "admin"`, a WiFi generator shipping a PSK, an
 of the five are found at `high` confidence; the bare `key` beside a six-digit hex
 value is found at `low`.
 
-What the new corpus asks of 747 is concrete, and #262 does not fix it because
-this issue owns no rule: **a value that is a placeholder, or that is RFC-mandated
-rather than chosen, should not be reported at `high`.** `"password"`, `"pass?#wd"`
-and the anonymous FTP default are all reportable-but-not-leaked. Tightening the
-value heuristics is the change, and it should be taken against this measurement
-rather than against fixtures alone.
+What the new corpus asked of 747 was concrete, and #262 could not answer it
+because that issue owns no rule: **a value that is a placeholder, or that is a
+protocol default rather than a chosen credential, should not be reported at
+`high`.** `"password"`, `"pass?#wd"` and the anonymous FTP default were all
+reportable-but-not-leaked. **#290 answers it, by demotion rather than by
+suppression**, and the distinction matters for the next reader: a demotion is a
+statement about *exposure*, so all 15 are still reported and
+`luasec --only 747` still finds them - only the severity moved, which is why the
+count in the table above is unchanged.
+
+Two contexts demote, and the two are answered from opposite directions. One is
+the **file**: a path segment named `test`, `tests`, `spec` or `specs`, or a file
+whose own name begins or ends with one, is a test suite, and a credential-shaped
+literal in a test suite is the fixture it is. That is the blunt route and it is
+the one that carries the corpus's fourteen; it is also the route that had to
+leave `t/` out, because macOS names the scratch directory it hands every process
+`T` and a one-letter entry would have demoted every finding in every temporary
+file. The other is the **value**, and it is where the one in `src/` went: a
+strong `password` name holding `anonymous@anonymous.org` is the identity an
+anonymous login sends instead of a password somebody chose.
+
+That second one is deliberately *not* a list of allowed values. The issue called
+the constant an RFC-mandated default and named RFC 2577; RFC 2577 is
+*FTP Security Considerations*, an Informational memo about the bounce attack and
+brute-force limits, and it says nothing about an anonymous login. There is no
+IETF RFC for the convention - it is de-facto, documented in `ftp(1)`, and every
+client implements it. So a table of permitted values would have had no authority
+to copy from, and the only string in it that catches this corpus is
+`anonymous@anonymous.org`, which is *luasocket's* choice of domain. The shape -
+a local part, an `@`, then either nothing or a domain whose last label is
+letters - covers every client's choice at once and has nothing to go stale.
+
+The other route the issue offered, placement - a literal in a field named
+`password` inside a table that is clearly a fixture - was **not** taken, and the
+measurement is why it could not be: `{scheme = "ftp", host = ..., user = ...,
+password = ...}` is byte for byte how firmware writes an FTP connection
+configuration, and nothing in the table says which of the two it is. The path
+says it, the table does not.
 
 What 747 gives up, stated rather than hidden: a bare `key` or `auth` holding
 something under twelve characters, or a single lower-case word with no digit in

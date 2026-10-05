@@ -109,6 +109,24 @@ carries a base64 body is the key, and is reported whatever name it is filed
 under, at `high`. When a file holds a marker and a body as separate literals,
 the body is the finding.
 
+**Two contexts lower one finding to `low`, and neither drops it.** A demotion is
+a statement about exposure, not about detection, so everything 747 finds is still
+in the report and `luasec --only 747` still finds it. The first is **a file that
+is part of a test suite** - a path segment named `test`, `tests`, `spec` or
+`specs`, or a file whose own name begins or ends with one. A credential-shaped
+literal in a test fixture is the fixture: a parser's table of URLs has to carry a
+password containing `#` or the parser is not being tested. The second is **the
+identity an anonymous login sends** - a strong `password` name holding a local
+part, an `@`, and then either nothing or a domain whose last label is letters,
+which is why no list of values appears anywhere in this rule: every FTP client
+picks a different address and none of them is anybody else's to enumerate. There
+is no `t` in the directory list, because macOS names the scratch directory it
+hands every process `T`, and a one-letter entry would lower the severity of every
+finding in every temporary file this tool is pointed at. **A PEM private key block
+is never demoted.** Both demotions are about a finding whose evidence is a
+*name*, and in a test suite a credential-named binding is exactly what a fixture
+is; a key block's evidence is the block itself, and a key is not a fixture shape.
+
 **What 747 does not report.** A value the program only *compares* against - a
 login check, a credential dictionary it tests input with - is the check, not a
 leak; a credential read out of a configuration file has no literal to report; a

@@ -113,10 +113,33 @@ describe("a credential in a test file", function()
    end)
 
    it("does not depend on which name the test suite's directory carries", function()
-      for _, directory in ipairs{"test", "tests", "spec", "specs", "t"} do
+      for _, directory in ipairs{"test", "tests", "spec", "specs"} do
          local report = analyze_at(SHIPPED_PASSWORD, directory .. "/telnet_login.lua")
          assert_equal(severity_of(report), "low",
             directory .. "/ is a test suite, so the fixture inside it is not shipped")
+      end
+   end)
+
+   it("is not what a one-letter directory is taken to mean", function()
+      -- `t/` is the OpenResty and Test::Nginx convention, so it is the obvious
+      -- fifth entry, and it is not in the vocabulary. macOS hands every process
+      -- a scratch directory at `/var/folders/<a>/<b>/T/`, so a whole-segment
+      -- match on `t` lowers the severity of every finding in every temporary
+      -- file this tool is pointed at - including a firmware image a CI job
+      -- unpacked. The corpus is what the entry would have bought: the five
+      -- `.lua` files under the OpenResty `t/` directories hold no
+      -- credential-shaped literal, so here it hides a credential class and
+      -- buys nothing.
+      local report = analyze_at(SHIPPED_PASSWORD, "t/telnet_login.lua")
+      assert_equal(severity_of(report), "high",
+         "a one-character directory is not evidence of a test suite")
+   end)
+
+   it("does not depend on a name that merely contains one", function()
+      for _, directory in ipairs{"contest", "latest", "spectrum", "manifest"} do
+         local report = analyze_at(SHIPPED_PASSWORD, directory .. "/telnet_login.lua")
+         assert_equal(severity_of(report), "high",
+            directory .. "/ is not a test suite, however it is spelled")
       end
    end)
 
