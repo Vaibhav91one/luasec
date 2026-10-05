@@ -84,7 +84,6 @@ luasec/engine/callgraph.lua	213	index
 luasec/engine/inline_directives.lua	542	nil
 luasec/engine/interprocedural.lua	211	codes
 luasec/engine/interprocedural.lua	211	platform_api
-luasec/engine/interprocedural.lua	211	varargs
 luasec/engine/interprocedural.lua	311	opts
 luasec/engine/parse_context.lua	111	line_len_available
 luasec/engine/parse_context.lua	113	line_len_available
