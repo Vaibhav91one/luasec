@@ -312,7 +312,7 @@ describe("the measured precision document", function()
 
    it("says how many files it measured, and which of the two numbers that is", function()
       -- 562 is what `make corpus` collects; 566 is what luasec analyzed. The
-      -- headline carries the second, because that is the denominator the 146
+      -- headline carries the second, because that is the denominator the 249
       -- findings were divided by, and the document says so rather than leaving
       -- a reader to guess which number the headline borrowed from the table.
       local text = read_precision_doc()
