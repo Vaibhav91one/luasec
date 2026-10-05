@@ -30,6 +30,18 @@ jobs:
       - name: Vendored luacheck is unmodified
         run: make vendor-verify
 
+      # `make selfscan` at the end of this job runs luasec over src/, and luasec
+      # has no rule for a global assignment, so a function that lost its `local`
+      # compiled, worked and shipped as a global through a fully green build
+      # (#277). This is the linter that can see it, on the luacheck already
+      # vendored here, held against a frozen list of the warnings src/ carries
+      # today so that anything new fails the run. A step in this job rather than
+      # a job of its own: a separate job can go red without blocking anything, so
+      # it would be a check that reports rather than one that gates. Early in the
+      # job because it costs seconds and the specs below cost minutes.
+      - name: Lint the source with the vendored luacheck
+        run: make self-lint
+
       - name: A failing spec must fail the runner
         run: make runner-selftest
 
