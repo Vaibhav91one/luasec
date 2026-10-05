@@ -30,6 +30,9 @@ help:
 	@echo "  make precision re-measure corpus/ and fail on any difference from the frozen numbers"
 	@echo "  make corpus     clone firmware Lua corpora into corpus/ (network)"
 	@echo "  make lua55-check  compile every src/ file under Lua 5.5 (skips without one)"
+	@echo "  make selfscan   scan src/ with luasec itself"
+	@echo "  make self-lint  lint src/ with the vendored luacheck"
+	@echo "  make self-lint-bless   re-take test/self-lint-baseline.txt after a deliberate change"
 	@echo "  make clean      remove build artifacts"
 
 .PHONY: all
@@ -160,7 +163,7 @@ precision: lua vendor
 	$(LUA_RUN) scripts/precision-check.lua --corpus corpus --report $(PRECISION_REPORT)
 
 .PHONY: ci-verify
-ci-verify: vendor-verify runner-selftest test adversarial precision
+ci-verify: vendor-verify runner-selftest self-lint test adversarial precision
 	@echo "ci-verify: PASS"
 
 # Accept the two positional shas of `make tdd-proof BASE HEAD` as goals. Make
@@ -219,3 +222,29 @@ lua55-check:
 .PHONY: selfscan
 selfscan: lua vendor
 	@./bin/luasec --format json -o /dev/null src/ && echo "selfscan: ok"
+
+# Lint src/ with the luacheck that already ships in vendor/. `make selfscan`
+# above runs luasec over its own source and cannot see a global assignment -
+# luasec has no rule for that class - so a function that lost its `local`
+# compiled, worked and shipped as a global through a fully green build (#277).
+#
+# The comparison is against a frozen list rather than against zero, because src/
+# does not lint clean today: it carries 111 and 113 of its own. Anything not in
+# that list fails the run, so this is a ratchet and not a rubber stamp. The two
+# halves are checked independently as well - test/spec/module_globals_spec.lua
+# asserts the same thing without reading a lint's configuration, and the lint
+# reads code the spec does not load (src/luasec/validate/child.lua is a
+# concatenated sandbox script, not a module).
+SELF_LINT_BASELINE ?= test/self-lint-baseline.txt
+SELF_LINT_DIR      ?= src
+
+.PHONY: self-lint
+self-lint: lua vendor
+	@$(LUA_RUN) test/self-lint.lua --baseline $(SELF_LINT_BASELINE) $(SELF_LINT_DIR)
+
+# Deliberate only. Run it after you have decided the new warnings are ones this
+# tree should carry, and read the lines it prints: it will happily accept the
+# very global this gate exists to refuse.
+.PHONY: self-lint-bless
+self-lint-bless: lua vendor
+	@$(LUA_RUN) test/self-lint.lua --bless --baseline $(SELF_LINT_BASELINE) $(SELF_LINT_DIR)
