@@ -47,6 +47,49 @@ local function drop(dir)
    os.execute("rm -rf " .. string.format("%q", dir))
 end
 
+-- The repository root, for the specs below that need a path a symlink or a
+-- subprocess can be built from. `harness.cli` runs `./bin/luasec`, which stops
+-- resolving the moment the command changes directory first.
+local function repo_root()
+   local pipe = assert(io.popen("pwd"))
+   local root = pipe:read("*l")
+   pipe:close()
+   return root
+end
+
+-- The severity of the one 747 in a JSON report on disk, or nil when there is
+-- none. The finding's presence is read as well as its severity, because a rule
+-- that stopped reporting is not a rule that stopped being wrong.
+local function severity_in_json(path)
+   local handle = assert(io.open(path, "r"))
+   local text = handle:read("*a")
+   handle:close()
+   return text:match('"code"%s*:%s*"747"[^}]*"severity"%s*:%s*"(%a+)"')
+end
+
+--- Run the CLI from `dir` over a RELATIVE path, with `$PWD` naming nothing.
+--
+-- `bin/luasec` cannot be used to do this. Its `#!/bin/sh` sets `PWD` to the real
+-- working directory at startup, as every POSIX shell does, so a doctored value
+-- handed to it has been overwritten before any Lua runs - which is why this
+-- repeats the two lines `bin/luasec` execs rather than calling it. It is the
+-- documented CLI entry point either way; what changes is only that the
+-- interpreter is reached without a shell in between.
+local function cli_with_unreadable_pwd(dir, args)
+   local root = repo_root()
+   local interpreter = root .. "/build/lua-5.4.9/src/lua"
+   local report = dir .. "/report.json"
+   local command = ("cd %s && PWD=/nonexistent-luasec-pwd exec %s -e %s %s %s > %s 2>&1")
+      :format(string.format("%q", dir), string.format("%q", interpreter),
+              string.format("%q", "package.path='" .. root
+                 .. "/src/?.lua;" .. root .. "/src/?/init.lua;"
+                 .. root .. "/vendor/?.lua;" .. root .. "/vendor/?/init.lua;'..package.path"),
+              string.format("%q", root .. "/src/luasec/main.lua"),
+              table.concat(args, " "), string.format("%q", report))
+   os.execute(command)
+   return severity_in_json(report)
+end
+
 --- Write `source` at `<tree>/<relative>` and analyze it as that path.
 --
 -- `relative` carries the directory names, because the directory names are what
@@ -69,6 +112,20 @@ end
 -- specs are about: `t/` in a source tree is a test suite, `t/` in a scratch
 -- directory is a directory the operating system named.
 local SOURCE_TREE = "build/spec-scope"
+
+-- A symlink at `<SOURCE_TREE>/<relative>` naming `target`.
+--
+-- `ln -s` and not a copy, because the question here is what the kernel resolves
+-- a path to, and a copy is not a link: it would answer a different question.
+local function link_at(relative, target)
+   local path = SOURCE_TREE .. "/" .. relative
+   os.remove(path)
+   os.execute(("mkdir -p %s"):format(string.format("%q", SOURCE_TREE)))
+   local ok = os.execute(("ln -s %s %s"):format(string.format("%q", target),
+                                                string.format("%q", path)))
+   assert(ok, "ln -s failed for " .. path)
+   return path
+end
 
 local function analyze_at(source, relative)
    local path = plant(SOURCE_TREE, source, relative)
@@ -180,6 +237,98 @@ describe("a credential in a test file", function()
          assert_equal(severity_of(report), "high",
             relative .. " is under a temporary root, which is not a source tree")
       end
+   end)
+
+   it("is not a test directory through a link that points into a scratch root", function()
+      -- The one hole the lexical reading of the path cannot see.
+      --
+      -- `absolute()` folds `..` and unifies separators, which is exactly what
+      -- stops `/tmp/../etc/t/x.lua` from being read as a file in `/tmp` - and
+      -- none of that touches a LINK. `build/link -> $TMPDIR` spells a file in
+      -- `build/` and is scratch space, and asked from the spelling alone the
+      -- exclusion said `t/` was a test suite. Same defect class as the `..`
+      -- case, and it under-excludes for the same reason: the answer was read off
+      -- a string that does not say where the file is.
+      --
+      -- TWO links, one spelling, differing only in where they point, because a
+      -- single case does not separate the two things a fix here could be. Answer
+      -- `high` for both and the rule has decided a link is not a test suite,
+      -- which is not what it is supposed to have decided. Answer `low` for both
+      -- and nothing was closed. Only the pair says which.
+      local scratch = scratch_dir("secrets_scope_link")
+      drop(SOURCE_TREE)
+      plant(scratch, SHIPPED_PASSWORD, "t/telnet_login.lua")
+      plant(SOURCE_TREE, SHIPPED_PASSWORD, "elsewhere/t/telnet_login.lua")
+      -- ABSOLUTE targets, because a link's target is read relative to the
+      -- directory holding the link, and `build/spec-scope/elsewhere` spelled
+      -- relative to `build/spec-scope/` is `build/spec-scope/build/spec-scope/…`
+      -- - a link to nothing, which is a third case this spec is not about.
+      local root = repo_root()
+      link_at("into-scratch", scratch)
+      link_at("into-source", root .. "/" .. SOURCE_TREE .. "/elsewhere")
+
+      local function severity_through(link)
+         local report = api.analyze({SOURCE_TREE .. "/" .. link .. "/t/telnet_login.lua"})
+         return severity_of(report)
+      end
+
+      assert_equal(severity_through("into-scratch"), "high",
+         "the file is scratch space; `t/` there is a directory the system named")
+      assert_equal(severity_through("into-source"), "low",
+         "the same spelling into a source tree is a test suite, link or not")
+
+      drop(SOURCE_TREE)
+      drop(scratch)
+   end)
+
+   it("reads a path it has no anchor for from its own spelling, and still reports it", function()
+      -- The fallback, on the other side of resolution. When `$PWD` names
+      -- nothing, `cwd()` declines and a RELATIVE path stays relative, so there
+      -- is no anchor - and resolution is not consulted, the same refusal the
+      -- prefix test already makes, applied to both halves rather than one.
+      --
+      -- This corner under-excludes and did before: `t/` under a scratch root
+      -- reads as a test suite here and as scratch space one spec above, purely
+      -- because the spelling that arrived here carried no anchor to check. It is
+      -- pinned rather than closed because closing it means asking the process for
+      -- a working directory the prefix test also declined to guess at, and a
+      -- guessed one is how a finding gets demoted on the say-so of a directory
+      -- nobody read. The finding is in the report either way, and that is the
+      -- half that may not fail.
+      local scratch = scratch_dir("secrets_scope_pwd")
+      plant(scratch, SHIPPED_PASSWORD, "t/telnet_login.lua")
+      plant(scratch, SHIPPED_PASSWORD, "pkg/telnet_login.lua")
+
+      assert_equal(cli_with_unreadable_pwd(scratch,
+            {"--format", "json", "--only", "747", "t/telnet_login.lua"}), "low",
+         "the spelling says `t/` and there is no anchor that could say otherwise")
+      assert_equal(cli_with_unreadable_pwd(scratch,
+            {"--format", "json", "--only", "747", "pkg/telnet_login.lua"}), "high",
+         "with no anchor there is no test directory in `pkg/`, so the severity stands")
+
+      drop(scratch)
+   end)
+
+   it("keeps reading the spelling when a path cannot be resolved at all", function()
+      -- The other fallback, and the one that is reachable on every host: a link
+      -- that names nothing. `cd -P` fails on it, there is no resolved path to
+      -- test, and the answer is the spelling's - which for `t/` is a test suite,
+      -- because that is all the evidence there is.
+      --
+      -- It is the loud end of the rule: a dangling link is not a scratch root,
+      -- and a finding that cannot be placed is not demoted on the strength of
+      -- where it might have been.
+      drop(SOURCE_TREE)
+      os.execute(("mkdir -p %s"):format(string.format("%q", SOURCE_TREE)))
+      os.execute(("ln -s %s %s"):format(string.format("%q", SOURCE_TREE .. "/nothing-here"),
+                                        string.format("%q", SOURCE_TREE .. "/dangling")))
+      local report = api.analyze({SOURCE_TREE .. "/dangling/t/telnet_login.lua"})
+      -- The file was never written, so there is no finding to read a severity
+      -- from: the point is that nothing was reported as unreadable-silence, and
+      -- the report says so out loud rather than coming back empty.
+      assert_true(#with_code(report, "747") == 0 and #report > 0,
+         "a path that cannot be resolved is reported unreadable, not skipped")
+      drop(SOURCE_TREE)
    end)
 
    it("follows $TMPDIR when it is set somewhere the rule cannot know", function()
@@ -340,11 +489,22 @@ describe("the anonymous-FTP login identity", function()
       -- one direction this change may not move.
       --
       -- The assertion is that nothing here is at `low`, rather than that
-      -- something here is at `high`. `admin@example.com` carries `example` and
-      -- is already excluded by the placeholder vocabulary before this rule is
-      -- reached, and the spec that says a missing finding is right belongs to
-      -- that rule rather than to this one.
-      for _, value in ipairs{ "admin@example.com", "admin@acme-internal.net",
+      -- something here is at `high`: the loop is over what the rule produced,
+      -- and a literal that never reaches the rule would pass it by being
+      -- absent.
+      --
+      -- `admin@example.com` is NOT here for that reason. It carries `example`,
+      -- and `looks_like_secret` (`src/luasec/rules/secrets.lua`) runs its
+      -- `placeholders` table over the lowered value and returns false before
+      -- `severity_for` is ever reached - so that literal produces no 747 at
+      -- all, before this rule or after it, and asserting over it asserts
+      -- nothing. Placeholder literals are covered by the spec that owns
+      -- `looks_like_secret`, where a missing finding is the thing asserted;
+      -- putting one here is how a spec starts passing for the wrong reason, so
+      -- it is left out rather than made to look covered. Every value below
+      -- hits no placeholder, does report a 747, and is demoted to `low` or
+      -- not at all.
+      for _, value in ipairs{ "admin@acme-internal.net",
                               "svc-deploy@staging.acme.com", "jenkins@build.corp.net" } do
          local report = analyze_at("local account_password = " .. string.format("%q", value)
             .. "\nreturn account_password\n", "src/account_login.lua")

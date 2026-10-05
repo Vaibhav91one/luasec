@@ -87,7 +87,13 @@ end
 --
 -- The folding is not tidiness. `/tmp/../etc/t/x.lua` is a file in `/etc` and
 -- has to be read as one, or a prefix match on `/tmp/` is something a caller
--- walks around by typing one `..`.
+-- walks around by typing one `..`. It is also all lexical: see
+-- `physical_directory` for the one thing it cannot do.
+--
+-- A relative path folded onto `$PWD` comes back WITHOUT its leading separator,
+-- because `was_absolute` is settled before the working directory is joined on.
+-- That is load-bearing for the one caller below and is left exactly as it is;
+-- `anchored` is what resolution uses, and the reason for the split is there.
 local function absolute(path)
    local unified = path:gsub("\\", "/")
    local was_absolute = unified:find("/", 1, true) == 1
@@ -107,15 +113,19 @@ local function absolute(path)
    return (was_absolute and "/" or "") .. table.concat(parts, "/")
 end
 
---- Is `path` under a temporary root the operating system chose?
+--- Is this already-resolved path under a temporary root the operating system chose?
+--
+-- Takes the output of `absolute`, not a path, so that the same comparison can be
+-- made against a lexical spelling and against one the kernel has resolved, and
+-- the two cannot drift apart.
 --
 -- Lower case throughout: the filesystem is case-insensitive on the platform
 -- whose scratch directory this is, so `/TMP/x` and `/tmp/x` are one directory
 -- and only one of them is spelled here.
-local function in_a_temp_root(path)
-   local resolved = absolute(path):lower()
+local function under_a_temp_root(resolved)
+   local lowered = resolved:lower()
    for _, root in ipairs(TEMP_ROOTS) do
-      if resolved:sub(1, #root) == root then return true end
+      if lowered:sub(1, #root) == root then return true end
    end
    -- `$TMPDIR` when the caller set it, which is the one root this process
    -- cannot know in advance: `mktemp -d` honours it and nothing here can ask
@@ -127,9 +137,121 @@ local function in_a_temp_root(path)
    local tmpdir = os.getenv("TMPDIR")
    if type(tmpdir) == "string" and tmpdir ~= "" then
       local root = absolute(tmpdir):lower():gsub("/+$", "") .. "/"
-      if resolved:sub(1, #root) == root then return true end
+      if lowered:sub(1, #root) == root then return true end
    end
    return false
+end
+
+-- Whether `path` is under a temporary root, read off the path as spelled.
+local function in_a_temp_root(path)
+   return under_a_temp_root(absolute(path))
+end
+
+-- `path` anchored to a working directory, folded and carrying its leading
+-- separator, or nil when there is no working directory to anchor it to.
+--
+-- `absolute()` and this disagree about one character and that is deliberate.
+-- `absolute()` drops the leading separator from a path it joined onto `$PWD`,
+-- and its one caller is a prefix test that cannot match `/tmp/` against a string
+-- with no leading separator - so it has always under-excluded a relative path
+-- whose working directory was a scratch root, and changing that is a different
+-- question from the one this file is here to answer. Resolution has no such
+-- luck available to it: `cd -P` needs a path, and a path with no leading
+-- separator is a relative one, which is the case being declined.
+local function anchored(path)
+   local unified = path:gsub("\\", "/")
+   if unified:sub(1, 1) ~= "/" then
+      local base = cwd()
+      if not base then return nil end
+      unified = base .. "/" .. unified
+   end
+   return absolute(unified)
+end
+
+-- Where a directory really is, as the kernel resolves it, or nil when it cannot
+-- be resolved.
+--
+-- `absolute()` folds `..` and unifies separators, and neither of those touches a
+-- LINK: `build/link -> $TMPDIR` is spelled like a file in `build/` and is
+-- scratch space, so every prefix test below has to be re-asked of the resolved
+-- path or it under-excludes, which for this rule is the direction that costs a
+-- reader a finding.
+--
+-- Stock Lua cannot answer this. There is no `os.realpath`, no `lstat`, and this
+-- tool vendors no LuaFileSystem, so the answer has to come from a process; the
+-- question is which one. `cd -P -- "$p" && printf %s "$PWD"`, and not
+-- `readlink -f`, for the reason `cli/walk.lua` gives at its own copy of this
+-- line: the question is not "what does this link say" but "which directory is
+-- this", only the kernel collapses `x`, `./x`, `a/../x` and a path that goes
+-- through a link into one string, and `readlink -f` is not portable - BSD
+-- readlink had no `-f` until macOS 12.3, and this tool ships to whatever
+-- firmware-analysis host the operator is on. `cd -P` is POSIX and answers in one
+-- fork. Measured here at about 5ms a call, which is why the next paragraph
+-- matters more than the choice.
+--
+-- One fork per DIRECTORY and never per file: `is_test` is asked once per source,
+-- so a suite of a thousand test files in one directory costs one process rather
+-- than a thousand. Memoised for the run, which cannot change under it - the
+-- same argument `cwd()` makes for `$PWD`.
+--
+-- luasec: ignore 702 [push]
+-- The command is constant; the path is not in it. `$(cat <tmpfile>)` rather than
+-- interpolating the path, because Lua's %q escapes only " and \ and a directory
+-- named `/tmp/$(cmd)` would otherwise run a command substitution inside luasec
+-- itself - and SECURITY.md says filenames come from attackers. A named region
+-- rather than a bare `ignore` because the latter is file-wide and this file has
+-- more in it than one shell call.
+local physical_directories = {}
+local function physical_directory(directory)
+   local cached = physical_directories[directory]
+   if cached ~= nil then return cached or nil end
+   physical_directories[directory] = false
+   local answer
+   -- The path is always `absolute()`'s output by the time it arrives here, so
+   -- it begins with a separator and needs no `-`-guard the way a raw operator
+   -- argument would.
+   local tmp = os.tmpname()
+   local handle = io.open(tmp, "wb")
+   if handle then
+      handle:write(directory)
+      handle:close()
+      local command = ('p="$(cat %s; printf x)" || exit 0; p="${p%%x}"; '
+         .. 'test -d "$p" || exit 0; cd -P -- "$p" && printf "%%s" "$PWD"')
+         :format(string.format("%q", tmp))
+      local pipe = io.popen(command, "r")
+      if pipe then
+         answer = tostring(pipe:read("*a") or "")
+         pipe:close()
+         if answer == "" then answer = nil end
+      end
+      os.remove(tmp)
+   end
+   physical_directories[directory] = answer or false
+   return answer
+end
+-- luasec: pop
+
+-- Does `path` land under a temporary root once its links are followed?
+--
+-- Every step here can fail, and every failure answers false, which means "not
+-- excluded": a file stays at the severity the lexical reading gave it. That is
+-- the fallback the resolver must have, and it is the safe direction, because an
+-- answer of false can only stop a demotion that had not been earned yet.
+--
+-- A path with no anchor is answered without consulting the kernel at all. When
+-- `cwd()` declined there is nothing to resolve a relative path against, and the
+-- rule does not go and ask the process for a working directory the prefix test
+-- also declined to guess at - the refusal is the same one on both sides of it,
+-- and a path half-anchored by one and not the other is how a finding gets
+-- demoted for a directory nobody read.
+local function really_in_a_temp_root(path)
+   local anchored_path = anchored(path)
+   if not anchored_path then return false end
+   local parent, name = anchored_path:match("^(.*)/([^/]+)$")
+   if not parent or parent == "" then return false end
+   local physical = physical_directory(parent)
+   if not physical then return false end
+   return under_a_temp_root(physical .. "/" .. name)
 end
 
 -- A file whose own name says it is a test. Matched on the stem, so
@@ -197,10 +319,20 @@ end
 --
 -- A temporary root answers `false` before the vocabulary is consulted at all,
 -- and it is the reason `t` can be in that vocabulary.
+--
+-- The lexical spelling is read first and the kernel is asked only if the
+-- vocabulary said yes. That order is the whole of the safety argument: a
+-- resolution can VETO a demotion and never grant one, so no file that reports
+-- at `high` today can be moved down by a symlink, and no path that fails to
+-- resolve is treated as anything other than what it is spelled as. Under-
+-- exclusion is what this closes; over-exclusion is what it must not open, and
+-- the direction is enforced by the order rather than by a case.
 function M.is_test(path)
    if type(path) ~= "string" or path == "" then return false end
    if in_a_temp_root(path) then return false end
-   return in_a_test_directory(path) or named_as_a_test(path)
+   if not (in_a_test_directory(path) or named_as_a_test(path)) then return false end
+   if really_in_a_temp_root(path) then return false end
+   return true
 end
 
 return M
