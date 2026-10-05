@@ -275,10 +275,115 @@ subtree_has = function(ctx, node, budget)
    return false
 end
 
+-- Is this argument the replacement a `gsub` substitutes with, and is it what
+-- makes the payload?
+--
+-- A `gsub` whose third argument is a function was, on its own, read as a decoder
+-- here, and that was the only shape in this function offered on syntax with no
+-- evidence of a byte anywhere in it - every other shape below is a byte this
+-- function saw being built, read out or looked up. So it also read every source
+-- rewrite written the same way, and #256 already ruled those out: `luadoc`'s
+-- `translate` rewrites template markup it is holding in the open, and the rule
+-- stopped reporting it. A build tool that rewrites the markers in its own source
+-- and compiles the result is that same function written with a closure.
+--
+-- What tells the two apart is not the shape of the call but what the replacement
+-- *produces*, so only what it returns is read. Two things in a returned value
+-- say the payload is being made there:
+--
+--   a byte being built   `function(pair) return string.char(tonumber(pair, 16))
+--                         end` turns what it is given into the payload.
+--   a table being read   `function(c) return M[c] end` is a substitution cipher:
+--                         one character of the subject in, one byte out.
+--
+-- What is not on that list is a rearrangement of the subject. `function(var)
+-- return format("%s=%d", var, n) end` returns text built out of the subject's
+-- own captures, which is what `transform_lua` does and what `luadoc`'s
+-- `translate` does, and #256 already ruled that out.
+--
+-- `byte_builders` rather than `subtree_has`, and the difference is the point: a
+-- builder *makes* the byte the payload is made of, while `c:byte()` only reads
+-- one out of a character that was already in the subject. `s:gsub(".", function(c)
+-- return c:byte() end)` renumbers text it was handed; it decodes nothing.
+--
+-- Reading the returns rather than the whole body is what keeps `fixup[n] = {"CHECK",
+-- tp}` in a rewrite from counting: that index is an assignment target, so it is
+-- not in anything the replacement hands back.
+local function substitution_decoder(ctx, argument)
+   if type(argument) ~= "table" or argument.tag ~= "Function" then return false end
+   local body = argument[2]
+   if type(body) ~= "table" then return false end
+
+   -- True when a returned value builds a byte or reads one out of a table. An
+   -- `Index` in a returned expression is a read by construction: an assignment
+   -- target cannot be inside one. Nested functions are their own closures and
+   -- return to their own caller, so a return inside one is not this one's.
+   local function produces_payload(node, budget)
+      if budget <= 0 or type(node) ~= "table" then return false end
+      budget = budget - 1
+
+      if node.tag == "Index" then return true end
+      if node.tag == "Call" or node.tag == "Invoke" then
+         local path = ctx:path_of(node[1])
+         if path and byte_builders[path] then return true end
+         -- The callee is a name rather than a value: slot 1 is the `string` in
+         -- `string.format(f, n)`, and slot 2 of a method call is its name. Only
+         -- the arguments past them are what the call hands back, and leaving the
+         -- callee in would read `string.format` itself as a table lookup.
+         for index = (node.tag == "Invoke" and 3 or 2), #node do
+            if produces_payload(node[index], budget) then return true end
+         end
+         return false
+      elseif node.tag == "Function" then
+         return false
+      end
+
+      for index = 1, #node do
+         local child = node[index]
+         if type(child) == "table" then
+            local kids = child.tag and {child} or child
+            for _, sub in ipairs(kids) do
+               if type(sub) == "table" and produces_payload(sub, budget) then return true end
+            end
+         end
+      end
+      return false
+   end
+
+   local function returns_payload(node, budget)
+      if budget <= 0 or type(node) ~= "table" then return false end
+      budget = budget - 1
+
+      if node.tag == "Function" then return false end
+      if node.tag == "Return" then
+         -- The parser hangs the `Return` tag on the list of values itself rather
+         -- than wrapping it, so the values sit at slots 1..n and a bare `return`
+         -- is the tag on its own.
+         for index = 1, #node do
+            if produces_payload(node[index], MAX_BYTE_SEARCH) then return true end
+         end
+         return false
+      end
+
+      for index = 1, #node do
+         local child = node[index]
+         if type(child) == "table" then
+            local kids = child.tag and {child} or child
+            for _, sub in ipairs(kids) do
+               if type(sub) == "table" and returns_payload(sub, budget) then return true end
+            end
+         end
+      end
+      return false
+   end
+
+   return returns_payload(body, MAX_BODY_NODES)
+end
+
 -- What a function defined in this file is, judged by its body: nil when the
 -- body shows no decoder shape at all. This is what separates a hand-rolled
 -- decoder from a helper that happens to be called `run`. The answer is cached
--- per file: one body, one scan, however many times it is called.
+-- per file: one body is walked once, however many times it is called.
 shape_of = function(ctx, fn, index)
    if type(fn) ~= "table" or fn.tag ~= "Function" then return nil end
    local cached = index.shapes[fn]
@@ -323,8 +428,7 @@ shape_of = function(ctx, fn, index)
          end
          if label == "string.gsub" then
             for index = 2, #node do
-               local argument = node[index]
-               if type(argument) == "table" and argument.tag == "Function" then
+               if substitution_decoder(ctx, node[index]) then
                   offer("substitution decode", node.line)
                   return
                end
@@ -333,8 +437,7 @@ shape_of = function(ctx, fn, index)
       elseif node.tag == "Invoke" then
          if node[2] and node[2].tag == "String" and node[2][1] == "gsub" then
             for index = 3, #node do
-               local argument = node[index]
-               if type(argument) == "table" and argument.tag == "Function" then
+               if substitution_decoder(ctx, node[index]) then
                   offer("substitution decode", node.line)
                   return
                end
