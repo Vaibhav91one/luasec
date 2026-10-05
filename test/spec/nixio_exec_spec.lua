@@ -105,12 +105,18 @@ describe("nixio.execp and nixio.exece are the other two process functions", func
       end
    end)
 
-   it("reports a computed command it cannot prove is fixed", function()
-      local report = api.check_source([[
-nixio.execp(mylib.getname())
-]], {std = "openwrt", report_dynamic_sinks = false})
-      assert_equal(#with_code(report, "701"), 1,
-         "a command we cannot prove constant is still an execution sink")
+   it("still reports a computed command it cannot prove is fixed", function()
+      -- The same shape as the `nixio.exec` spec above, and for the same
+      -- reason: 701 is the "this call is an execution sink" answer and it does
+      -- not need a source to say so.
+      for _, call in ipairs({
+         "nixio.execp(mylib.getname())",
+         'nixio.exece(mylib.getname(), {})',
+      }) do
+         local report = api.check_source(call, {std = "openwrt"})
+         assert_equal(#with_code(report, "701"), 1,
+            call .. ": a command we cannot prove constant is still an execution sink")
+      end
    end)
 
    it("leaves a fixed command and a fixed argv silent in both", function()
