@@ -3,6 +3,34 @@
 Numbers here are measurements against real firmware Lua, not against the test
 fixtures. The corpora are cloned by `make corpus` and are gitignored.
 
+## Which numbers here are authoritative
+
+Three copies of this measurement exist and they are not equal in kind.
+`scripts/precision-golden.lua` is the measurement: it is frozen, `make
+precision` compares a fresh run of the analyzer against it, and it is the copy a
+contributor updates when a rule changes what the tool finds. The per-code table
+below is that file written out for a reader. Everything else in this document is
+prose about how the number got here.
+
+**The table is the only place in this document where a current per-code total
+appears.** Prose names the change that moved the count - usually the PR that made
+it - and leaves the figure to the table. A sentence saying "after #225" stays
+true forever; one saying "is 33" is a time bomb that only a reader reading
+closely can defuse, and two of them reached review before this rule existed
+(#258). The warning this document used to open with was correct and had
+demonstrably not prevented it, which is why it is a rule now.
+
+`test/spec/precision_spec.lua` holds the prose to it: a sentence claiming a count
+for the corpus as it stands now has to agree with the frozen measurement, and a
+sentence about a run that has already happened - one naming the PR, or saying
+`was` - is left alone, because a historical figure is correct as history and is
+not drift. `test/spec/precision_golden_spec.lua` holds the table itself against
+the same file, in both directions.
+
+So a contributor who changes what the tool finds edits two files in one commit:
+`scripts/precision-golden.lua` and the table below. Prose changes only when the
+story changes.
+
 ## The corpora
 
 | Corpus | Files collected | What it is |
@@ -47,8 +75,9 @@ report. Five new 709s, all of them the shell form in real firmware:
 `failsafe/failsafe.lua:170` and `:200`. Each is a value reaching a shell from
 `fork_exec`/`ltn12_popen`, which the dispatcher calls with request data. Those
 five lines previously scored `100/100 (good)`. Nothing was removed and no other
-code moved: 253 to 258, 709 from 17 to 22, and the 101 files carrying a finding
-is unchanged because every one of them already carried one.
+code moved: the headline is up by five and 709 is up by five, and the number of
+files carrying a finding is unchanged because every one of them already carried
+one.
 
 What it costs: `nixio.exec` passes arguments 2..N straight to `execv()` as
 `argv[]` and involves no shell (`libs/luci-lib-nixio/src/process.c:32`), so in a
@@ -64,8 +93,8 @@ non-finding: a LuCI CBI hook whose command is a compile-time literal, which is
 how a config file says "restart this service". Those 17 now report at `medium`
 and low confidence with a note saying the command is a literal. Nothing is
 hidden - the finding is still made, because the exposure is real - but
-`--severity-threshold high` no longer reports them. The count is 25 before and 25
-after and every other code is byte-identical; what moved is the severity mix,
+`--severity-threshold high` no longer reports them. The count is the same before
+and after and every other code is byte-identical; what moved is the severity mix,
 from 190 `high` findings to 173. The 8 that stay `high` are handlers whose
 command is built from something `const_eval` cannot fold, and they keep the
 registered severity.
@@ -85,17 +114,19 @@ getting one finding, the 708, and nothing at all for the sink itself. 708 still
 reports "nothing in this file feeds it"; the 701 reports what is built into the
 command, and both are true of the same line. Thirty-three findings arrived, 29
 at 701 and 4 at 704, every one of them a sink already being reported as an
-exposure. 708 is unmoved at 33 there, because the fix is that it no longer
+exposure. 708 is unmoved by that fix, because what changed is that it no longer
 *replaces* the sink report rather than that it reports less. Three of the sites
 #225 restores were also among the nine #226 turned into a 709, which is why
 this reads 29 where #225 measured 32 against the previous main. No file that
 was clean became dirty.
 
 This number has been wrong three times, each time because the headline was
-edited by hand and the per-code table was not. `test/spec/precision_spec.lua`
-now parses this file, sums the per-code counts, and fails the build if the
-headline and the table disagree, so the two cannot drift apart again. The
-command above is here so the number can be reproduced rather than believed.
+edited by hand and the per-code table was not, and twice more in prose, where a
+sentence carried a figure with nothing to compare it against (#258).
+`test/spec/precision_spec.lua` parses this file and fails the build if the
+headline and the table disagree, and if a sentence claims a count for the corpus
+as it stands now that `scripts/precision-golden.lua` contradicts. The command
+above is here so the number can be reproduced rather than believed.
 
 
 
@@ -267,5 +298,6 @@ corpus. Naming the value in a qualifying name gets the report either way.
   escape rewritten to one of the same length and analysed. The rest are
   reported rather than guessed at, which is the right behaviour, but it is 10
   findings an operator has to learn to read.
-- **708 is 32 findings and "mostly true" is not a number.** The claim has not
-  been re-audited since the review fix.
+- **708's assessment says "mostly true" and has not been re-audited since the
+  review fix.** The count is in the table above; what has not been re-checked is
+  the claim beside it.
