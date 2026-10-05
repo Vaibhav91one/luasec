@@ -84,6 +84,19 @@ prints `1687552`, which looks like 1.6GB and is actually 1.6MB - the real value.
 It is not an offset and it is not a broken tool; it is a different unit than the
 one its own documentation implies. Read the raw field as **bytes**.
 
+`collectgarbage("count")` **returns kilobytes, not bytes** - the `time -l` trap
+above, in the opposite direction. `LUA_GCCOUNT` computes `gettotalbytes(g) >> 10`
+internally, so `math.floor(count)` is a KiB figure, `count / 1024` is MiB, and a
+reading used as bytes is wrong by 1024x. A million-entry table calibrates it:
+
+    local t = {} for i = 1, 1e6 do t[i] = i end
+    print(collectgarbage("count"))   --> 16406.24609375
+
+That is the ~16MB the table really costs; read as bytes it would be 16KB for a
+million slots, which is impossible. While fixing #251 an agent double-divided a
+reading and got `0.1 kB per file`; the primary bound test passed vacuously and
+only its regression guard caught it.
+
 Do not trust the byte reading on the strength of that argument alone, because
 `time` is a single source. Measure with `getrusage` and check that it agrees:
 
