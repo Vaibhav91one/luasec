@@ -382,7 +382,7 @@ tree:
 | Severity | 24 critical, 163 high, 31 medium, 30 low |
 | `709` untrusted data → execution | 23 |
 | `724` execution sink exposed as an RPC handler | 25 |
-| `708` exposed sink, input not visible in this file | 24 |
+| `708` exposed sink, input not visible in this file | 22 |
 | Hardcoded credentials (`747`) | **0** — see below |
 
 The per-code table is in [docs/precision.md](docs/precision.md).
