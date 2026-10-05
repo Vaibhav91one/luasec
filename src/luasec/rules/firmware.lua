@@ -1100,11 +1100,15 @@ end
 --
 -- The test is the whole argument list rather than the index the sink registry
 -- declares for the command, and that is a deliberate narrowing. A declared
--- index is a claim about the API's signature; `nixio.exec` is registered as
--- taking its command first, but the shell form `nixio.exec("/bin/sh", "-c", c)`
--- takes it third, so asking about argument 1 alone would fold `"/bin/sh"` and
--- downgrade a handler that passes request data in the third. Requiring every
--- argument to fold is a weaker downgrade and the safe direction. 701's blind
+-- index is a claim about the API's signature, and an API with more than one
+-- calling convention makes that claim false for at least one of them: #265
+-- found `nixio.exec` declared as taking its command first, which is right for
+-- `nixio.exec(c)` and wrong for `nixio.exec("/bin/sh", "-c", c)`, so asking
+-- about argument 1 alone folded `"/bin/sh"` and would have downgraded a handler
+-- that passes request data in the third. That entry now declares both
+-- positions, but `posix.exec` and `posix.spawn` still declare only the first,
+-- and requiring every argument to fold needs no claim about any API's
+-- signature at all. It is a weaker downgrade and the safe direction. 701's blind
 -- spot there is an omission -- it reports nothing. Repeating it as an assertion
 -- here would go the other way and cost a real one: the handler passing request
 -- data in the third argument would be downgraded to medium and reported as a

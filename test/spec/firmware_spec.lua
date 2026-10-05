@@ -701,10 +701,12 @@ return m
    end)
 
    it("does not downgrade when any other argument of the call can hold data", function()
-      -- `nixio.exec`'s declared command argument is its first, but the shell
-      -- form takes the command third. 701 has the same blind spot and is silent
-      -- on this line for the same reason; 724 must not turn that silence into a
-      -- claim that the command is fixed.
+      -- The test is the whole argument list, not the one position the registry
+      -- declares. #265 taught this rule why: it took a `nixio.exec` with its
+      -- command in the third argument as its example, which the registry
+      -- described with the first position alone. That entry now declares both,
+      -- but `posix.exec` still declares one, and 724 must not claim a command is
+      -- fixed on the strength of a single position.
       local report = api.check_source([[
 local ubus = require "ubus"
 local object = ubus.add("luci.example")
