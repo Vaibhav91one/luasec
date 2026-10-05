@@ -275,3 +275,76 @@ handler(name)
          "a traced in-file call means the feed is visible here")
    end)
 end)
+
+
+describe("a function no other file can reach", function()
+   it("stands down for a literal in-file call, because that call is the only feed", function()
+      -- The asymmetry, stated positively. For a function nothing outside the
+      -- file can reach, a resolved call is the whole story and a literal in it
+      -- really does mean the sink is fed a constant -- so this stands down, where
+      -- an exported handler called with the same literal does not.
+      --
+      -- The first version of this rule tightened both and this case regressed: a
+      -- 708 appeared beside a 701 in vararg_interproc_spec, and the only reason
+      -- it was caught is that narrowing that spec's assertion to "no 709" was
+      -- refused. Both halves are asserted so neither can be bought by silence.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+local function helper(cmd)
+   os.execute(cmd)
+end
+local function entry(req)
+   return helper("/bin/true")
+end
+return entry
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 0,
+         "the only call to an unreachable function passes a literal")
+   end)
+
+   it("still reports it when nothing calls it at all", function()
+      -- Being uncalled is not the reason the case above stands down. Without this
+      -- the exemption would read as "never called", and an unreachable local
+      -- would come back the moment anything called it.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+local function helper(cmd)
+   os.execute(cmd)
+end
+return 1
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 1,
+         "an uncalled local is still a sink whose input we cannot see")
+   end)
+
+   it("reports a local function the chunk hands out itself", function()
+      -- Why the rule cannot be phrased as "global": `local function run` is a
+      -- Localrec, and `return run` puts it in another file's hands, which is
+      -- exactly the situation 708 is written for.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+local function run(cmd)
+   os.execute(cmd)
+end
+return run
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 1,
+         "a returned local function is reachable from outside its file")
+   end)
+
+   it("still reports a handler exported through a table", function()
+      -- The half that must not move. `function t.f()` is how a LuCI controller
+      -- exposes a handler, and restricting this to bare globals would silence
+      -- exactly the shape the code exists to find.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+local controller = {}
+function controller.run(cmd)
+   os.execute(cmd)
+end
+return controller
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 1,
+         "a handler exported through a table is reachable from outside")
+   end)
+end)
