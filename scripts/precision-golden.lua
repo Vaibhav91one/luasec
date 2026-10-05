@@ -48,13 +48,14 @@
 -- that updating one without the other fails, which is the whole point of it.
 
 -- The corpus grew in #262: six OpenResty entries joined the four firmware ones,
--- so every number here is larger than it was. The growth is new measurement
--- surface and nothing else, and the split was taken before these figures were
--- written. Over the four entries that were already here the run is identical to
--- main's, finding for finding - the multiset of (code, file, line, column,
--- message) over `luci`, `luci-1806`, `openwrt-packages` and `luajit` is equal
--- before and after - and every code that was reported before is reported the
--- same number of times. All of the increase is in the six new directories.
+-- and every number in that change was larger than the one before it. The growth
+-- was new measurement surface and nothing else, and the split was taken before
+-- those figures were written. Over the four entries that were already here the
+-- run was identical to main's, finding for finding - the multiset of (code,
+-- file, line, column, message) over `luci`, `luci-1806`, `openwrt-packages` and
+-- `luajit` was equal before and after - and every code that was reported before
+-- was reported the same number of times. All of that increase was in the six new
+-- directories, and #288 below is the first thing to have moved this table down.
 --
 -- What the new directories are, and what they are not, is in docs/precision.md.
 -- The short form: they buy FFI false-positive surface and crypto/encoding
@@ -63,30 +64,51 @@
 -- libraries, and a library is not a request handler. Reading them as though they
 -- measured handler flow would be the easy mistake to make here.
 --
--- Three codes in this table (711, 728, 902) and a large share of 901 and 903 are
--- findings in files that are not Lua at all: the Test::Nginx `.t` spec files in
--- lua-resty-core and lua-nginx-module are Perl, and the walk reads them as Lua
--- because it has no `.t` in its not-Lua list and does descend into `.git/`. That
--- is a walker defect rather than a property of OpenResty, it is filed as #288,
--- and it is recorded here rather than engineered away: an earlier draft of this
--- change removed the `.git/packed-refs` findings by relocating the git
--- directories outside the corpus, which would have made the frozen table smaller
--- and the defect harder to find.
+-- The walker stopped claiming files that are not Lua are Lua, and with it 525
+-- findings went away. #288 is the first change in this table's history where the
+-- headline moved DOWN by more than a single finding, and the whole 525 is
+-- accounted for in docs/precision.md - which is the only place that can say
+-- whether each one was noise or a real detection inside a file that had no
+-- business being read. In short: 436 of them were 901/902/903 on files that are
+-- not Lua, which is 94% of every parse failure this corpus produces, and the
+-- other 89 were real findings inside the Lua that Test::Nginx specs carry in
+-- heredocs, which is a coverage loss this change caused and has filed.
+--
+-- Over the four entries that were already here the run is unchanged, finding for
+-- finding and code for code: 248, and 701=49, 708=22, 709=23, 901=10, 903=20 both
+-- before and after. Those four carry no `.t` file and no `.git`, which is why
+-- they are the control.
+--
+-- The four figures that are NOT 691 and NOT the total are worth stating once:
+--
+--   scanned_files fell 964 -> 706, and corpus_files did not move at all. 691 is
+--      `find corpus -name '*.lua'`, which never counted a `.t` spec or a
+--      packed-refs, so it is the same number it always was. The 258 files the
+--      walk gave up are 250 Test::Nginx specs, 2 `.git/packed-refs`, a
+--      `tapset/ngx_lua.stp` probe, `util/gen-lexer-c`, `makefile.dist`,
+--      `ci`, `ci-coverage` and `luasocket/test/cgi/cat`. Not one of them was a
+--      `.lua` file: the walk selected 687 `.lua` files before this change and
+--      selects the same 687 after, and that is the direction this fix is not
+--      allowed to move.
 return {
    corpus_files = 691,
-   scanned_files = 964,
-   total = 1136,
+   scanned_files = 706,
+   total = 611,
    codes = {
-      [701] = 67,
-      [702] = 19,
-      [703] = 25,
+      [701] = 50,
+      [702] = 14,
+      [703] = 20,
       [704] = 21,
-      [705] = 23,
-      [707] = 401,
+      [705] = 22,
+      [707] = 346,
       [708] = 22,
       [709] = 23,
       [710] = 1,
-      [711] = 6,
+      -- Zero, and recorded for the same reason 741 and 747 are: a code measured
+      -- at zero is an assertion that the rule stays quiet here. 711 was six
+      -- backtick command literals, all six inside `.t` specs; 902 was six
+      -- unsupported-dialect reports, all six on the same specs.
+      [711] = 0,
       [712] = 3,
       [724] = 25,
       [725] = 2,
@@ -94,8 +116,8 @@ return {
       [728] = 1,
       [741] = 0,
       [747] = 15,
-      [901] = 268,
-      [902] = 6,
-      [903] = 192,
+      [901] = 10,
+      [902] = 0,
+      [903] = 20,
    },
 }
