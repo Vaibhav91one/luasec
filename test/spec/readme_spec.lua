@@ -29,22 +29,43 @@ local function read(path)
 end
 
 -- ---------------------------------------------------------------------------
+-- What this does not check, stated rather than implied.
+--
+-- It reads the measurement TABLE and nothing else. The README also carries
+-- per-code figures in prose - the collapsed "Why the table stays honest" block
+-- says the OpenResty entries "gave it 15" for 747 - and those can drift exactly
+-- as the rows did, with every case here green. That is a real gap and this is
+-- not the change that closes it.
+--
+-- It is not closed here for the same reason docs/precision.md's prose gate was
+-- built separately in #258: holding prose to a number needs a claim grammar that
+-- tells a live figure from a historical one, and that grammar exists in
+-- test/spec/precision_spec.lua. Duplicating a second, weaker copy of it here
+-- would make two documents disagree about what counts as history, and the one
+-- that is wrong would be this one.
+--
+-- What this change does instead is remove the rows that had no such grammar to
+-- protect them, and state in the README itself that a per-code count lives in
+-- docs/precision.md. The rule that stops a future contributor from retyping a
+-- row is the sentence; the gate only makes the sentence enforceable.
+-- ---------------------------------------------------------------------------
+--
+-- ---------------------------------------------------------------------------
 -- Telling a per-code row from a derived one.
 --
--- The measurement table carries three kinds of figure and they are not the same
+-- The measurement table carries two kinds of figure, and they are not the same
 -- kind of claim:
 --
 --   per-code   `| `709` untrusted data -> execution | 23 |`
 --              one rule, how many findings it reported. The golden has this.
 --   derived    `| Severity | 24 critical, 523 high, 34 medium, 30 low |`
---              and `| Findings | **611** across 706 scanned files (21%) |`
+--              and `| Findings | **611** across 706 scanned files |`
 --              a mix over many codes, and a denominator. The golden carries a
---              total and a file count but NOT a severity breakdown and NOT the
---              145 files that carry a finding, so a parser that demands every
---              row's number appear in `golden.codes` fails on rows that are
---              correct, and then the fix is to weaken the gate rather than to
---              correct the row - which is the failure mode this whole issue is
---              about.
+--              total and a file count but NOT a severity breakdown, so a parser
+--              that demands every row's number appear in `golden.codes` fails on
+--              rows that are correct, and then the fix is to weaken the gate
+--              rather than to correct the row - which is the failure mode this
+--              whole issue is about.
 --
 -- So the discriminator is the shape of the ROW, not the number in it, and it is
 -- deliberately narrow:
@@ -62,11 +83,12 @@ end
 -- author intended is how a gate gets turned off by accident.
 --
 -- What the discriminator deliberately does NOT do is read the last cell and
--- require it to be an integer. Two of the rows above do not end in a bare
--- integer - the `747` row ends in a sentence, and the Findings row ends in a
--- percentage - and a parse built on "the number at the end of the row" is wrong
--- on both of them. Matching the row's LABEL is the only thing that separates
--- "a count for rule 709" from "a count over everything".
+-- require it to be a bare integer. The 747 row this table used to carry ended in
+-- a sentence - "**15, and all 15 are false positives** - see below" - and a
+-- parse built on "the number at the end of the row" skips that row while
+-- appearing to cover it. Matching the row's LABEL is the only thing that
+-- separates "a count for rule 709" from "a count over everything", and it does
+-- not care what the other cell happens to hold.
 -- ---------------------------------------------------------------------------
 
 local GOLDEN = "scripts/precision-golden.lua"
@@ -76,13 +98,14 @@ local function frozen()
    return chunk()
 end
 
--- The rows of the README's measurement table, as {label = ..., numbers = {...}}.
+-- The body rows of the README's measurement table, as raw markdown lines.
 --
 -- Reads from the `## Measured behaviour` heading and stops at the first line
 -- that is not a table row, so a second table further down the README cannot
--- contribute a row to this one. Every table row in that span is collected,
--- including the ones the cases below expect to IGNORE, because the point of
--- returning them all is that the cases decide which ones are per-code.
+-- contribute a row to this one, and the catalogue table above cannot either.
+-- Every row in that span is returned, including the ones the cases below expect
+-- to IGNORE, because the point of returning them all is that the cases decide
+-- which ones are per-code.
 local function measurement_rows()
    local text = read("README.md")
    local at = assert(text:find("## Measured behaviour", 1, true),
@@ -161,76 +184,116 @@ describe("the README", function()
       end
    end)
 
-   it("quotes the same measurement the precision gate checks", function()
-      -- The headline number. docs/precision.md and scripts/precision-golden.lua
-      -- are both checked against each other and against a real run; the README
-      -- quotes the same figure and is the one most likely to be read.
+   it("quotes the headline and the denominator the same way the precision gate does", function()
+      -- The two figures the table keeps. Both are checked against
+      -- scripts/precision-golden.lua, and both are checked rather than quoted,
+      -- because #273 exists because four of the six stale figures that reached
+      -- `main` through this file were caught here and nowhere else.
+      --
+      -- scanned_files is not corpus_files and the difference is not noise: the
+      -- corpus collects 691 `.lua` files and the walker selects 706 paths from
+      -- them. Both are claims a reader quotes, so both are held.
       local text = read("README.md")
-      local golden = dofile("scripts/precision-golden.lua")
-      local claimed = assert(tonumber(text:match("Findings | %*%*(%d+)%*%* across")),
-         "the README does not state the finding count it measured")
-      assert_equal(claimed, golden.total,
-         "the README quotes " .. claimed .. " findings; the frozen measurement is "
+      local golden = frozen()
+
+      local total, files = text:match(
+         "Findings | %*%*(%d+)%*%* across (%d+) scanned files")
+      total = assert(tonumber(total),
+         "the README does not state the finding count and the file count it "
+            .. "measured, in the form this case reads")
+      files = assert(tonumber(files),
+         "the README does not say how many files it scanned")
+
+      assert_equal(total, golden.total,
+         "the README quotes " .. total .. " findings; the frozen measurement is "
             .. golden.total)
+      assert_equal(files, golden.scanned_files,
+         "the README quotes " .. files .. " scanned files; the frozen "
+            .. "measurement analyzed " .. golden.scanned_files)
    end)
 
-   it("states a per-code row in the measurement table the same way the golden does", function()
-      -- The gate #273 is for, and the narrow one. Every row of the README's
-      -- measurement table whose first cell names a rule code is held to
-      -- scripts/precision-golden.lua, in both directions: a count the golden
-      -- does not have, and a count that disagrees with the one it does.
-      --
-      -- Both directions matter. The first catches a row for a rule the run no
-      -- longer reports; the second is the one this issue was opened for - a row
-      -- that stayed at its old number through a PR that moved the code.
+   it("quotes as many collected files as the corpus holds", function()
+      -- The sentence above the table names the corpus. It read 964 while the
+      -- table three lines below it read 706, and nothing noticed: 964 was the
+      -- scanned count before #288 stopped the walker reading Perl test specs,
+      -- and it is neither of the two numbers the golden holds now.
+      local text = read("README.md")
       local golden = frozen()
-      local stale, unknown, checked = {}, {}, 0
+      local claimed = assert(tonumber(text:match("Over %*%*(%d+) files%*%*")),
+         "the README does not say how many files the corpus collected")
+      assert_equal(claimed, golden.corpus_files,
+         "the README quotes " .. claimed .. " collected files; the frozen "
+            .. "measurement collected " .. golden.corpus_files)
+   end)
 
+   it("carries no per-code count, because docs/precision.md is the only place one appears", function()
+      -- The gate #273 asked for, in the form the decision in that issue
+      -- actually took. The per-code rows were removed rather than gated, and the
+      -- reason is that gating them would have certified them: they were four of
+      -- the twenty codes the run reports, they showed nothing above 25, and they
+      -- omitted `707` - 346 findings against 265 from all nineteen other codes
+      -- put together. Holding those four to the golden would have kept a table
+      -- that is true of each row and false about the shape of the measurement.
+      --
+      -- So the rule is structural: the README states the totals and the
+      -- denominator; docs/precision.md states a per-code count. This case fails
+      -- the moment a per-code row comes back, which is the whole point - the
+      -- failure is loud, and it says where the number belongs.
+      local per_code_rows = {}
       for _, row in ipairs(measurement_rows()) do
          local code = per_code(row)
-         if code then
-            if golden.codes[code] == nil then
-               unknown[#unknown + 1] = code
-            else
-               checked = checked + 1
-               -- The count is the FIRST integer in the rest of the row, not the
-               -- last cell parsed as an integer. The 747 row's cell is
-               -- "**15, and all 15 are false positives** - see below", and a
-               -- cell that has to be entirely a number skips that row while
-               -- appearing to cover it.
-               local cell = row:match("^|[^|]*|(.*)$")
-               local claimed = cell and tonumber(cell:match("(%d+)"))
-               if claimed == nil then
-                  -- A per-code row whose cell carries no number at all cannot be
-                  -- compared, and quietly skipping it is how a real count
-                  -- escapes a gate that claims to hold it.
-                  stale[#stale + 1] = "code " .. code .. ": the row carries no "
-                     .. "count to compare: " .. row
-               elseif claimed ~= golden.codes[code] then
-                  stale[#stale + 1] = "code " .. code .. ": the README says "
-                     .. claimed .. ", the frozen measurement says "
-                     .. golden.codes[code] .. " (" .. row .. ")"
-               end
-            end
-         end
+         if code then per_code_rows[#per_code_rows + 1] = row end
       end
 
-      assert_equal(#unknown, 0,
-         "the README's measurement table has a row for code(s) "
-            .. table.concat(unknown, ", ") .. ", which "
-            .. GOLDEN .. " does not measure. A per-code count here has to be a "
-            .. "count the run actually reported")
-      assert_equal(#stale, 0,
-         #stale .. " per-code row(s) in README.md disagree with " .. GOLDEN
-            .. ":\n  " .. table.concat(stale, "\n  "))
-      -- A gate that found nothing because it matched nothing is the failure
-      -- this issue is about wearing a different hat, so the number of rows it
-      -- actually compared is part of what it asserts.
-      assert_true(checked > 0,
-         "no per-code row in README.md's measurement table was compared against "
-            .. GOLDEN .. ". If the rows were removed on purpose, say so in the "
-            .. "spec; if the parser stopped matching them, this gate is now "
-            .. "vacuous and will stay green through the next stale figure")
+      assert_equal(#per_code_rows, 0,
+         "README.md's measurement table carries "
+            .. #per_code_rows .. " per-code row(s), and docs/precision.md is the "
+            .. "only place a current per-code total appears:\n  "
+            .. table.concat(per_code_rows, "\n  ")
+            .. "\n  Link to it instead. If a per-code row is genuinely wanted "
+            .. "here, this is the case to argue with.")
+   end)
+
+   it("keeps the two derived rows, so the table is still worth reading", function()
+      -- The negative half of the case above, and the one that stops it being
+      -- satisfied by deleting the whole table. A gate forbidding per-code rows
+      -- is also satisfied by an empty one, which would remove the measurement
+      -- from the product's front door and call it hygiene. The totals and the
+      -- severity mix are what the README is for; they are the figures a person
+      -- deciding whether to trust this tool reads first.
+      local rows = measurement_rows()
+      for _, want in ipairs({"Findings", "Severity"}) do
+         assert_true(labelled(rows, want) ~= nil,
+            "README.md's measurement table has no " .. want .. " row. It carries "
+               .. "the totals and the denominator; deleting those is not what "
+               .. "this gate is for")
+      end
+   end)
+
+   it("would still catch a per-code row put back", function()
+      -- Anti-vacuity, and the reason the case above can be trusted with zero
+      -- per-code rows in the document. A gate that matches nothing passes; this
+      -- one is asserted against the exact rows that were removed, so if the
+      -- parser ever stops recognising them this fails instead of going quiet
+      -- through the next stale figure.
+      --
+      -- These are the four rows verbatim as they stood on `main` before this
+      -- change, including the 747 row whose cell is a sentence rather than a
+      -- number - the one a `| N |` parse would have skipped while looking like
+      -- it had covered it.
+      local removed = {
+         {"| `709` untrusted data → execution | 23 |", 709},
+         {"| `724` execution sink exposed as an RPC handler | 25 |", 724},
+         {"| `708` exposed sink, input not visible in this file | 22 |", 708},
+         {"| Hardcoded credentials (`747`) | **15, and all 15 are false positives** — see below |", 747},
+      }
+      for _, row in ipairs(removed) do
+         assert_equal(per_code(row[1]), row[2],
+            "the parser no longer recognises " .. row[1] .. " as a per-code row "
+               .. "for " .. row[2] .. ". The gate that forbids those rows would "
+               .. "pass without them, which is the failure this case exists to "
+               .. "prevent")
+      end
    end)
 
    it("reads the two derived rows as derived, not as per-code counts", function()
