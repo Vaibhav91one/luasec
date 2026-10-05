@@ -87,7 +87,8 @@ load(conv("4c4a0202"), "=x")
 ]]
       local formats = [[
 local function conv(src)
-   return (src:gsub("MARK%((.-)%)", function(var) return string.format("x=%d", var:byte()) end))
+   local n = 0
+   return (src:gsub("MARK%((.-)%)", function(var) n = n + 1; return string.format("x=%d", n) end))
 end
 load(conv("MARK(1)"), "=x")
 ]]
@@ -102,5 +103,19 @@ load(conv("MARK(1)"), "=x")
          "the same program with a replacement that only reformats its subject is a rewrite: "
             .. codes(formatted))
       assert_equal(#with_code(formatted, "901"), 0, "it was judged, not skipped: " .. codes(formatted))
+
+      -- The line between building a byte and reading one is the same line.
+      -- `c:byte()` pulls a number out of a character that was already in the
+      -- subject; the replacement is still writing the subject back out.
+      local renumbers = [[
+local function conv(s)
+   return (s:gsub(".", function(c) return c:byte() end))
+end
+load(conv("abc"), "=x")
+]]
+      local read = api.check_source(renumbers)
+      assert_equal(#with_code(read, "741"), 0,
+         "reading a byte out of a character the subject already held renumbers text, it does not "
+            .. "decode it: " .. codes(read))
    end)
 end)
