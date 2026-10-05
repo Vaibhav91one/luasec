@@ -971,9 +971,8 @@ function walk.collect(paths)
       -- acceptance criterion of #288 is that nothing anywhere names a path under
       -- one. An operator who wants the directories that were skipped asked a
       -- different question, and this is not the answer to it.
-      if is_git_dir(path) or under_git_dir(path) then
-         -- not this scan's ground
-      elseif is_dir(path) then
+      local git_metadata = is_git_dir(path) or under_git_dir(path)
+      if not git_metadata and is_dir(path) then
          local listed, list_error = expand_root(path)
          local skipped = path
          if not listed then
@@ -993,12 +992,12 @@ function walk.collect(paths)
             end
          end
          end
-      elseif file_exists(path) then
+      elseif not git_metadata and file_exists(path) then
          if not seen[path] then
             seen[path] = true
             files[#files + 1] = path
          end
-      else
+      elseif not git_metadata then
          return nil, "no such file: " .. path
       end
    end
