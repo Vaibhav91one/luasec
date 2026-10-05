@@ -1,0 +1,11 @@
+-- `nixio.exece(cmd, argtable [, envtable])` is nixio's execve form. The
+-- command is the FIRST argument and the argv table is the second, which is the
+-- same convention `nixio.exec` uses for its direct form. It was not declared at
+-- all, so a request parameter reaching it reported nothing and scored 100/100
+-- (good).
+--
+-- The parameter is read at the call site rather than passed into a handler
+-- because the flow this fixture is about is which ARGUMENT of nixio.exece
+-- carries the command. The handler shape is exercised by the 724 specs in
+-- firmware_spec.lua.
+nixio.exece(luci.http.formvalue("cmd"), {})
