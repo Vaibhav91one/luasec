@@ -17,7 +17,22 @@ return {
    sinks = {
       {pattern = "nixio.process.execute", code = "701", kind = "exec", arg = {1}},
       {pattern = "nixio.process.exec", code = "701", kind = "exec", arg = {1}},
-      {pattern = "nixio.exec", code = "701", kind = "exec", arg = {1}},
+      -- `nixio.exec` is overloaded and the two forms disagree about where the
+      -- command is:
+      --     nixio.exec(command)                  -- first
+      --     nixio.exec("/bin/sh", "-c", command)  -- third, and the dangerous one
+      -- Declaring only the first left every shell call silent, which is the form
+      -- OpenWrt code actually writes. Both positions are declared, so both
+      -- report.
+      --
+      -- What this over-approximates: a third argument of a DIRECT call is an
+      -- argv element, and nixio.exec hands it to execvp rather than to a shell,
+      -- so `nixio.exec("/usr/bin/tool", "--label", tainted)` is reported where
+      -- nixio itself treats it as an option. No corpus file does that. Telling
+      -- the two forms apart needs a per-position guard -- position 3 counting
+      -- only when position 2 is the literal "-c" -- and the sink declaration has
+      -- no field for one.
+      {pattern = "nixio.exec", code = "701", kind = "exec", arg = {1, 3}},
       {pattern = "posix.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.exec.*", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},
