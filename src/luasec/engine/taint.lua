@@ -349,7 +349,7 @@ end
 
 -- Resolve a callee expression to a path, following locals to the functions they
 -- were assigned when we can, so `local run = os.execute; run(cmd)` still matches.
-function callee_path(node, item, state, depth)
+local function callee_path(node, item, state, depth)
    if depth > 8 then return nil end
 
    if node.tag == "Invoke" then
