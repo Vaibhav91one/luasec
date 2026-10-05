@@ -47,27 +47,55 @@
 -- update this file and docs/precision.md in the same commit. The gate is built so
 -- that updating one without the other fails, which is the whole point of it.
 
+-- The corpus grew in #262: six OpenResty entries joined the four firmware ones,
+-- so every number here is larger than it was. The growth is new measurement
+-- surface and nothing else, and the split was taken before these figures were
+-- written. Over the four entries that were already here the run is identical to
+-- main's, finding for finding - the multiset of (code, file, line, column,
+-- message) over `luci`, `luci-1806`, `openwrt-packages` and `luajit` is equal
+-- before and after - and every code that was reported before is reported the
+-- same number of times. All of the increase is in the six new directories.
+--
+-- What the new directories are, and what they are not, is in docs/precision.md.
+-- The short form: they buy FFI false-positive surface and crypto/encoding
+-- surface, not request-handler flow. They contribute nothing at all to 704, 708,
+-- 709, 710, 712 or 724, and the reason is the one #262 predicted - these are
+-- libraries, and a library is not a request handler. Reading them as though they
+-- measured handler flow would be the easy mistake to make here.
+--
+-- Three codes in this table (711, 728, 902) and a large share of 901 and 903 are
+-- findings in files that are not Lua at all: the Test::Nginx `.t` spec files in
+-- lua-resty-core and lua-nginx-module are Perl, and the walk reads them as Lua
+-- because it has no `.t` in its not-Lua list and does descend into `.git/`. That
+-- is a walker defect rather than a property of OpenResty, it is filed as #288,
+-- and it is recorded here rather than engineered away: an earlier draft of this
+-- change removed the `.git/packed-refs` findings by relocating the git
+-- directories outside the corpus, which would have made the frozen table smaller
+-- and the defect harder to find.
 return {
-   corpus_files = 562,
-   scanned_files = 566,
-   total = 248,
+   corpus_files = 691,
+   scanned_files = 964,
+   total = 1136,
    codes = {
-      [701] = 49,
-      [702] = 14,
-      [703] = 17,
+      [701] = 67,
+      [702] = 19,
+      [703] = 25,
       [704] = 21,
-      [705] = 19,
-      [707] = 9,
+      [705] = 23,
+      [707] = 401,
       [708] = 22,
       [709] = 23,
       [710] = 1,
+      [711] = 6,
       [712] = 3,
       [724] = 25,
-      [725] = 1,
-      [727] = 14,
+      [725] = 2,
+      [727] = 16,
+      [728] = 1,
       [741] = 0,
-      [747] = 0,
-      [901] = 10,
-      [903] = 20,
+      [747] = 15,
+      [901] = 268,
+      [902] = 6,
+      [903] = 192,
    },
 }

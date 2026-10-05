@@ -372,31 +372,48 @@ Not claims — a measurement, re-runnable, and checked in CI:
 make corpus && make precision
 ```
 
-Over **566 files** of real firmware Lua from upstream LuCI (current and the
-`openwrt-18.06` branch, pinned to a commit), LuaJIT and the OpenWrt package
-tree:
+Over **964 files** of real Lua: upstream LuCI (current and the `openwrt-18.06`
+branch, pinned to a commit), LuaJIT, the OpenWrt package tree, and six OpenResty
+repositories pinned to released tags:
 
 | | |
 | --- | --- |
-| Findings | **248** across 101 files (18%) |
-| Severity | 24 critical, 163 high, 31 medium, 30 low |
+| Findings | **1136** across 403 files (42%) |
+| Severity | 24 critical, 612 high, 34 medium, 466 low |
 | `709` untrusted data → execution | 23 |
 | `724` execution sink exposed as an RPC handler | 25 |
 | `708` exposed sink, input not visible in this file | 22 |
-| Hardcoded credentials (`747`) | **0** — see below |
+| Hardcoded credentials (`747`) | **15, and all 15 are false positives** — see below |
 
 The per-code table is in [docs/precision.md](docs/precision.md).
 
-<details><summary>Why the table stays honest, and what 747 measuring zero means</summary>
+<details><summary>Why the table stays honest, and what the OpenResty entries do and do not buy</summary>
 
 The table has been wrong three times, so it is now measured by `make precision` on
-every CI run and the build fails if a single count moves.
+every CI run and the build fails if a single count moves. `make precision` also
+runs `scripts/clone-corpus.sh --verify` first, which fails if a declared corpus
+entry is missing, holds no Lua, or sits at a revision other than its pin — the
+last of which no file count can catch.
 
-On `747` measuring zero: that is not the rule being blind, it is this corpus
-containing no hardcoded credential. A real firmware image does. The rule's
-precision is measured by fixtures instead, and that is a real weakness of the
-measurement — a rule can be completely broken for the shapes firmware uses and
-this corpus will not notice, which has happened more than once.
+Six OpenResty repositories were added in #262, pinned to released tags. Over the
+four entries that were already here the run is **identical to main's, finding for
+finding** — every code reported before is reported the same number of times — so
+the entire increase is in the new directories.
+
+**What they buy is FFI and crypto/encoding false-positive surface, not
+request-handler flow.** They contribute nothing to 709, 708, 724, 712, 704 or 710,
+because a library is not a request handler. A large share of what they do
+contribute sits in files that are not Lua at all — the Test::Nginx `.t` specs in
+two of them are Perl and the file walker reads them as Lua (#288) — so read the
+OpenResty rows knowing that. What is still missing from this queue is a deployed
+`nginx.conf` with a `content_by_lua_block`.
+
+On `747`: it used to measure zero here, which is not the rule being blind but this
+corpus containing no credential. That is no longer true — the OpenResty entries
+gave it 15, and all 15 are false: one RFC-mandated anonymous-FTP default and
+fourteen upstream test fixtures asserting how a URL parser handles a `?` and a `#`
+inside a password. The rule has no true positive anywhere in this corpus, which
+makes it fixable against a real measurement instead of against fixtures alone.
 
 </details>
 
@@ -525,7 +542,7 @@ Run with `make <target>`:
 | `selfscan` | scan `src/` with luasec itself |
 | `adversarial` | run the adversarial regression suite |
 | `precision` | re-take the corpus measurement (needs `corpus`) |
-| `corpus` | clone the firmware corpora (network, gitignored) |
+| `corpus` | clone the firmware and OpenResty corpora, then verify them (network, gitignored) |
 | `vendor-verify` | fail on any drift in `vendor/` |
 | `ci-verify` | the full gate: vendor check, specs, adversarial, precision |
 | `tdd-proof` | show the new tests fail without the change (`BASE` `HEAD`) |
@@ -544,7 +561,8 @@ directory walk nor the validator runs there.
 <details><summary>What CI runs</summary>
 
 CI runs the specs, an adversarial suite, a TDD proof on every pull request, the
-`luasec` scan of itself, and precision — which clones the corpora and
+`luasec` scan of itself, and precision — which verifies that `corpus/` is what
+`scripts/clone-corpus.sh` declares it to be, runs the analyzer over it, and
 fails the build if a single finding count has moved. The last of those exists
 because a rule regression once passed the entire gate: nothing in it had ever
 executed the analyzer over the corpus.
