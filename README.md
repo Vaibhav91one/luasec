@@ -378,7 +378,7 @@ tree:
 
 | | |
 | --- | --- |
-| Findings | **252** across 101 files (19%) |
+| Findings | **252** across 101 files (18%) |
 | Severity | 18 critical, 173 high, 31 medium, 30 low |
 | `709` untrusted data → execution | 17 |
 | `724` execution sink exposed as an RPC handler | 25 |

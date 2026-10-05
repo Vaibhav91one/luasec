@@ -118,4 +118,28 @@ load(conv("abc"), "=x")
          "reading a byte out of a character the subject already held renumbers text, it does not "
             .. "decode it: " .. codes(read))
    end)
+
+   -- The second arm of the predicate, which decides substitution *ciphers*. A
+   -- replacement that reads a table to turn each character into a byte is
+   -- decoding just as much as one that builds the byte itself, and
+   -- `docs/rules/741.md` claims substitution ciphers still report. If this
+   -- stops firing, an entire decoder class has been deleted silently - which is
+   -- the failure this issue exists to prevent, wearing the opposite shape.
+   it("still reports a substitution cipher that reads its byte out of a table", function()
+      local cipher = [[
+local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+local M = {}
+for i = 1, #alphabet do M[alphabet:sub(i, i)] = i end
+local function conv(s)
+   return (s:gsub(".", function(c) return string.char(M[c]) end))
+end
+load(conv("0413"), "=x")
+]]
+      local found = with_code(api.check_source(cipher), "741")
+      assert_equal(#found, 1,
+         "a replacement reading a table to produce each byte is a decoder: "
+            .. codes(api.check_source(cipher)))
+      assert_equal(found[1].severity, "critical",
+         "the chain is read end to end, so this is the worst case rather than a hint")
+   end)
 end)
