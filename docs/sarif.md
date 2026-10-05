@@ -44,6 +44,19 @@ Two rules make the JSON stable enough to diff and to key on:
   path has no trace, and writing `[]` would suggest the analysis looked and found
   an empty flow.
 
+And one rule makes a report readable rather than merely well shaped:
+
+- **No two findings in a report are identical in `file`, `code`, `line`,
+  `column`, `message` and `source`.** The same sentence about the same place is
+  one finding however many times an engine observed it, and the report says it
+  once. It holds for every producer - `check_source`, `analyze`, `--jobs`,
+  stdin, a baseline - because it is applied where the list is projected rather
+  than in any one rule. It does *not* merge findings that differ in anything
+  else: two exposures of one exported function naming different sinks, two taint
+  findings at one sink from two sources, and the same code on two lines are all
+  still separate rows. A field the contract gains later is not silently merged
+  away, because the merge happens after projection rather than before.
+
 A trace step is `{kind, line, name}`, where `kind` is `source`, `sink`, or a
 propagation step. The order is **source first, sink last**, and that order is
 guaranteed by the contract rather than by whatever order an engine happened to

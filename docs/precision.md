@@ -31,7 +31,7 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-257 findings over 566 files, 101 of them carrying at least one (18%), after seven
+249 findings over 566 files, 101 of them carrying at least one (18%), after seven
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
@@ -104,7 +104,7 @@ Hand-audited sample by code:
 | Code | Count | Assessment |
 | --- | --- | --- |
 | 724 RPC handler | 25 | true, at two strengths. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field. Down 3 from 28 with #226: the three controller methods that now carry a real flow to their sink (`startstop`, `lxc_create`, `iface_reconnect`) report a 709 instead of the weaker "exposed, nothing feeds it". Unmoved in count by #238 and down 17 in severity: 17 of the 25 are a CBI hook running a literal command, which is this corpus's spelling of "restart this service", and they now report at `medium`/low confidence instead of `high`. The 8 that stay `high` all reach a sink whose command is built from something that does not fold - `ddns`'s `CTRL.luci_helper` is the clearest - and they keep the registered severity |
-| 708 exposed sink | 32 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well |
+| 708 exposed sink | 24 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well |
 | 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
 | 901 parse failure | 10 | true: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed |
 | 727 unbounded growth | 14 | true after narrowing: string accumulation in a loop with no visible ceiling |
