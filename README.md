@@ -378,8 +378,8 @@ repositories pinned to released tags:
 
 | | |
 | --- | --- |
-| Findings | **1136** across 403 files (42%) |
-| Severity | 24 critical, 612 high, 34 medium, 466 low |
+| Findings | **611** across 706 scanned files (21%) |
+| Severity | 24 critical, 523 high, 34 medium, 30 low |
 | `709` untrusted data → execution | 23 |
 | `724` execution sink exposed as an RPC handler | 25 |
 | `708` exposed sink, input not visible in this file | 22 |
