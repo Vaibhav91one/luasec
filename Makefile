@@ -134,6 +134,15 @@ ci: vendor-verify test
 # fixed; so it exits 0, says SKIPPED, and says that the measurement was not
 # taken. PRECISION_REQUIRE_CORPUS=1 makes that skip fatal for a job that has the
 # corpora and must not proceed without a measurement.
+#
+# The corpus is verified before the analyzer runs, not compared after. The two
+# frozen file counts do catch a corpus that shrank, but they report it as
+# arithmetic - "corpus holds N .lua files, the frozen measurement says M" - which
+# names no checkout, and they cannot catch a pinned entry moved to another commit
+# at all: same number of files, different code in them. scripts/clone-corpus.sh
+# --verify names the entry and exits non-zero, so the run below is not taken over
+# a tree the frozen numbers do not describe. test/spec/corpus_spec.lua fails if
+# the verify is removed from here or from behind the analyzer.
 PRECISION_REPORT ?= build/precision-report.json
 PRECISION_REQUIRE_CORPUS ?= 0
 
@@ -148,6 +157,12 @@ precision: lua vendor
 	   fi; \
 	   exit 0; \
 	fi; \
+	echo ">> verifying corpus/ against what scripts/clone-corpus.sh declares"; \
+	bash scripts/clone-corpus.sh --verify corpus \
+	  || { echo "precision: FAIL - corpus/ is not what clone-corpus.sh declares it to be,"; \
+	       echo "precision: FAIL - so the run below would describe a different corpus than"; \
+	       echo "precision: FAIL - the frozen numbers, and it is not a measurement of either"; \
+	       exit 1; }; \
 	echo ">> luasec over corpus/ (this is the measurement)"; \
 	./bin/luasec --std +openwrt+luci+luajit --format json -o $(PRECISION_REPORT) corpus; \
 	status=$$?; \
@@ -205,6 +220,13 @@ tdd-proof:
 
 # ---------------------------------------------------------------- corpora
 
+# Clone what is missing, then verify the whole tree against the list the script
+# itself declares. The verify is not decoration: a clone that fails part-way
+# leaves a corpus that still scans, and a pinned checkout that was moved leaves
+# one whose file counts are unchanged and whose code is not. Both are what the
+# frozen numbers would then be compared against. `make precision` runs the same
+# --verify before it measures, so a corpus that drifted is caught whether or not
+# `make corpus` was the thing that left it that way.
 .PHONY: corpus
 corpus: scripts/clone-corpus.sh
 	@bash scripts/clone-corpus.sh
