@@ -207,6 +207,33 @@ t.run(p)
       assert_equal(#report, 0, "table.insert is not a dynamic-code sink")
    end)
 
+   it("does not read a local that shadows a module name as that module", function()
+      -- `local os` really does replace `os`, so the call reaches
+      -- `table.insert` and not the shell. Reading it as `os.execute` is the
+      -- guess; the field is the fact.
+      local report = findings_for([[
+local os = { execute = table.insert }
+local p = luci.http.formvalue("q")
+os.execute(p)
+]])
+      assert_equal(#report, 0, "a shadowing local is not the module it is named after")
+   end)
+
+   it("follows taint through a table field named nodes", function()
+      -- The field record is keyed by field name, so a field called `nodes`
+      -- has to stay taint like any other: nothing may read the record itself
+      -- where a taint set is expected.
+      local report = findings_for([[
+local function go()
+   local t = { nodes = http.formvalue("host") }
+   os.execute(t.nodes)
+end
+]])
+      assert_equal(#report, 1, "expected exactly one 709 finding")
+      assert_equal(report[1].code, "709")
+      assert_equal(report[1].name, "os.execute")
+   end)
+
    it("still reports a literal string key, which is not a computed dispatch", function()
       local report = findings_for([[
 local t = { run = loadstring }
