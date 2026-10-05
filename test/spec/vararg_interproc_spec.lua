@@ -151,6 +151,12 @@ local function entry_point()
 end
 entry_point()
 ]], REQUEST)
+      -- Asserted on the whole code list, and that is deliberate after #281.
+      -- Narrowing this to "no 709" would have let a 708 appear beside the 701
+      -- without anybody noticing, and it did: tightening 708's withholding made
+      -- one show up here. It went away again only because 708 was corrected to
+      -- require that something outside the file can reach the function at all,
+      -- which this assertion is what forces.
       assert_equal(codes(report), "701",
          "the sink reads a clean formal, so it stays the shape-only 701")
    end)

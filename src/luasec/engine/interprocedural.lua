@@ -144,17 +144,65 @@ function interprocedural.exposed_sinks(chstate, opts)
    local state = taint_engine.new_state()
    local exposed = {}
 
-   -- Functions this file calls are not exposures: whatever feeds them is here,
-   -- and if it is untrusted the flow is already reported as 709.
-   local called = {}
+   -- How much evidence an in-file call supplies depends on whether another file
+   -- can reach the function at all, so that is what decides it.
+   --
+   -- For a function nothing outside this file can reach, a resolved call is the
+   -- only feed there is, and a call with a literal in it genuinely means the
+   -- sink is fed a constant. The old rule -- any resolved call stands down --
+   -- was right for those and is kept.
+   --
+   -- For an *assigned* function the opposite holds. Its real callers are in
+   -- another file, because LuCI registers a handler by name and dispatches to it
+   -- from the dispatcher:
+   --
+   --     function handler(cmd) os.execute(cmd) end   -- exported: entry({...}, handler)
+   --     function boot() handler("cleanup") end       -- in-file, a literal
+   --
+   -- Counting that call as "fed" withdrew the 708 and added no 709, because
+   -- "cleanup" is a constant: silence on an attacker-reachable sink, from a line
+   -- that looks like it reduces noise. So an assigned function stands down only
+   -- for a call that passes an argument this file cannot fold to a constant --
+   -- the same `is_constant` test the rule applies below when it decides whether
+   -- a sink argument is genuinely unaccounted for.
+   --
+   -- "Assigned" rather than "global", on purpose. luacheck's parser emits a Set
+   -- for `function f()` and for `function t.f()` alike, and both can be reached
+   -- from elsewhere, the second through the table it is written into -- which is
+   -- how a LuCI controller exposes its handlers. It is also why this cannot be
+   -- phrased as "global": `local function run` followed by `return run` is a
+   -- Localrec that is handed straight out of the chunk, and 708 is right about
+   -- that one.
+   local assigned = {}
+   for _, each in ipairs(chstate.lines) do
+      for _, item in ipairs(each.items) do
+         if item.tag == "Set" and item.node and item.node[2] then
+            local value = item.node[2][1]
+            if type(value) == "table" and value.tag == "Function" then
+               assigned[value] = true
+            end
+         end
+      end
+   end
+
+   local fed = {}
    for _, site in ipairs(callgraph.call_sites(chstate)) do
-      called[site.callee] = true
+      if not assigned[site.callee] then
+         fed[site.callee] = true
+      else
+         for _, arg in ipairs(site.args) do
+            if not taint_engine.is_constant(arg) then
+               fed[site.callee] = true
+               break
+            end
+         end
+      end
    end
 
    for _, line in ipairs(chstate.lines) do
       local function_node = line.node
       if function_node and function_node.tag == "Function" and function_node.name then
-         local has_sink = not called[function_node] and callgraph.has_sink(chstate, function_node)
+         local has_sink = not fed[function_node] and callgraph.has_sink(chstate, function_node)
          if has_sink then
             local reached = {}
             callgraph.sink_from_arguments(chstate, state, function_node, reached)

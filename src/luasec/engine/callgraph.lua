@@ -17,30 +17,78 @@ local MAX_ITERATIONS = 8
 local MAX_DEPTH = 12
 
 -- The Function node behind a call site's callee, when we can find it.
-local function resolve_callee(node, item, state, depth)
+--
+-- `globals` is the file's global function declarations, from globals_of. It is
+-- consulted only for an Id that carries no `.var`, and that condition is the
+-- whole justification for the lookup: an Id with no var is shadowed by no local
+-- in scope, so a global declaration of that name in this file is what the
+-- reference means. An Id that does carry a var is a local and returns before
+-- reaching the table. Matching on the name alone instead would let a shadowing
+-- local's call bind a same-named global's body, and invent a sink inside it.
+local function resolve_callee(node, item, globals, depth)
    depth = depth or 0
    if depth > MAX_DEPTH or type(node) ~= "table" then return nil end
 
    if node.tag == "Invoke" then
-      return resolve_callee(node[1], item, state, depth + 1)
+      return resolve_callee(node[1], item, globals, depth + 1)
    end
    if node.tag == "Paren" then
-      return resolve_callee(node[1], item, state, depth + 1)
+      return resolve_callee(node[1], item, globals, depth + 1)
    end
    if node.tag == "Index" and node[2] and node[2].tag == "String" then
-      return resolve_callee(node[1], item, state, depth + 1)
+      return resolve_callee(node[1], item, globals, depth + 1)
    end
    if node.tag == "Call" then
       return nil
    end
-   if node.tag == "Id" and node.var and item and item.used_values then
-      for _, value in ipairs(item.used_values[node.var] or {}) do
-         if value.node and value.node.tag == "Function" then
-            return value.node
+   if node.tag == "Id" then
+      if node.var then
+         if item and item.used_values then
+            for _, value in ipairs(item.used_values[node.var] or {}) do
+               if value.node and value.node.tag == "Function" then
+                  return value.node
+               end
+            end
+         end
+         return nil
+      end
+      -- No var, so this reference is a global. It resolves only if this file
+      -- declares a global function of that name: a library function or a
+      -- platform API has no body here, and inventing one would be a finding
+      -- about a function nobody in this file wrote.
+      return type(globals) == "table" and globals[node[1]] or nil
+   end
+   return nil
+end
+
+-- Global function declarations in the file, as name -> Function node.
+--
+-- luacheck's parser wraps `function f(x)` -- with no `local` -- in a Set whose
+-- target is a bare Id and whose value is the Function node. `local function f`
+-- is a Localrec instead and never reaches here, because resolve_locals gives it
+-- a var and the used_values path already resolves it.
+--
+-- A Set whose target is an Index (`t.meth = function`) is not a global name and
+-- is left out on purpose: resolve_callee reaches those through the receiver, and
+-- keying them as "t.meth" would make a table field look like a global.
+local function globals_of(chstate)
+   local globals = {}
+
+   for _, line in ipairs(chstate.lines) do
+      for _, item in ipairs(line.items) do
+         if item.tag == "Set" and item.node then
+            local value = item.node[2] and item.node[2][1]
+            local target = item.node[1] and item.node[1][1]
+            if type(value) == "table" and value.tag == "Function"
+                  and type(target) == "table" and target.tag == "Id"
+                  and type(target[1]) == "string" then
+               globals[target[1]] = value
+            end
          end
       end
    end
-   return nil
+
+   return globals
 end
 
 -- Argument nodes of a call expression.
@@ -75,18 +123,45 @@ local function formals_of(function_node)
 end
 
 --- Every call site in the file, as {callee = Function node, args = nodes, item = item}.
+--
+-- A call is a site wherever it is *evaluated*, not only where it is the entire
+-- statement. The rule used to be `item.tag == "Eval"` and the node being the
+-- call, which made every call whose result is stored invisible:
+--
+--     local argv = parse_cmdline(...)        -- a Local item
+--     result = execute(...)                   -- a Set item
+--
+-- On corpus/luci-1806/.../controller/commands.lua that hid 58 of the 91 call
+-- nodes in the file. Those are the shapes LuCI is written in -- a handler is a
+-- global function and its callers are nearly all assignments -- so both halves
+-- of this had to move together. See the PR for the measurement.
+--
+-- `return f(x)` is deliberately not handled here: a Noop item's node is the
+-- Return, and taint.lua already binds through that shape, so adding it would
+-- bind the same call twice.
 function callgraph.call_sites(chstate)
    local sites = {}
+   local globals = globals_of(chstate)
+
+   local function record(node, item)
+      if type(node) ~= "table" then return end
+      if node.tag == "Call" or node.tag == "Invoke" then
+         local callee = resolve_callee(node[1], item, globals, 0)
+         if callee then
+            sites[#sites + 1] = {callee = callee, args = args_of(node), item = item}
+         end
+      end
+   end
 
    for _, line in ipairs(chstate.lines) do
       for _, item in ipairs(line.items) do
          if item.tag == "Eval" then
-            local node = item.node
-            if node and (node.tag == "Call" or node.tag == "Invoke") then
-               local callee = resolve_callee(node[1], item, nil, 0)
-               if callee then
-                  sites[#sites + 1] = {callee = callee, args = args_of(node), item = item}
-               end
+            record(item.node, item)
+         elseif item.tag == "Local" or item.tag == "Set" then
+            -- One value slot per name on the left, so `local a, b = f(), g()`
+            -- is two calls and each is bound on its own.
+            for _, value in ipairs(item.rhs or {}) do
+               record(value, item)
             end
          end
       end
