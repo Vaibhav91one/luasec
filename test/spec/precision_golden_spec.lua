@@ -9,7 +9,7 @@ local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 -- sum to the headline printed above it. It passed through all three times the
 -- document was wrong, and it would pass through the fourth, because a rule
 -- regression moves the table and the headline together. The document agreed with
--- itself at 150 findings over a corpus that now measures 146, and `make
+-- itself at 150 findings over a corpus that now measures 249, and `make
 -- ci-verify` was green throughout: nothing in the gate ran the analyzer.
 --
 -- So the numbers are frozen outside the document, in scripts/precision-golden.lua,
