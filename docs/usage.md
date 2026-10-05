@@ -422,14 +422,14 @@ bin/luasec --summary test/fixtures/firmware
 ```
 
 ```
-Summary: 48 findings in 13 files
-Severity: high 30, medium 18
-Confidence: high 6, medium 29, low 13
+Summary: 47 findings in 13 files
+Severity: high 26, medium 21
+Confidence: high 6, medium 26, low 15
 Codes:
   726  7  self-modifying or destructive operation
-  708  6  exported execution sink whose argument nothing in this file feeds
   724  6  function containing an execution sink is exposed as an RPC handler
   728  6  untrusted data used as a search pattern
+  708  5  exported execution sink whose argument nothing in this file feeds
   725  5  sandbox or global environment manipulated
   721  4  write to flash or firmware configuration with untrusted data
   701  3  command execution with a non-constant argument
@@ -444,12 +444,12 @@ Files with the most findings:
   6  test/fixtures/firmware/sandbox_escape.lua
   6  test/fixtures/firmware/ubus_method.lua
   5  test/fixtures/firmware/self_modify.lua
-  5  test/fixtures/firmware/ubus_two_sinks.lua
+  4  test/fixtures/firmware/ubus_two_sinks.lua
   4  test/fixtures/firmware/unregistered_helper.lua
   3  test/fixtures/firmware/sensitive_read.lua
   2  test/fixtures/firmware/flash_write.lua
   2  test/fixtures/firmware/unbounded_growth.lua
-Score: 0/100 (critical) - exec 13, firmware 33, payload 2
+Score: 0/100 (critical) - exec 12, firmware 33, payload 2
 ```
 
 ### Progress

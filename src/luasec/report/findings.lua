@@ -7,6 +7,9 @@
 --   * a finding carries a fixed set of fields, always present, never null;
 --   * the order is total, so two runs that visit the same files in a different
 --     order still agree byte for byte;
+--   * the same finding appears once: two findings that say the same thing about
+--     the same place are one finding, and no rule can publish the same sentence
+--     twice;
 --   * a finding's identity (its fingerprint) deliberately excludes the line
 --     number, so a statement that moved down the file is the same finding;
 --   * a taint trace is source-to-sink: every source step, then the sink.
@@ -187,13 +190,81 @@ function findings.open_file(finding, memo)
    return file
 end
 
---- Every finding of a report, in report order, on the contract.
+-- The parts a reader tells two findings apart by, each one length-prefixed so
+-- that one part's contents cannot be read as the parts beside it: a message that
+-- happens to end in a separator is text the tool emitted, not a boundary.
+local function part(value)
+   local text = value == nil and "" or tostring(value)
+   return #text .. ":" .. text
+end
+
+--- Two findings are the same finding when they say the same thing about the same
+-- place: the file, the code, the location, the sentence and the source.
+--
+-- Deliberately not "every field the contract happens to carry". `sink` is a field
+-- a 708's finding is given by the pipeline and NOT one of the fields 708
+-- publishes: codes.lua registers 708 with no `fields` at all, next to 709, which
+-- declares `sink`, `source` and `trace` precisely because a consumer uses them.
+-- docs/rules/708.md says the same thing in words - "the finding is about the
+-- argument, not about the sink".
+--
+-- So two exposures of one exported function that name different sinks are one
+-- sentence said twice, and on a terminal they are indistinguishable: plain
+-- renders the sink nowhere, so the two lines come out byte for byte the same.
+-- Printing the same line twice is the whole defect, so they collapse.
+--
+-- Nothing actionable goes with them. Every exposed sink is separately reported as
+-- a 701 at its own line - that is where an operator goes to find out what a sink
+-- is - and 724 already answers this exact shape the same way: one finding per
+-- registration, naming the first sink the handler reaches, with a spec saying so.
+--
+-- Nor is it blind to anything a reader can act on. Findings that differ in file,
+-- code, line, column, message or source are never merged, so two taint findings
+-- at one sink from two sources both survive, as does the same code at two lines.
+-- `status` is in the key for the same reason: under a baseline, "new" and "fixed"
+-- are two different statements about one location.
+local function identity(finding)
+   return part(finding.file) .. part(finding.code) .. part(finding.line)
+      .. part(finding.column) .. part(finding.message) .. part(finding.source)
+      .. part(finding.status)
+end
+
+--- One finding per distinct finding.
+--
+-- A report that publishes the same finding twice says the same thing twice. The
+-- second copy carries nothing a reader could act on differently, and it inflates
+-- every number derived from the report: the summary total, the score, the corpus
+-- measurement, the baseline. A report showing one line four times reads as a
+-- broken tool and trains the eye to skip past the code rather than read it.
+--
+-- This runs here rather than in the rule that produced the duplicate because the
+-- property is about the published document, and it is then true of every producer
+-- - `check_source`, `analyze`, `--jobs`, stdin, a baseline - rather than of the
+-- one rule that happens to be wrong today. A rule is free to make an observation
+-- several times over; it is the report's job to say it once.
+--
+-- Which of several equal findings is kept is not observable: they agree on every
+-- field a format prints, and `normalize` sorts afterwards.
+function findings.distinct(list)
+   local out, seen = {}, {}
+   for _, finding in ipairs(list or {}) do
+      local key = identity(finding)
+      if not seen[key] then
+         seen[key] = true
+         out[#out + 1] = finding
+      end
+   end
+   return out
+end
+
+--- Every finding of a report, in report order, on the contract, each distinct
+-- finding once.
 function findings.normalize(report, status)
    local out = {}
    for _, raw in ipairs(report or {}) do
       out[#out + 1] = project(raw, status)
    end
-   return findings.sort(out)
+   return findings.sort(findings.distinct(out))
 end
 
 --- The machine-readable document: what version of the contract, which tool, and

@@ -31,11 +31,21 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-253 findings over 566 files, 101 of them carrying at least one (18%), after seven
+245 findings over 566 files, 101 of them carrying at least one (18%), after seven
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
 embedded.
+
+**#261** removed eight findings that were not eight observations. An exported
+function reaching several execution sinks is one 708 per exposure, and each is
+written at the function's own line, so `luci-app-splash`'s `splash.lua:105` came
+out four times with nothing at all to tell the copies apart. The report now
+publishes each distinct finding once: 253 to 245 overall, 708 from 32 to 24, and
+the `high` count from 173 to 165, with every other code byte-identical. Nothing
+was hidden - each of those sinks is still reported as a 701 at its own line,
+which is where a reader goes to find out what a sink is. See below for why the
+merge is in the report layer rather than in the rule.
 
 **#238** did not move this number, and that is the point of it. 724 was the
 second-largest family here at 25, all 25 at `high`, and 17 of them were the same
@@ -45,11 +55,11 @@ and low confidence with a note saying the command is a literal. Nothing is
 hidden - the finding is still made, because the exposure is real - but
 `--severity-threshold high` no longer reports them. The count is 25 before and 25
 after and every other code is byte-identical; what moved is the severity mix,
-from 190 `high` findings to 173. The 8 that stay `high` are handlers whose
-command is built from something `const_eval` cannot fold, and they keep the
-registered severity.
+from 190 `high` findings to 173 as it stood then. The 8 that stay `high` are
+handlers whose command is built from something `const_eval` cannot fold, and they
+keep the registered severity.
 
-Two changes moved this number since the last release, and neither is a
+Three changes moved this number since the last release, and none is a
 regression.
 
 **#226** modelled the LuCI dispatcher's arguments, so twelve sinks that used to
@@ -83,7 +93,7 @@ Hand-audited sample by code:
 | Code | Count | Assessment |
 | --- | --- | --- |
 | 724 RPC handler | 25 | true, at two strengths. The rule that matters most after 709, and the one the release review found crashing on every controller with a non-hook field. Down 3 from 28 with #226: the three controller methods that now carry a real flow to their sink (`startstop`, `lxc_create`, `iface_reconnect`) report a 709 instead of the weaker "exposed, nothing feeds it". Unmoved in count by #238 and down 17 in severity: 17 of the 25 are a CBI hook running a literal command, which is this corpus's spelling of "restart this service", and they now report at `medium`/low confidence instead of `high`. The 8 that stay `high` all reach a sink whose command is built from something that does not fold - `ddns`'s `CTRL.luci_helper` is the clearest - and they keep the registered severity |
-| 708 exposed sink | 32 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well |
+| 708 exposed sink | 24 | mostly true: an exported function in a LuCI library calls an execution sink and nothing in that file feeds it. Fixed after review: it was also firing on functions the file itself called, and its registry message, doc row and registered severity disagreed. Down 3 from 36 with #226, for the same reason 724 fell: three exported functions now carry a named flow to their sink. Unmoved again in #225 - the fix there stopped it *replacing* the 701 at the sink it names, so the same sinks are reported and most of them now carry their 701 as well. Down 8 with #261, and none of the 8 was an observation lost: all 32 sat at 5 locations in 13 copies, every copy identical to the last down to the message, and the 13 sinks behind them are still reported as 701s at their own lines |
 | 747 hardcoded secret | 0 | was 17 and every one of the 17 was a false positive; see below. It then went to 0 and came back as 2, because widening it to the forms firmware actually uses — a `uci.set` key argument, a CBI `.default`/`.value` field, a value concatenated at author time — also made it read `public_key.datatype = "and(base64,rangelength(44,44))"`, a CBI validator expression on a field that happens to be named after a credential. Those 2 are gone: only the fields that carry a value count, and only the profile-declared writers and real UCI cursors count as config writes. The rule's true positives are all fixtures, because this corpus contains no hardcoded credential |
 | 901 parse failure | 10 | true: real Lua the parser still rejects. Four of the original 14 (gettext escapes such as `"\$"`, which Lua 5.1 accepts) now parse through the escape retry (#181) and are analysed |
 | 727 unbounded growth | 14 | true after narrowing: string accumulation in a loop with no visible ceiling |
@@ -99,6 +109,48 @@ Hand-audited sample by code:
 | 710 dynamic code | 1 | true by the rule, low real risk: `luajit/dynasm/dynasm.lua:626` compiles a file it read (`loadstring(s)` of `io.open(...):read`); a file read is untrusted by rule, and this is a build-time tool |
 | 712 partial quote | 3 | true: a shell-quoted argument alongside an unquoted one, where the partially-quoted call is used in an expression. Up 2 from 1 with #226: at `diag:36` and `network:412` the tool can now see both halves of the command, so it reports which part was quoted |
 | 725 env escape | 1 | true after 725 was narrowed from every setfenv to the dangerous ones |
+
+### Why the eight went in the report layer, not in the rule
+
+The measurement says one exported function reaching four execution sinks is
+four facts, and the report said the same sentence four times. Collapsing it is
+either the rule's business or the report's, and the choice decides what a future
+change is allowed to do.
+
+**It went in the report layer** (`src/luasec/report/findings.lua`), in
+`findings.normalize`, because the property being asserted is about the published
+document rather than about the analysis. "No two findings in a report are
+identical" is then a property of the report, true of every producer -
+`check_source`, `analyze`, `--jobs`, stdin, a baseline - rather than a property
+of the one rule that happened to be wrong on this corpus. A rule stays free to
+make the same observation four times; saying it once is the report's job.
+
+**The key is what a reader tells two findings apart by** - file, code, line,
+column, message, source - and deliberately not "every field the contract
+happens to carry". 708 declares no `fields` at all, next to 709, which declares
+`sink`, `source` and `trace` precisely because a consumer uses them; and
+`docs/rules/708.md` says the finding is about the argument, not about the sink.
+So a difference in the sink a 708 names is not a difference a reader can act
+on, and least of all in `plain`, which prints no sink for any code - the two
+lines come out byte for byte identical, which is the defect itself.
+
+Measured rather than assumed, over the corpus and over every fixture in the
+repo: of the groups the merge collapses, exactly two - `ubus_two_sinks.lua` and
+one fixture added here - have a member differing outside the key, and in both
+the only difference is `sink`. Everything else, all 8 of the corpus's and 3 of
+the fixtures', is identical in every field including `severity` and `cwe`. Those
+two are not a silent loss either: both sinks are separately reported as a 701
+at their own line, which is where a reader goes to find out what a sink is, and
+it is the answer 724 already gives for the same shape - one finding per
+registration, naming the first sink the handler reaches, which a spec asserts.
+
+The risk is the other one, and it is the reason the key is not just the location:
+a merge that ignored `source` or `message` would answer for the operator which
+untrusted input gets to a sink, and that failure would be silent, because a
+merged finding and a distinct one look the same in the output either way. A spec
+sweeps every fixture in the repo and fails if any report repeats one, so the next
+rule that grows a new way of duplicating is caught there rather than by whoever
+reads the next corpus report.
 
 ## What the corpus fixed
 
@@ -246,5 +298,5 @@ corpus. Naming the value in a qualifying name gets the report either way.
   escape rewritten to one of the same length and analysed. The rest are
   reported rather than guessed at, which is the right behaviour, but it is 10
   findings an operator has to learn to read.
-- **708 is 32 findings and "mostly true" is not a number.** The claim has not
+- **708 is 24 findings and "mostly true" is not a number.** The claim has not
   been re-audited since the review fix.
