@@ -378,8 +378,8 @@ tree:
 
 | | |
 | --- | --- |
-| Findings | **252** across 101 files (18%) |
-| Severity | 18 critical, 173 high, 31 medium, 30 low |
+| Findings | **257** across 101 files (18%) |
+| Severity | 23 critical, 173 high, 31 medium, 30 low |
 | `709` untrusted data → execution | 17 |
 | `724` execution sink exposed as an RPC handler | 25 |
 | `708` exposed sink, input not visible in this file | 32 |

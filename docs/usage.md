@@ -101,9 +101,12 @@ loaded directly by the payload detector on every run. Do not pass `--std +signat
 ### openwrt
 
 OpenWrt router firmware. Sources are UCI config reads (`uci.get`, `nixio.getenv`,
-`ubus.call`), sinks are shell execution (`nixio.process.execute`, `luci.sys.call`)
-and UCI config writes (`uci.set`, `uci.add`). This is the profile for anything that
-looks like a LuCI or OpenWrt init script.
+`ubus.call`), sinks are shell execution (`nixio.exec`, `nixio.process.exec`,
+`luci.sys.call`) and UCI config writes (`uci.set`, `uci.add`). `nixio.exec` is
+overloaded and both forms are declared: `nixio.exec(command)` takes the command
+first, and `nixio.exec("/bin/sh", "-c", command)` — the form OpenWrt code
+actually writes — takes it third. This is the profile for anything that looks
+like a LuCI or OpenWrt init script.
 
 ```sh
 bin/luasec --std +openwrt test/fixtures/firmware/uci_tainted_value.lua
