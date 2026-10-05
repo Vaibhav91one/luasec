@@ -15,8 +15,29 @@ return {
       {pattern = "nixio.getenv", id = "nixio.getenv", name = "process environment", confidence = "medium"},
    },
    sinks = {
-      {pattern = "nixio.process.execute", code = "701", kind = "exec", arg = {1}},
-      {pattern = "nixio.process.exec", code = "701", kind = "exec", arg = {1}},
+      -- nixio's process functions, all three, read out of
+      -- corpus/luci-1806/libs/luci-lib-nixio/src/process.c:
+      --
+      --   325  static int nixio_exec(lua_State *L)  { return nixio__exec(L, NIXIO_EXECV); }
+      --   329  static int nixio_execp(lua_State *L) { return nixio__exec(L, NIXIO_EXECVP); }
+      --   333  static int nixio_exece(lua_State *L) { return nixio__exec(L, NIXIO_EXECVE); }
+      --
+      -- One implementation and three entry points, and process.c:31 reads the
+      -- command from position 1 for all three: `luaL_checkstring(L, 1)` is the
+      -- path, handed to execv, execvp or execve depending on which was called,
+      -- and the second argument is the next argv element or -- for exece -- the
+      -- argv table. So the command is FIRST in every form, and a declaration
+      -- written for one of them is the declaration for the rest.
+      --
+      -- They are declared one by one because firmware code calls them one by
+      -- one, and a call to an undeclared one was invisible: execp and exece
+      -- reported nothing at all and scored 100/100, on a sink that reaches
+      -- execve. Real code calls one of them --
+      -- luci-app-nlbwmon/luasrc/controller/nlbw.lua:46 is
+      -- `nixio.exece(cmd, args, nil)`, a command run through a pipe in a stock
+      -- LuCI controller.
+      {pattern = "nixio.execp", code = "701", kind = "exec", arg = {1}},
+      {pattern = "nixio.exece", code = "701", kind = "exec", arg = {1}},
       -- `nixio.exec` is overloaded and the two forms disagree about where the
       -- command is:
       --     nixio.exec(command)                  -- first
@@ -33,6 +54,52 @@ return {
       -- only when position 2 is the literal "-c" -- and the sink declaration has
       -- no field for one.
       {pattern = "nixio.exec", code = "701", kind = "exec", arg = {1, 3}},
+      -- There is deliberately no `nixio.process.*` entry. Two were declared --
+      -- `nixio.process.exec` and `nixio.process.execute` -- and neither could
+      -- ever match anything, because `nixio.process` is not a namespace:
+      --
+      --   process.c:448  void nixio_open_process(lua_State *L) {
+      --                      luaL_register(L, NULL, R);
+      --                  }
+      --
+      -- No `lua_newtable()`, no `lua_setfield(L, -2, "process")`: the table is
+      -- the one already on the stack, which is `nixio`. Ten of nixio's
+      -- seventeen openers are written that way and three are not -- fs.c:550
+      -- does push a table and name it "fs", and that one really is `nixio.fs` --
+      -- so the distinction has to be read off the source rather than inferred
+      -- from a file name. The exports are therefore `nixio.exec`, `nixio.execp`,
+      -- `nixio.exece`, `nixio.fork`, `nixio.getenv` and the rest, at the top
+      -- level. Three independent corroborations: the library's own docsrc
+      -- documents `@name nixio.exec` and ships no `nixio.process.*` page;
+      -- `grep -rn "nixio\.process" --include=*.lua corpus/` returns nothing
+      -- while `nixio.exec` appears in eight files; and luci-lua-runtime's
+      -- sys.lua:30 reads `getenv = nixio.getenv` at the top level.
+      --
+      -- `nixio.process.execute` was wrong twice over: nixio exports no
+      -- `execute` at all, because process.c:440-442 registers exec, execp and
+      -- exece and nothing else. test/spec/registry_export_spec.lua now derives
+      -- the exported names from the corpus's C sources and fails on any
+      -- declaration that is not one of them, so neither spelling can return.
+      -- luaposix, and the reason these three are not declared the way nixio's
+      -- are. `posix.exec` and `posix.spawn` are the same shape of claim:
+      -- `arg = {1}` says the command is the first argument, and #268's audit
+      -- flagged that the shell form of luaposix's exec takes the file third.
+      -- That is shape-based inference, not proof, and it could not be settled
+      -- here: luaposix is not in corpus/. `find corpus -iname "*posix*"`
+      -- returns `tools/include/asm/posix_types.h` and one gnulib patch and no
+      -- binding at all, and no corpus Lua file mentions `posix.`, so there is
+      -- nothing to derive the signature from.
+      --
+      -- test/spec/registry_export_spec.lua buckets a declaration it cannot
+      -- check rather than passing over it, and these three are in that bucket:
+      -- every run of `make test` prints `posix.exec posix.exec.* posix.spawn`
+      -- by name under "the corpus cannot speak for, so they were NOT checked",
+      -- alongside the other 72. That is the honest state -- unchecked, not
+      -- checked-and-fine -- and it is the reason this comment exists.
+      --
+      -- They are left as they are rather than changed on a guess. Reading
+      -- luaposix's posix/exec.c is the only thing that settles it, and that is
+      -- a fetch this repo does not do. Tracked as #278.
       {pattern = "posix.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.exec.*", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},

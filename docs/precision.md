@@ -59,11 +59,44 @@ bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 
 ## Result
 
-249 findings over 566 files, 101 of them carrying at least one (18%), after seven
+250 findings over 566 files, 101 of them carrying at least one (18%), after eight
 rounds of fixing false positives
 that this corpus found, after the release review found more, and after 747 was
 narrowed to the cases where a name and a value both say a credential is
 embedded.
+
+**#268** moved this number by one, in the one direction a security tool is allowed
+to. The OpenWrt profile declared one of the three functions nixio's process
+module exports. `process.c:325-335` dispatches `exec`, `execp` and `exece` to one
+`nixio__exec`, which reads the command from position 1 for all three, so the two
+undeclared ones are now declared: `nixio.execp` and `nixio.exece`, both `arg =
+{1}`. One new 709, in a stock LuCI controller:
+`luci-app-nlbwmon/luasrc/controller/nlbw.lua:46`. It is a true positive and a
+real one - `action_restore` unpacks an uploaded backup with
+`exec("/bin/tar", { "-C", dir, "-vxzf", tmp, unpack(files) })` at line 207, where
+`files` is the list of archive entry names read back out of that archive by
+`io.popen("/bin/tar -tzf %s" % tmp)` at line 179, so attacker-supplied bytes
+reach `argv` of `tar -x`. Line 46 is the `nixio.exece` that runs it. Nothing was
+removed and no other code moved: the headline is up by one and 709 is up by one.
+
+The same change removed two declarations that could never match anything:
+`nixio.process.execute` (nixio exports no `execute` - `process.c:440-442`
+registers `exec`, `execp` and `exece`) and `nixio.process.exec`. The second is
+the subtler one and the issue did not name it: `nixio.process` is not a namespace
+at all. `process.c:448` is `void nixio_open_process(lua_State *L) { luaL_register(L,
+NULL, R); }` - no `lua_newtable()`, no `lua_setfield(L, -2, "process")` - so the
+table is the one already on the stack, which is `nixio` itself. Ten of nixio's
+seventeen openers are written that way and three are not; `fs.c:550` does push a
+table and name it `fs`, and that one really is `nixio.fs`. Nothing in the corpus
+calls `nixio.process.*` and nothing can.
+
+What that costs is a spec, not accuracy: `test/spec/registry_export_spec.lua`
+reads the `luaL_register` tables out of every `.c` in `corpus/` and every
+module out of every `.lua`, and fails on any registry declaration that names
+something none of them export. It catches the two declarations removed here, and
+only those: `nixio.execp` and `nixio.exece` had no declaration to check, so the
+100/100 they scored was invisible to it and to everything else. What it stops is
+the next dead declaration, not the next missing one.
 
 **#265** moved this number, and in the one direction a security tool is allowed
 to. The OpenWrt profile declared `nixio.exec` as taking its command first, which
@@ -142,7 +175,7 @@ Hand-audited sample by code:
 | 707 FFI escape | 9 | true: LuaJIT source |
 | 903 dialect mismatch | 20 | true but mislabelled: all 20 are the 5.3 bitwise operators under `--std luajit`, and the message calls an operator an API |
 | 741 obfuscated loader | 0 | was 5, and all 5 were false. Down 2 with #235: `luci-base`'s `cbi.lua` defines `load` as its own module loader over `loadfile`, so `load(node, name)` at line 581 is module loading, not a hidden payload. Down 2 more with #256: `defined_function` resolved local bindings only, so a **global function statement the file defines** had no binding to follow and the walk could not read it. `luadoc`'s `lp.lua:104` is `loadstring(translate(s))` where `translate` is defined 61 lines earlier as a global `function translate(s)` and only rewrites template markup — one site, counted twice because the corpus holds two checkouts of openluci/luci (`corpus/luci` and `corpus/luci-1806`) and `lp.lua` is byte-identical between them (`cmp` clean). The same double-counting is why #235's drop was 2 and not 1: the CBI file appears in both checkouts, as `luci-base` in one and `luci-compat` in the other. **The 1 that remains is a different defect and is still wrong.** `genlibbc.lua:145` is the LuaJIT build tool handing the output of `transform_lua` to the standard `load`. It is not the #256 class: `transform_lua` is a `local function` (`genlibbc.lua:48`), which `defined_function` already resolved — the finding comes from `shape_of` reading `string.gsub(code, "PAIRS%((.-)%)", function(var) ... end)` inside it as a substitution decode, and that shape is a real decoder shape rather than a gap. So the column was 5 findings over 3 sites before #235, 3 over 2 after it, and 1 over 1 after #256 |
-| 709 injection | 22 | true, and the one that matters. Up from 5 with #226, which modelled the arguments `luci.dispatcher` calls a controller method with — the LuCI handlers this corpus is full of were previously reported as "exposed, nothing feeds it". Nine of the twelve are sites that carried a shape-only 701/702 instead (`adblock:75`, `cshark:56`, `diag:36`, `mwan3:102`, `network:302`, `network:412`, `status:65`, `status:85`, `system:183`); three are flows nothing reported at all before (`ddns:310`, `lxc:70`, `network:272`). All twelve name their source, and all twelve are `medium`: an entry point makes an argument reachable, it does not prove the dispatcher that reaches it is itself reachable. Up 5 more with #265, which declared the shell form of `nixio.exec` (`admin/system.lua:416` and `:446`, `mini/system.lua:233`, `failsafe/failsafe.lua:170` and `:200`) — five call sites, five findings, none of which was previously reported by any code. The pre-existing five are unchanged, including the two from #58 (`cshark.lua:73`, `wol.lua:85`) |
+| 709 injection | 23 | true, and the one that matters. Up from 5 with #226, which modelled the arguments `luci.dispatcher` calls a controller method with — the LuCI handlers this corpus is full of were previously reported as "exposed, nothing feeds it". Nine of the twelve are sites that carried a shape-only 701/702 instead (`adblock:75`, `cshark:56`, `diag:36`, `mwan3:102`, `network:302`, `network:412`, `status:65`, `status:85`, `system:183`); three are flows nothing reported at all before (`ddns:310`, `lxc:70`, `network:272`). All twelve name their source, and all twelve are `medium`: an entry point makes an argument reachable, it does not prove the dispatcher that reaches it is itself reachable. Up 5 more with #265, which declared the shell form of `nixio.exec` (`admin/system.lua:416` and `:446`, `mini/system.lua:233`, `failsafe/failsafe.lua:170` and `:200`) — five call sites, five findings, none of which was previously reported by any code. Up 1 more with #268, which declared the other two functions nixio's process module exports (`nixio.execp` and `nixio.exece`): `luci-app-nlbwmon/luasrc/controller/nlbw.lua:46`, where the archive entry names read out of an uploaded backup by `io.popen("/bin/tar -tzf %s" % tmp)` at `:179` reach `execve("/bin/tar", {..., unpack(files)})` at `:207`. The pre-existing five are unchanged, including the two from #58 (`cshark.lua:73`, `wol.lua:85`) |
 | 701 shape-only | 49 | true: a sink whose argument the analyzer could not trace, including sinks whose result is used (assigned to a local, passed to another call, or wrapped in an expression) that were previously invisible because only bare statement-level calls were checked. Down 3 to 22 with #226, then up to 51 with #225: that is where this row stops being an undercount. An exported sink used to be reported as a 708 *instead of* its 701, and 29 of these are the ones that suppression was eating. Each one is the same shape-only finding the tool already reports in the same file when the sink is not exported, and no file that was clean became dirty |
 | 703 file write | 17 | true: writes outside /tmp and /var/run, including sinks nested in expressions |
 | 702 env manipulation | 14 | true: setfenv grants and _G metatables, including sinks whose result is used in an expression. Down 6 from 21 with #226: those six sites now report a 709 naming the source |
