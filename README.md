@@ -372,20 +372,27 @@ Not claims — a measurement, re-runnable, and checked in CI:
 make corpus && make precision
 ```
 
-Over **964 files** of real Lua: upstream LuCI (current and the `openwrt-18.06`
+Over **691 files** of real Lua: upstream LuCI (current and the `openwrt-18.06`
 branch, pinned to a commit), LuaJIT, the OpenWrt package tree, and six OpenResty
-repositories pinned to released tags:
+repositories pinned to released tags. The walker selects **706** of them — the
+extra paths are the extensionless CGI handlers and generated scripts a firmware
+image carries beside its `.lua` files:
 
 | | |
 | --- | --- |
-| Findings | **611** across 706 scanned files (21%) |
+| Findings | **611** across 706 scanned files |
 | Severity | 24 critical, 523 high, 34 medium, 30 low |
-| `709` untrusted data → execution | 23 |
-| `724` execution sink exposed as an RPC handler | 25 |
-| `708` exposed sink, input not visible in this file | 22 |
-| Hardcoded credentials (`747`) | **15, and all 15 are false positives** — see below |
 
-The per-code table is in [docs/precision.md](docs/precision.md).
+Every per-code count in the table above is in
+[docs/precision.md](docs/precision.md), and it is the only place one appears.
+The table carries the totals and the denominator and stops there on purpose.
+
+The four per-code rows this table used to carry were four of the twenty codes the
+run reports, and they were not the four that mattered. They showed nothing above
+25 while omitting `707`, which found 346 — more than all nineteen other codes on
+this corpus put together. A reader counting those rows would have learned the
+opposite of what the run found, and because no gate watched them, three of them
+sat wrong on `main` for a while with CI green.
 
 <details><summary>Why the table stays honest, and what the OpenResty entries do and do not buy</summary>
 
