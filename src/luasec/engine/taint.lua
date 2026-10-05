@@ -220,6 +220,10 @@ local function new_state()
       value_taint = setmetatable({}, {__mode = "k"}),  -- luacheck value -> taint set
       global_taint = {},                              -- dotted global path -> taint set
       table_fields = setmetatable({}, {__mode = "k"}), -- Table node -> {key -> taint set}
+      -- The same table's fields as AST nodes rather than taint. Kept apart
+      -- because `table_fields` is keyed by field name, and a table with a
+      -- field called `nodes` is a table like any other.
+      field_nodes = setmetatable({}, {__mode = "k"}),   -- Table node -> {key -> AST node}
       global_tables = {},                              -- global name -> Table node
       findings = {},
       reported = {},                                  -- dedupe: one finding per site
@@ -244,76 +248,6 @@ local function id_path(node)
          return base .. "." .. node[2][1]
       end
    end
-end
-
--- Resolve a callee expression to a path, following locals to the functions they
--- were assigned when we can, so `local run = os.execute; run(cmd)` still matches.
-local function callee_path(node, item, state, depth)
-   if depth > 8 then return nil end
-
-   if node.tag == "Invoke" then
-      local base = callee_path(node[1], item, state, depth + 1)
-      local method = node[2] and node[2][1]
-      if base and method then return base .. ":" .. method end
-      return method
-   end
-
-   if node.tag == "Paren" then
-      return callee_path(node[1], item, state, depth + 1)
-   end
-
-   -- `require("ffi").C` names the ffi module, not an anonymous value.
-   if node.tag == "Call" then
-      local required = callee_path(node[1], item, state, depth + 1)
-      if required == "require" then
-         local argument = node[2]
-         if argument and argument.tag == "String" then
-            return platform_api.module_name(argument[1]) or argument[1]
-         end
-      end
-      return nil
-   end
-
-   -- Resolve a field access through the base's own definition, so
-   -- `local C = ffi.C; C.system(x)` is recognised as `ffi.C.system(x)`.
-   if node.tag == "Index" and node[2] and node[2].tag == "String" then
-      local base = callee_path(node[1], item, state, depth + 1)
-      if base then
-         return base .. "." .. node[2][1]
-      end
-      return nil
-   end
-
-   local direct = id_path(node)
-   if direct and not (node.tag == "Id" and node.var) then
-      return direct
-   end
-
-   if node.tag == "Id" and node.var and item then
-      local values = item.used_values and item.used_values[node.var]
-      local fallback
-      for _, value in ipairs(values or {}) do
-         local value_node = value.node
-         if value_node and value_node.tag == "Function" and value_node.name then
-            return value_node.name
-         elseif value_node and (value_node.tag == "Index" or value_node.tag == "Call") then
-            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`, and
-            -- `local json = require("luci.jsonc")` then `json.parse(...)` is
-            -- `jsonc.parse`. The comparison guards the case where resolving
-            -- through the definition gives back the same name we started with.
-            local via_local = callee_path(value_node, item, state, depth + 1)
-            local own_name = value_node[1] and value_node[1].tag == "Id"
-               and value_node[1][1] or nil
-            if via_local and via_local ~= own_name then
-               return via_local
-            end
-            fallback = fallback or via_local
-         end
-      end
-      return fallback or node[1]
-   end
-
-   return direct
 end
 
 -- The Table node a base expression refers to, following locals and globals.
@@ -352,9 +286,9 @@ local function resolve_table_node(base, item, state)
 
    if base.tag == "Index" then
       local outer = resolve_table_node(base[1], item, state)
-      local fields = outer and state.table_fields[outer]
-      if fields and base[2] and base[2].tag == "String" and fields.nodes then
-         return fields.nodes[base[2][1]]
+      local held = outer and state.field_nodes[outer]
+      if held and base[2] and base[2].tag == "String" then
+         return held[base[2][1]]
       end
    end
 
@@ -370,6 +304,144 @@ local function table_fields_of(base, item, state)
       state.table_fields[table_node] = fields
    end
    return fields
+end
+
+-- The AST node a table field was given, or nil when this scan cannot see the
+-- table or the field. Only a literal field name is read: a field reached
+-- through a computed key (`t[name]`) names nothing the analyzer can check, and
+-- picking one anyway is the guess this tool does not make.
+local function field_value_node(base, key, item, state)
+   local table_node = resolve_table_node(base, item, state)
+   if not table_node then return nil end
+
+   -- The constructor first: that is the value the field held when the table
+   -- was made, and reading it needs no analysis at all.
+   if table_node.tag == "Table" then
+      for _, pair_node in ipairs(table_node) do
+         if pair_node.tag == "Pair" and pair_node[1] and pair_node[1].tag == "String"
+               and pair_node[1][1] == key then
+            return pair_node[2]
+         end
+      end
+   end
+
+   -- Then the writes. `M.run = L` adds a field the constructor never had, and
+   -- the recorded write is the only account of it there is.
+   local held = state.field_nodes[table_node]
+   return held and held[key] or nil
+end
+
+-- The value nodes a local may hold at this item. Flow-sensitive reaching
+-- definitions first. When they say nothing -- the value was put in a table and
+-- read back at a later call, so the call item never records a definition of
+-- the name that is holding it -- fall back to the variable's own definitions,
+-- and only when there is exactly one. A local assigned more than once is left
+-- unresolved rather than resolved wrongly, which is the same rule the table
+-- resolver above applies to a table's identity.
+local function value_nodes(var, item)
+   local reaching = item and item.used_values and item.used_values[var]
+   if reaching and #reaching > 0 then return reaching end
+
+   local values = var.values
+   if not values or #values ~= 1 then return {} end
+   return values
+end
+
+-- Resolve a callee expression to a path, following locals to the functions they
+-- were assigned when we can, so `local run = os.execute; run(cmd)` still matches.
+local function callee_path(node, item, state, depth)
+   if depth > 8 then return nil end
+
+   if node.tag == "Invoke" then
+      local base = callee_path(node[1], item, state, depth + 1)
+      local method = node[2] and node[2][1]
+      if base and method then return base .. ":" .. method end
+      return method
+   end
+
+   if node.tag == "Paren" then
+      return callee_path(node[1], item, state, depth + 1)
+   end
+
+   -- `require("ffi").C` names the ffi module, not an anonymous value.
+   if node.tag == "Call" then
+      local required = callee_path(node[1], item, state, depth + 1)
+      if required == "require" then
+         local argument = node[2]
+         if argument and argument.tag == "String" then
+            return platform_api.module_name(argument[1]) or argument[1]
+         end
+      end
+      return nil
+   end
+
+   -- Resolve a field access through the base's own definition, so
+   -- `local C = ffi.C; C.system(x)` is recognised as `ffi.C.system(x)`.
+   if node.tag == "Index" and node[2] and node[2].tag == "String" then
+      local base = callee_path(node[1], item, state, depth + 1)
+      local dotted = base and (base .. "." .. node[2][1]) or nil
+
+      -- When the base is a table this scan can see, the value the field was
+      -- given is the function the call reaches: a table of handlers is an
+      -- ordinary shape, not an evasion. Tried before the dotted name because a
+      -- local that shadows a module name really does replace it -- `local os =
+      -- {execute = safe}` calls `safe`, so reading it as `os.execute` would be
+      -- the guess, not this.
+      local held = field_value_node(node[1], node[2][1], item, state)
+      if held then
+         local via_field = callee_path(held, item, state, depth + 1)
+         -- As below: a field whose value resolves back to the name we started
+         -- from is progress of no kind, and the dotted name is the better guess.
+         if via_field and via_field ~= dotted then
+            return via_field
+         end
+      end
+
+      return dotted
+   end
+
+   local direct = id_path(node)
+   if direct and not (node.tag == "Id" and node.var) then
+      return direct
+   end
+
+   if node.tag == "Id" and node.var and item then
+      local values = value_nodes(node.var, item)
+      local fallback
+      for _, value in ipairs(values or {}) do
+         local value_node = value.node
+         if value_node and value_node.tag == "Function" and value_node.name then
+            return value_node.name
+         elseif value_node and (value_node.tag == "Index" or value_node.tag == "Call") then
+            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`, and
+            -- `local json = require("luci.jsonc")` then `json.parse(...)` is
+            -- `jsonc.parse`. The comparison guards the case where resolving
+            -- through the definition gives back the same name we started with.
+            local via_local = callee_path(value_node, item, state, depth + 1)
+            local own_name = value_node[1] and value_node[1].tag == "Id"
+               and value_node[1][1] or nil
+            if via_local and via_local ~= own_name then
+               return via_local
+            end
+            fallback = fallback or via_local
+         elseif value_node and value_node.tag == "Id" then
+            -- `local L = loadstring` then `L(code)` is `loadstring(code)`. The
+            -- right-hand side is a name rather than an expression, so following
+            -- it is not a guess, and a name only becomes a finding when the
+            -- registry says it is a sink. These are the sinks that had no route
+            -- to a caller at all before: `os.execute` is an Index and was
+            -- already chased above, a bare global was not.
+            local via_local = callee_path(value_node, item, state, depth + 1)
+            if via_local and via_local ~= node[1] then
+               return via_local
+            end
+            fallback = fallback or via_local
+         end
+      end
+      return fallback or node[1]
+   end
+
+   return direct
 end
 
 -- ------------------------------------------------------------ expressions
@@ -840,6 +912,19 @@ local function record_table_write(node, value_node, item, state, depth)
    if depth > 16 or type(node) ~= "table" then return end
    local tag = node.tag
 
+   local function hold(table_node, key, held)
+      -- `M.run = L` is a field write with no reaching definition, so the value
+      -- is recorded here: this is the only place a field assignment is seen,
+      -- and the callee resolver has to read it to know which function a later
+      -- `M.run(...)` reaches.
+      local nodes = state.field_nodes[table_node]
+      if not nodes then
+         nodes = {}
+         state.field_nodes[table_node] = nodes
+      end
+      nodes[key] = held
+   end
+
    if tag == "Table" then
       for _, pair_node in ipairs(node) do
          if pair_node.tag == "Pair" and pair_node[1] and pair_node[1].tag == "String" then
@@ -848,6 +933,7 @@ local function record_table_write(node, value_node, item, state, depth)
                fields = {}
                state.table_fields[node] = fields
             end
+            hold(node, pair_node[1][1], pair_node[2])
             set_union_into(field_set(fields, pair_node[1][1]),
                taint_of_expr(pair_node[2], item, state, depth + 1))
          end
@@ -855,6 +941,8 @@ local function record_table_write(node, value_node, item, state, depth)
    elseif tag == "Index" and node[2] and node[2].tag == "String" then
       local fields = table_fields_of(node[1], item, state)
       if fields and value_node then
+         local table_node = resolve_table_node(node[1], item, state)
+         if table_node then hold(table_node, node[2][1], value_node) end
          set_union_into(field_set(fields, node[2][1]),
             taint_of_expr(value_node, item, state, depth + 1))
       end
