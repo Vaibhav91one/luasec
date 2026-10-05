@@ -17,8 +17,20 @@ local profiles = require "luasec.registry.profiles"
 --   luci.util.uci.*            declared; not exported by any LuCI in the corpus
 --
 -- So this spec reads the implementations out of corpus/ and asserts that every
--- name the registry declares is one the code actually exports. It is the part
--- of #268 that decides whether the next one is found by reading or by a test.
+-- name the registry declares is one the code actually exports.
+--
+-- What that catches and what it does not, because the two are different
+-- failures with different fixes. It catches the last three lines above: a
+-- declaration naming something that is not there, which is a data change. It
+-- cannot catch the first, because a function that is not declared has no
+-- declaration to check -- that is a missing row, and the only thing that finds
+-- it is reading the C and writing the declaration. What this spec guarantees is
+-- that the next *dead* declaration is found by running the tests rather than by
+-- reading, and that is the half of the problem that recurs.
+--
+-- A declaration the corpus cannot speak for is neither of those. It is neither
+-- dead nor verified, so it is bucketed and printed by name on every run rather
+-- than passing under a green line; see report_unverifiable below.
 --
 -- corpus/ is not in git (.gitignore; `make corpus` clones it), so a checkout
 -- without it can derive nothing. It says so in four lines rather than going
@@ -331,9 +343,14 @@ local function resolve(pattern, modules, tables, forwarded)
       return {verdict = "unknown", pattern = pattern, namespace = base}
    end
 
-   for count = #segments - 1, 1, -1 do
+   for count = #segments, 1, -1 do
       local namespace = table.concat(segments, ".", 1, count)
       if modules[namespace] then
+         if count == #segments then
+            -- The whole name is a module: `luci.ip.*` names the luci.ip module
+            -- and whatever hangs off it, and the corpus ships it.
+            return {verdict = "ok", pattern = pattern, namespace = namespace}
+         end
          local leaf = segments[count + 1]
          if tables[namespace] and tables[namespace][leaf]
                and forwarded[namespace] and forwarded[namespace][leaf] then
@@ -388,6 +405,19 @@ local function declared_patterns()
    return out
 end
 
+-- Every declaration, bucketed by what the corpus could say about it.
+--
+--   checked       the named function is exported
+--   unexplained   the namespace is in the corpus and the function is not
+--   unverifiable  the corpus implements no such namespace, or it is the Lua
+--                 standard library, or the pattern is a glob
+--   forwarded     the namespace is a table a runtime __index metamethod fills in
+--
+-- `unverifiable` is the bucket that must not disappear. A name lands there
+-- because the corpus is silent about it -- cgilua, espressif, hisi, the
+-- LuaJIT FFI, openresty, ubus, cjson, luaposix are all absent from it -- and a
+-- reader who sees "spec passed" and nothing else has no way to tell those apart
+-- from the ones that were checked. So they are printed, every run, by name.
 local function check_every_declaration()
    local modules, tables, forwarded = derive_lua_modules()
    for module, names in pairs(derive_c_modules()) do
@@ -395,25 +425,39 @@ local function check_every_declaration()
       for name in pairs(names) do modules[module][name] = true end
    end
 
-   local checked, unexplained, unknown, wildcards, forwarded_names = 0, {}, 0, 0, 0
+   local result = {checked = 0, unexplained = {}, unverifiable = {}, forwarded = {}}
    for _, entry in ipairs(declared_patterns()) do
       local verdict = resolve(entry.pattern, modules, tables, forwarded)
-      if verdict.verdict == "ok" then
-         checked = checked + 1
-      elseif verdict.verdict == "missing" then
-         if LUA_STANDARD[verdict.namespace] then
-            unknown = unknown + 1
-         else
-            unexplained[#unexplained + 1] = entry
-         end
-      elseif verdict.verdict == "forwarded" then
-         forwarded_names = forwarded_names + 1
-      else
-         unknown = unknown + 1
-      end
+      local bucket =
+         (verdict.verdict == "ok") and result or
+         (verdict.verdict == "missing" and not LUA_STANDARD[verdict.namespace])
+            and result.unexplained or
+         (verdict.verdict == "forwarded") and result.forwarded or
+         result.unverifiable
+      bucket[#bucket + 1] = entry.pattern
+      if bucket == result then result.checked = result.checked + 1 end
    end
-   return {checked = checked, unexplained = unexplained, unknown = unknown,
-           wildcards = wildcards, forwarded = forwarded_names}
+   for _, list in pairs(result) do
+      if type(list) == "table" then table.sort(list) end
+   end
+   return result
+end
+
+-- A bucket that is not empty is a coverage limit somebody has to read, so it
+-- goes to stdout in full. `make test` prints spec names, so this lands next to
+-- them rather than in a log nobody opens, and it is not an assertion: these
+-- names are wrong for a reason that has nothing to do with this code, and
+-- failing on them would be the spec lying about what it is for.
+local function report_unverifiable(result)
+   if #result.unverifiable == 0 then return end
+   io.write("  registry export check: ", #result.unverifiable,
+      " declaration(s) the corpus cannot speak for, so they were NOT checked:\n    ")
+   io.write(table.concat(result.unverifiable, " "), "\n")
+   if #result.forwarded > 0 then
+      io.write("  registry export check: ", #result.forwarded,
+         " forwarded at runtime and NOT checked: ",
+         table.concat(result.forwarded, " "), "\n")
+   end
 end
 
 --------------------------------------------------------------------------------
@@ -448,6 +492,7 @@ describe("registry declarations name functions that exist", function()
       end
 
       local result = check_every_declaration()
+      report_unverifiable(result)
 
       -- The derivation reading the whole corpus is the load-bearing part: a
       -- check that silently stopped looking is the failure mode this spec
@@ -458,11 +503,8 @@ describe("registry declarations name functions that exist", function()
           "broken rather than the registry clean"):format(result.checked))
 
       local unexplained = {}
-      for _, entry in ipairs(result.unexplained) do
-         if not KNOWN_NOT_EXPORTED[entry.pattern] then
-            unexplained[#unexplained + 1] = ("%s (declared by the %s profile)")
-               :format(entry.pattern, entry.profile)
-         end
+      for _, pattern in ipairs(result.unexplained) do
+         if not KNOWN_NOT_EXPORTED[pattern] then unexplained[#unexplained + 1] = pattern end
       end
       assert_equal(#unexplained, 0,
          "the registry declares " .. #unexplained .. " name(s) the corpus does not export:\n  "
@@ -474,11 +516,39 @@ describe("registry declarations name functions that exist", function()
       -- And the reverse: the list of knowingly-wrong names is the review
       -- surface, so it has to keep matching what is actually declared.
       local declared = {}
-      for _, entry in ipairs(result.unexplained) do declared[entry.pattern] = true end
+      for _, pattern in ipairs(result.unexplained) do declared[pattern] = true end
       for pattern in pairs(KNOWN_NOT_EXPORTED) do
          assert_true(declared[pattern],
             "KNOWN_NOT_EXPORTED lists " .. pattern .. ", which the corpus now exports " ..
             "or the registry no longer declares; delete the entry")
+      end
+   end)
+
+   it("lists every declaration the corpus cannot check, rather than passing over it", function()
+      -- The same run, asserting the thing that was missing: the unverifiable
+      -- names are a named list in the output, not a counter nobody reads. A
+      -- green line next to seventy unchecked declarations is the shape of a
+      -- false assurance, and this is what stops it being one.
+      if not have_corpus then return end
+
+      local result = check_every_declaration()
+      assert_true(#result.unverifiable > 0,
+         "nothing is unverifiable, which means either the corpus grew a copy of " ..
+         "luaposix, openresty, cgilua and the rest, or the resolver stopped " ..
+         "distinguishing 'no such namespace' from 'checked and fine'. Print the " ..
+         "list before believing this.")
+
+      -- And the ones that must be on it, by name. These are the namespaces the
+      -- corpus genuinely does not ship, so if one ever stops being unverifiable
+      -- the corpus has gained a library and the resolver should reach it.
+      local listed = {}
+      for _, pattern in ipairs(result.unverifiable) do listed[pattern] = true end
+      for _, pattern in ipairs({"posix.exec", "posix.spawn", "ngx.exec", "ffi.load"}) do
+         assert_true(listed[pattern],
+            pattern .. " is expected to be unverifiable here (luaposix, openresty " ..
+            "and the LuaJIT FFI are not in corpus/). If it is no longer on the " ..
+            "list, the corpus has gained one of them and the spec should now be " ..
+            "checking it rather than assuming.")
       end
    end)
 end)

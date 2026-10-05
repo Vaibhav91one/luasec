@@ -93,8 +93,10 @@ calls `nixio.process.*` and nothing can.
 What that costs is a spec, not accuracy: `test/spec/registry_export_spec.lua`
 reads the `luaL_register` tables out of every `.c` in `corpus/` and every
 module out of every `.lua`, and fails on any registry declaration that names
-something none of them export. It is the check that would have caught all three
-of these at once.
+something none of them export. It catches the two declarations removed here, and
+only those: `nixio.execp` and `nixio.exece` had no declaration to check, so the
+100/100 they scored was invisible to it and to everything else. What it stops is
+the next dead declaration, not the next missing one.
 
 **#265** moved this number, and in the one direction a security tool is allowed
 to. The OpenWrt profile declared `nixio.exec` as taking its command first, which

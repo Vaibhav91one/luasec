@@ -88,13 +88,18 @@ return {
       -- here: luaposix is not in corpus/. `find corpus -iname "*posix*"`
       -- returns `tools/include/asm/posix_types.h` and one gnulib patch and no
       -- binding at all, and no corpus Lua file mentions `posix.`, so there is
-      -- nothing to derive the signature from and
-      -- test/spec/registry_export_spec.lua deliberately reports these three as
-      -- "the corpus implements no such namespace" rather than guessing.
+      -- nothing to derive the signature from.
+      --
+      -- test/spec/registry_export_spec.lua buckets a declaration it cannot
+      -- check rather than passing over it, and these three are in that bucket:
+      -- every run of `make test` prints `posix.exec posix.exec.* posix.spawn`
+      -- by name under "the corpus cannot speak for, so they were NOT checked",
+      -- alongside the other 72. That is the honest state -- unchecked, not
+      -- checked-and-fine -- and it is the reason this comment exists.
       --
       -- They are left as they are rather than changed on a guess. Reading
       -- luaposix's posix/exec.c is the only thing that settles it, and that is
-      -- a fetch this repo does not do.
+      -- a fetch this repo does not do. Tracked as #278.
       {pattern = "posix.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.exec.*", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},
