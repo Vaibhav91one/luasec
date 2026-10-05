@@ -115,7 +115,7 @@ clone luajit https://github.com/LuaJIT/LuaJIT.git "" 1 "LuaJIT, the firmware dia
 #
 # Until these were added the corpus held no OpenResty at all: every source the
 # openresty std declares is a firmware API, so no openresty source was in scope
-# and a change to that profile could not move the number. #227, #240 and #263 all
+# and a change to that profile could not move the number. #227, #250 and #263 all
 # shipped such changes with a corpus figure of 0 before and 0 after, which is
 # not evidence - it is the absence of a measurement. What is here is idiomatic
 # server-side Lua, the libraries an OpenResty deployment actually loads, and the
