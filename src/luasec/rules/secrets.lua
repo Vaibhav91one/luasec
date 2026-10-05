@@ -319,35 +319,50 @@ local function is_a_number(value)
    return value:match("^%d+$") ~= nil
 end
 
+-- The account names an anonymous login sends. This half is a LIST, and the
+-- asymmetry with the half below is the whole argument for it: there are a
+-- handful of account names an anonymous FTP login uses and no more, while
+-- `admin`, `svc-deploy` and `jenkins` are three accounts on three real systems
+-- and the next one is nobody's to enumerate. A shape that accepted any local
+-- part demoted every address-shaped password in the world, which is the one
+-- direction this change may not move - `password = "admin@example.com"` is a
+-- chosen password that happens to look like an address, not an identity a
+-- client chose to send.
+--
+-- `ftp` and `guest` are here because clients really do send them in the PASS
+-- field, and `nobody` because that is what a service account is called when the
+-- login is not a person. The comparison is in lower case, so `FTP@` and
+-- `Anonymous@` are the same claim however they are spelled.
+local LOGIN_LOCAL_PARTS = {
+   anonymous = true, anon = true, ftp = true, guest = true, nobody = true,
+}
+
 -- The identity an anonymous login sends in place of a password.
 --
 -- The convention is that a client logging in as `anonymous` puts an address in
 -- the PASS field, so that an administrator reading the server's log sees who
 -- asked rather than seeing a blank. Every FTP client does it and every one
--- picks a different address, so the shape is the only thing that can be
--- recognised: a local part, an `@`, and either nothing after it or a domain
--- whose last label is letters.
+-- picks a different address, so the DOMAIN is recognised by shape and not by a
+-- list: a local part from the table above, an `@`, and then either nothing at
+-- all or a domain whose last label is letters.
 --
--- NO LIST OF ALLOWED VALUES, deliberately. The strings are not anyone's to
--- enumerate - `anonymous`, `anonymous@`, `ftp@host`, `user@example.org` are all
--- in wide use and none of them is the one the next library will pick - and the
--- value that would have to be in such a list to catch `luasocket`'s
--- `anonymous@anonymous.org` is luasocket's own choice of domain, which is a
--- hard-coded string of one project in a table about a protocol. The shape
--- covers all of them at once and has nothing to go stale.
+-- The domain stays shape-based for the reason the account names do not have to
+-- be. `luasocket` picks `anonymous@anonymous.org`, `curl` picks
+-- `anonymous@`, and what luasocket's own source is doing here is hard-coding one
+-- project's domain - which is exactly what a table of allowed values would have
+-- to carry, and exactly what goes stale the moment the next library is read.
 --
--- The bounds are what keep it from eating real passwords. A dotted domain with
--- a non-alphabetic last label is an IPv4 literal (`root@10.0.0.5`), an `@` with
--- anything after it that is not a domain is a password that happens to contain
--- one (`p@ssw0rd`), and the local part has to be three characters or more so a
--- two-letter value with a domain beside it is not read as an identity. Every
--- one of those bounds makes the rule demote LESS, which is the direction to err
--- in: what is left behind is a `high` finding, which is the finding this rule
--- would rather over-report than lose.
+-- The bounds on the domain are what keep it from eating real passwords. A
+-- dotted domain with a non-alphabetic last label is an IPv4 literal
+-- (`root@10.0.0.5`), and an `@` with anything after it that is not a domain is
+-- a password that happens to contain one (`p@ssw0rd`). Every one of those
+-- bounds makes the rule demote LESS, which is the direction to err in: what is
+-- left behind is a `high` finding, which is the finding this rule would rather
+-- over-report than lose.
 local function is_login_identity(value)
-   if value:find("@", 1, true) == nil then return false end
    local local_part, domain = value:match("^([%w][%w%.%-_]*)@(.*)$")
-   if not local_part or #local_part < 3 then return false end
+   if not local_part then return false end
+   if not LOGIN_LOCAL_PARTS[local_part:lower()] then return false end
    if domain == "" then return true end
    if domain:find("[^%w%.%-]") then return false end
    return domain:match("%.%a[%a]+$") ~= nil

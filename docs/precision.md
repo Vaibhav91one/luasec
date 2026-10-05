@@ -569,26 +569,40 @@ statement about *exposure*, so all 15 are still reported and
 count in the table above is unchanged.
 
 Two contexts demote, and the two are answered from opposite directions. One is
-the **file**: a path segment named `test`, `tests`, `spec` or `specs`, or a file
-whose own name begins or ends with one, is a test suite, and a credential-shaped
-literal in a test suite is the fixture it is. That is the blunt route and it is
-the one that carries the corpus's fourteen; it is also the route that had to
-leave `t/` out, because macOS names the scratch directory it hands every process
-`T` and a one-letter entry would have demoted every finding in every temporary
-file. The other is the **value**, and it is where the one in `src/` went: a
-strong `password` name holding `anonymous@anonymous.org` is the identity an
-anonymous login sends instead of a password somebody chose.
+the **file**: a path segment named `test`, `tests`, `spec`, `specs` or `t`, or a
+file whose own name begins or ends with one, is a test suite, and a
+credential-shaped literal in a test suite is the fixture it is. That is the blunt
+route and it is the one that carries the corpus's fourteen. The macOS scratch
+directory is answered by excluding temporary roots as absolute prefixes of the
+resolved path (`/var/folders/`, `/private/var/folders/`, `/tmp/`,
+`/private/tmp/`, and `$TMPDIR` when it is set), **not** by leaving `t/` out of
+that vocabulary. `t/` is how OpenResty and Test::Nginx spell a test suite, and
+"buys nothing in this corpus" is an argument about the corpus rather than about
+the rule, which ships to scan trees nobody here has cloned. Neither change moves
+the count in the table above: this corpus has no `.lua` file under a `t/`
+directory, and none of the 15 is under a temporary root. The other context is
+the **value**, and it is where the one in `src/` went: a strong `password` name
+holding `anonymous@anonymous.org` is the identity an anonymous login sends
+instead of a password somebody chose.
 
-That second one is deliberately *not* a list of allowed values. The issue called
-the constant an RFC-mandated default and named RFC 2577; RFC 2577 is
-*FTP Security Considerations*, an Informational memo about the bounce attack and
-brute-force limits, and it says nothing about an anonymous login. There is no
-IETF RFC for the convention - it is de-facto, documented in `ftp(1)`, and every
-client implements it. So a table of permitted values would have had no authority
-to copy from, and the only string in it that catches this corpus is
-`anonymous@anonymous.org`, which is *luasocket's* choice of domain. The shape -
-a local part, an `@`, then either nothing or a domain whose last label is
-letters - covers every client's choice at once and has nothing to go stale.
+That second one splits its two halves, in opposite directions. The **domain** is
+a shape and not a list: the issue called the constant an RFC-mandated default and
+named RFC 2577; RFC 2577 is *FTP Security Considerations*, an Informational memo
+about the bounce attack and brute-force limits, and it says nothing about an
+anonymous login. There is no IETF RFC for the convention - it is de-facto,
+documented in `ftp(1)`, and every client implements it. So a table of permitted
+domains would have had no authority to copy from, and the only string in it that
+catches this corpus is `anonymous@anonymous.org`, which is *luasocket's* choice
+of domain. A shape - either nothing after the `@` or a domain whose last label is
+letters - covers every client's choice at once and has nothing to go stale. The
+**local part** is the other way round, and is a list of five (`anonymous`,
+`anon`, `ftp`, `guest`, `nobody`), because there are a handful of anonymous
+account names and no more, while `admin`, `svc-deploy` and `jenkins` are three
+accounts on three real systems and the next one is nobody's to enumerate. The
+first #290 draft made the local part a shape too and demoted every
+address-shaped password in the world; `password = "svc-deploy@staging.acme.com"`
+is a chosen credential, and lowering it moves the finding in the one direction a
+security tool may not.
 
 The other route the issue offered, placement - a literal in a field named
 `password` inside a table that is clearly a fixture - was **not** taken, and the

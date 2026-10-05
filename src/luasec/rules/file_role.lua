@@ -28,21 +28,109 @@ local M = {}
 
 -- Directory names a test suite lives under, matched as whole segments.
 --
--- There is no `t` here, and its absence is measured rather than stylistic. `t`
--- is the OpenResty and Test::Nginx convention, so it looks like it belongs; and
--- a whole-segment match on it demotes every finding in every temporary file on
--- macOS, where `$TMPDIR` is `/var/folders/<a>/<b>/T/` and the directory the
--- system hands you for scratch space is named `T`. A security rule cannot lower
--- severity on a directory name the operating system chose, and the corpus says
--- what the entry costs: the five `.lua` files under the OpenResty `t/`
--- directories are library helpers with no credential-shaped literal in any of
--- them, so on this corpus `t` buys nothing and hides a real credential class.
--- A project that wants it can say so in the source, with
--- `-- luasec: ignore 747`, which is a decision recorded where the file is.
+-- `t` is here, and it is here because `t/` is how OpenResty and Test::Nginx
+-- spell a test suite - a real layout, in wide use, and one this repository's
+-- corpus happens to contain. #290 left it out on a measurement: the five `.lua`
+-- files under the OpenResty `t/` directories in the corpus hold no
+-- credential-shaped literal, so on this corpus the entry buys nothing. That is
+-- corpus-fitting for a rule that ships to scan trees nobody here has cloned, and
+-- it hid a credential class in every other OpenResty checkout.
+--
+-- The macOS scratch directory is a real bug and it is answered below, by
+-- excluding temp roots rather than by deleting a class: what makes
+-- `/var/folders/<a>/<b>/T/` dangerous is that the OPERATING SYSTEM named it,
+-- not that it is one letter long.
 local TEST_DIRECTORIES = {
    test = true, tests = true,
    spec = true, specs = true,
+   t = true,
 }
+
+-- Absolute prefixes of the directories an operating system hands a process for
+-- scratch space. Nothing under one of these is a test suite, however its
+-- directories are named, and the answer is `false` for the WHOLE vocabulary -
+-- `tests/` and `test_login_spec.lua` included - because a directory the system
+-- picked is not a place a project's test suite was laid out.
+--
+-- macOS is the case this exists for: `$TMPDIR` there is
+-- `/var/folders/<a>/<b>/T/`, so a whole-segment match on `t` would lower the
+-- severity of every finding in every scratch file this tool is pointed at,
+-- including a firmware image a CI job unpacked. `/private/` is listed beside
+-- each root because `/var` and `/tmp` are symlinks to it on macOS and a
+-- resolved path can be spelled either way.
+local TEMP_ROOTS = {
+   "/var/folders/", "/private/var/folders/",
+   "/tmp/", "/private/tmp/",
+}
+
+-- The directory the process was started in, or nil when it cannot be read.
+--
+-- `$TMPDIR` is honoured separately below; this is about a RELATIVE path, which
+-- has to be resolved against something before an absolute prefix can mean
+-- anything. `PWD` is what the shell maintains and what `make` passes down, and
+-- the `os.rename` is the guard against a stale one: renaming a directory onto
+-- itself succeeds only when the directory is really there. Read once per
+-- process, because it cannot change while the tool runs.
+local working_directory
+local function cwd()
+   if working_directory ~= nil then return working_directory end
+   working_directory = false
+   local candidate = os.getenv("PWD")
+   if type(candidate) == "string" and candidate:find("/", 1, true) == 1 then
+      if os.rename(candidate, candidate) then working_directory = candidate end
+   end
+   return working_directory or nil
+end
+
+-- The path as one absolute, normalised string: separators unified, `.` and `..`
+-- folded away, and a relative path joined onto the working directory.
+--
+-- The folding is not tidiness. `/tmp/../etc/t/x.lua` is a file in `/etc` and
+-- has to be read as one, or a prefix match on `/tmp/` is something a caller
+-- walks around by typing one `..`.
+local function absolute(path)
+   local unified = path:gsub("\\", "/")
+   local was_absolute = unified:find("/", 1, true) == 1
+   if not was_absolute then
+      local base = cwd()
+      if not base then return unified end
+      unified = base .. "/" .. unified
+   end
+   local parts = {}
+   for segment in unified:gmatch("[^/]+") do
+      if segment == ".." then
+         if #parts > 0 then table.remove(parts) end
+      elseif segment ~= "." then
+         parts[#parts + 1] = segment
+      end
+   end
+   return (was_absolute and "/" or "") .. table.concat(parts, "/")
+end
+
+--- Is `path` under a temporary root the operating system chose?
+--
+-- Lower case throughout: the filesystem is case-insensitive on the platform
+-- whose scratch directory this is, so `/TMP/x` and `/tmp/x` are one directory
+-- and only one of them is spelled here.
+local function in_a_temp_root(path)
+   local resolved = absolute(path):lower()
+   for _, root in ipairs(TEMP_ROOTS) do
+      if resolved:sub(1, #root) == root then return true end
+   end
+   -- `$TMPDIR` when the caller set it, which is the one root this process
+   -- cannot know in advance: `mktemp -d` honours it and nothing here can ask
+   -- where the result went. It goes through the same resolution as the path,
+   -- because a caller that sets it relative gets a relative directory back out
+   -- of `mktemp` and would otherwise slip past an absolute prefix.
+   -- Compared with a trailing separator, so a `$TMPDIR` of `/build` does not
+   -- swallow `/builder/`.
+   local tmpdir = os.getenv("TMPDIR")
+   if type(tmpdir) == "string" and tmpdir ~= "" then
+      local root = absolute(tmpdir):lower():gsub("/+$", "") .. "/"
+      if resolved:sub(1, #root) == root then return true end
+   end
+   return false
+end
 
 -- A file whose own name says it is a test. Matched on the stem, so
 -- `telnet_login_test.lua`, `test_telnet_login.lua` and `telnet_login_spec.lua`
@@ -106,8 +194,12 @@ end
 -- False for nil, for an empty path and for anything that is not a string: an
 -- answer of `true` here lowers a finding, and a caller that passes something
 -- this cannot read has not said the file is a test.
+--
+-- A temporary root answers `false` before the vocabulary is consulted at all,
+-- and it is the reason `t` can be in that vocabulary.
 function M.is_test(path)
    if type(path) ~= "string" or path == "" then return false end
+   if in_a_temp_root(path) then return false end
    return in_a_test_directory(path) or named_as_a_test(path)
 end
 

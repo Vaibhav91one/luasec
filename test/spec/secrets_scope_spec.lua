@@ -47,17 +47,43 @@ local function drop(dir)
    os.execute("rm -rf " .. string.format("%q", dir))
 end
 
---- Write `source` at `<tmp>/<relative>` and analyze it as that path.
+--- Write `source` at `<tree>/<relative>` and analyze it as that path.
 --
 -- `relative` carries the directory names, because the directory names are what
 -- is under test. `mkdir -p` so the caller can ask for `tests/`, `spec/` and
 -- `t/` without building the tree itself.
-local function analyze_at(source, relative)
-   local dir = scratch_dir("secrets_scope")
-   local path = dir .. "/" .. relative
+local function plant(tree, source, relative)
+   local path = tree .. "/" .. relative
    local parent = path:match("^(.*)/[^/]+$")
    if parent then os.execute("mkdir -p " .. string.format("%q", parent)) end
    write(path, source)
+   return path
+end
+
+-- A source tree, which is NOT `harness.scratch_dir`.
+--
+-- That helper hands out `$TMPDIR/luasec_...`, which on macOS is under
+-- `/var/folders/<a>/<b>/T/` - the very directory the rule under test excludes.
+-- Building the tree in the repository's own (gitignored) build directory keeps
+-- it on the other side of that distinction, which is the whole of what these
+-- specs are about: `t/` in a source tree is a test suite, `t/` in a scratch
+-- directory is a directory the operating system named.
+local SOURCE_TREE = "build/spec-scope"
+
+local function analyze_at(source, relative)
+   local path = plant(SOURCE_TREE, source, relative)
+   local report = api.analyze({path})
+   drop(SOURCE_TREE)
+   return report
+end
+
+-- The same file, built under a scratch directory. Which directory that is
+-- depends on the host: `$TMPDIR` when it is set (`/var/folders/<a>/<b>/T/` on
+-- macOS) and `/tmp` otherwise. Both are the temporary roots the rule excludes,
+-- which is what makes this the control for `analyze_at`.
+local function analyze_in_scratch(source, relative)
+   local dir = scratch_dir("secrets_scope")
+   local path = plant(dir, source, relative)
    local report = api.analyze({path})
    drop(dir)
    return report
@@ -120,19 +146,65 @@ describe("a credential in a test file", function()
       end
    end)
 
-   it("is not what a one-letter directory is taken to mean", function()
-      -- `t/` is the OpenResty and Test::Nginx convention, so it is the obvious
-      -- fifth entry, and it is not in the vocabulary. macOS hands every process
-      -- a scratch directory at `/var/folders/<a>/<b>/T/`, so a whole-segment
-      -- match on `t` lowers the severity of every finding in every temporary
-      -- file this tool is pointed at - including a firmware image a CI job
-      -- unpacked. The corpus is what the entry would have bought: the five
-      -- `.lua` files under the OpenResty `t/` directories hold no
-      -- credential-shaped literal, so here it hides a credential class and
-      -- buys nothing.
+   it("is what a one-letter directory in a source tree is taken to mean", function()
+      -- `t/` is the OpenResty and Test::Nginx convention, it is a real and
+      -- common layout, and it is in this vocabulary because of that.
+      --
+      -- #290 left it out on a measurement - the five `.lua` files under the
+      -- OpenResty `t/` directories in the corpus hold no credential-shaped
+      -- literal, so on this corpus the entry buys nothing - and that is
+      -- corpus-fitting for a rule that ships to scan trees nobody here has
+      -- cloned. What it also did was hide a real credential class in every
+      -- other OpenResty checkout. The macOS scratch directory is a genuine
+      -- bug and it is answered by excluding temp roots, which is the spec
+      -- two below.
       local report = analyze_at(SHIPPED_PASSWORD, "t/telnet_login.lua")
-      assert_equal(severity_of(report), "high",
-         "a one-character directory is not evidence of a test suite")
+      assert_equal(severity_of(report), "low",
+         "`t/` is how OpenResty and Test::Nginx spell a test suite")
+   end)
+
+   it("is not a test directory anywhere under a scratch root, whatever it is called", function()
+      -- The other side of the same distinction. `$TMPDIR` on macOS is
+      -- `/var/folders/<a>/<b>/T/`, so the operating system names a directory
+      -- `T` and a one-letter vocabulary entry would lower the severity of
+      -- every finding in every scratch file this tool is pointed at -
+      -- including a firmware image a CI job unpacked.
+      --
+      -- The exclusion is about the ROOT, not about the one-letter name, so
+      -- the ordinary spellings are in here too: a fix that excluded only
+      -- `t/` would pass the first case and leave the rest of the hole.
+      for _, relative in ipairs{ "whatever/t/telnet_login.lua",
+                                 "whatever/tests/telnet_login.lua",
+                                 "app/test_telnet_login_spec.lua" } do
+         local report = analyze_in_scratch(SHIPPED_PASSWORD, relative)
+         assert_equal(severity_of(report), "high",
+            relative .. " is under a temporary root, which is not a source tree")
+      end
+   end)
+
+   it("follows $TMPDIR when it is set somewhere the rule cannot know", function()
+      -- `$TMPDIR` names a directory the operating system chose, and the
+      -- caller may have set it to anything. It is honoured rather than
+      -- assumed, and the control is the same file read with the ambient
+      -- `$TMPDIR`: the only thing that changed is the variable.
+      local dir = "build/spec-scope-tmpdir"
+      drop(dir)
+      local path = plant(dir, SHIPPED_PASSWORD, "pkg/t/telnet_login.lua")
+
+      local function severity_with(env)
+         local out = harness.cli({"--format", "json", path},
+            env and {env = "TMPDIR=" .. string.format("%q", dir)} or nil)
+         local findings = out:match('"code"%s*:%s*"747"[^}]*"severity"%s*:%s*"(%a+)"')
+         assert_true(findings ~= nil, "luasec reported no 747 at all for " .. path)
+         return findings
+      end
+
+      assert_equal(severity_with(), "low",
+         "with the ambient $TMPDIR this is an ordinary `t/` in an ordinary tree")
+      assert_equal(severity_with(true), "high",
+         "the same file is scratch space once $TMPDIR says so")
+
+      drop(dir)
    end)
 
    it("does not depend on a name that merely contains one", function()
@@ -258,6 +330,56 @@ describe("the anonymous-FTP login identity", function()
       local report = analyze_at(ANONYMOUS_FTP, "src/ftp.lua")
       assert_true(with_code(report, "747")[1] ~= nil,
          "the finding survives at low, so nothing is quietly swallowed")
+   end)
+
+   it("does not demote a chosen password that happens to be somebody's address", function()
+      -- This is the half of the shape with no bound on it, and it is the half
+      -- that must not be left as a shape. `admin`, `svc-deploy` and `jenkins`
+      -- are three accounts on three real systems, and the next one is nobody's
+      -- to enumerate; a rule that demotes `admin@` moves the finding in the
+      -- one direction this change may not move.
+      --
+      -- The assertion is that nothing here is at `low`, rather than that
+      -- something here is at `high`. `admin@example.com` carries `example` and
+      -- is already excluded by the placeholder vocabulary before this rule is
+      -- reached, and the spec that says a missing finding is right belongs to
+      -- that rule rather than to this one.
+      for _, value in ipairs{ "admin@example.com", "admin@acme-internal.net",
+                              "svc-deploy@staging.acme.com", "jenkins@build.corp.net" } do
+         local report = analyze_at("local account_password = " .. string.format("%q", value)
+            .. "\nreturn account_password\n", "src/account_login.lua")
+         for _, finding in ipairs(with_code(report, "747")) do
+            assert_true(finding.severity ~= "low",
+               value .. " is a password somebody chose, wearing an address's shape")
+         end
+      end
+   end)
+
+   it("does not demote a password named in a table field either", function()
+      -- The corpus shape: a password a deployment put in a configuration
+      -- table, in a file that ships. It is still the field, and still the
+      -- registered severity.
+      local report = analyze_at([[
+local account = {
+   login = "svc-deploy",
+   password = "svc-deploy@staging.acme.com",
+}
+return account
+]], "src/site_config.lua")
+      assert_equal(severity_of(report), "high",
+         "an address a deployment put in a password field is still a credential")
+   end)
+
+   it("still demotes an FTP identity whose local part is the protocol's own name", function()
+      -- The half that stays a shape is the DOMAIN - every client picks a
+      -- different one - while the local part is the finite set of account
+      -- names an anonymous login actually uses. A fix that stopped demoting
+      -- `ftp@` altogether would have thrown out the half of the problem that
+      -- is real, and this is the spec that notices.
+      local report = analyze_at("local PASSWORD = " .. string.format("%q", "ftp@ftp.acme-internal.net")
+         .. "\nreturn PASSWORD\n", "src/ftp_client.lua")
+      assert_equal(severity_of(report), "low",
+         "`ftp@` is an account an anonymous login uses, whatever domain follows it")
    end)
 
    it("does not reach a password whose domain is not one", function()
