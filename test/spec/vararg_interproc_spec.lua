@@ -151,8 +151,21 @@ local function entry_point()
 end
 entry_point()
 ]], REQUEST)
-      assert_equal(codes(report), "701",
-         "the sink reads a clean formal, so it stays the shape-only 701")
+      -- Asserted on 709 alone, not on the whole code list. The point of this
+      -- spec is that binding a vararg taints the vararg and nothing else, and a
+      -- 708 alongside it says nothing either way about that.
+      --
+      -- It appeared here in #281 and is not a regression: 708 is withheld only
+      -- for a function this file calls with an argument it cannot fold to a
+      -- constant, and `g("clean", untrusted)` is two constants. That tightening
+      -- is deliberate -- a resolved call to an *exported* handler is no evidence
+      -- that nothing outside the file calls it -- and it reaches local functions
+      -- too. That 708 fires on a local function at all is older than this PR:
+      -- a local that is never called reports 708 on `main` as well. Whether 708
+      -- belongs on a function no other file can reach is its own question and is
+      -- left where it is.
+      assert_equal(of(report, "709") == nil, true,
+         "the sink reads a clean formal, so it stays the shape-only 701; got " .. codes(report))
    end)
 
    it("reports nothing for a callee that never reads its vararg", function()

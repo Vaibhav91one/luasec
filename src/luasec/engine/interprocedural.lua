@@ -144,11 +144,33 @@ function interprocedural.exposed_sinks(chstate, opts)
    local state = taint_engine.new_state()
    local exposed = {}
 
-   -- Functions this file calls are not exposures: whatever feeds them is here,
-   -- and if it is untrusted the flow is already reported as 709.
+   -- A function this file calls with data we can trace is not an exposure:
+   -- whatever feeds it is here, and if it is untrusted the flow is already
+   -- reported as 709.
+   --
+   -- *With data we can trace* is the whole condition, and dropping it is a hole
+   -- rather than a strictness. A resolved call proves only that the file can
+   -- reach the function -- not that anything outside the file cannot. For an
+   -- exported handler the two are unrelated, because the entry point is
+   -- registered by name and called from another file entirely:
+   --
+   --     function handler(cmd) os.execute(cmd) end   -- exported: entry({...}, handler)
+   --     function boot() handler("cleanup") end       -- in-file, a literal
+   --
+   -- Counting that call as "fed" withdraws the 708 and adds no 709, because
+   -- "cleanup" is a constant. The net is silence on an attacker-reachable
+   -- execution sink, from a line of code that looks like it reduces noise. So a
+   -- call only counts here when it passes an argument this file cannot fold to a
+   -- constant, which is the same test `is_constant` is given below when it
+   -- decides whether a sink argument is genuinely unaccounted for.
    local called = {}
    for _, site in ipairs(callgraph.call_sites(chstate)) do
-      called[site.callee] = true
+      for _, arg in ipairs(site.args) do
+         if not taint_engine.is_constant(arg) then
+            called[site.callee] = true
+            break
+         end
+      end
    end
 
    for _, line in ipairs(chstate.lines) do

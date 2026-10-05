@@ -197,11 +197,17 @@ end
       -- The shadowing case, and the reason the global lookup is keyed on an
       -- unshadowed Id rather than on the name alone. Inside this scope `execute`
       -- is a local, so the local's body is the callee and the global one is not.
+      --
+      -- The global's body passes `cmd` straight to the sink. A name-matching
+      -- bug would bind `untrusted` to that `cmd` and report 709; the correct
+      -- implementation binds it to the local, which discards it, and reports
+      -- nothing. With a global body that dropped the argument instead this spec
+      -- would pass under the bug too, and pin nothing.
       local api = require "luasec.api"
       local report = api.check_source([[
 local untrusted = "request"
 function execute(cmd)
-   os.execute("not the sink")
+   os.execute(cmd)
 end
 local function outer()
    local function execute(cmd)
@@ -224,5 +230,48 @@ local result = uci_get(untrusted)
 ]], REQUEST)
       assert_equal(count_of(report, "709"), 0,
          "an undeclared global callee has no body here to bind into")
+   end)
+end)
+
+
+describe("an exported handler the file also calls with a constant", function()
+   it("still reports the sink as exposed", function()
+      -- The hole this closes, and it is worse than a missed finding. A resolved
+      -- call is not evidence that a function is fed: an exported handler's real
+      -- callers are in another file, because LuCI registers it by name and
+      -- dispatches to it from the dispatcher. Here the file calls `handler` with
+      -- a literal, which proves nothing about the path an attacker would take.
+      --
+      -- Under the loosened rule the in-file call made 708 stand down and 709
+      -- never stood up -- "cleanup" is a constant -- so the tool went quiet on a
+      -- reachable os.execute. Both halves are asserted, because either alone is
+      -- a pass: 708 is the finding, and its absence is the bug.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+function handler(cmd)
+   os.execute(cmd)
+end
+function boot()
+   handler("cleanup")
+end
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 1,
+         "a constant-only in-file call does not make an exported sink unexposed")
+   end)
+
+   it("stands down once a call supplies data it cannot fold", function()
+      -- The other half, so the rule above cannot be satisfied by never
+      -- withholding. A call with a non-constant argument means the feed is
+      -- visible here, which is the case 708 was written not to double-report.
+      local api = require "luasec.api"
+      local report = api.check_source([[
+local name = os.getenv("CMD")
+function handler(cmd)
+   os.execute(cmd)
+end
+handler(name)
+]], {std = "+luci"})
+      assert_equal(count_of(report, "708"), 0,
+         "a traced in-file call means the feed is visible here")
    end)
 end)
