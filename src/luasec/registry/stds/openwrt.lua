@@ -80,29 +80,38 @@ return {
       -- exece and nothing else. test/spec/registry_export_spec.lua now derives
       -- the exported names from the corpus's C sources and fails on any
       -- declaration that is not one of them, so neither spelling can return.
-      -- luaposix, and the reason these three are not declared the way nixio's
-      -- are. `posix.exec` and `posix.spawn` are the same shape of claim:
-      -- `arg = {1}` says the command is the first argument, and #268's audit
-      -- flagged that the shell form of luaposix's exec takes the file third.
-      -- That is shape-based inference, not proof, and it could not be settled
-      -- here: luaposix is not in corpus/. `find corpus -iname "*posix*"`
-      -- returns `tools/include/asm/posix_types.h` and one gnulib patch and no
-      -- binding at all, and no corpus Lua file mentions `posix.`, so there is
-      -- nothing to derive the signature from.
-      --
-      -- test/spec/registry_export_spec.lua buckets a declaration it cannot
-      -- check rather than passing over it, and these three are in that bucket:
-      -- every run of `make test` prints `posix.exec posix.exec.* posix.spawn`
-      -- by name under "the corpus cannot speak for, so they were NOT checked",
-      -- alongside the other 72. That is the honest state -- unchecked, not
-      -- checked-and-fine -- and it is the reason this comment exists.
-      --
-      -- They are left as they are rather than changed on a guess. Reading
-      -- luaposix's posix/exec.c is the only thing that settles it, and that is
-      -- a fetch this repo does not do. Tracked as #278.
-      {pattern = "posix.exec", code = "701", kind = "exec", arg = {1}},
-      {pattern = "posix.exec.*", code = "701", kind = "exec", arg = {1}},
+      -- luaposix v36.3 (github.com/luaposix/luaposix, tag v36.3 = e6b94b37c19c4bd19a7dc475a4f4cb56f61f5da9),
+      -- read from the source, not inferred; luaposix is not in corpus/. There is no shell form
+      -- anywhere in it: `exec` is execv and `execp` is execvp (ext/posix/unistd.c:289-356,
+      -- runexec), so this is argv execution like nixio's, not `sh -c`.
+      --   posix.unistd.exec(path, argt) / .execp(path, argt)    unistd.c:337,354 -- the program
+      --       is argument 1; argt (argument 2) is a TABLE of argv strings
+      --   posix.exec(path, ...) / posix.execp(path, ...)        lib/posix/deprecated.lua:295-350,
+      --       653,663 -- the program is argument 1; the argv is argument 2 as a table OR the
+      --       remaining arguments as strings, so `posix.exec("/bin/sh", "-c", cmd)` has the
+      --       command at argument 3 and `posix.exec("/bin/sh", {"-c", cmd})` inside argument 2
+      --   posix.execx(task, ...), posix.spawn(task, ...), posix.popen(task, mode)
+      --       lib/posix/init.lua:117-123,236-244,337,375,397 -- `task` is argument 1, either a
+      --       Lua function (not a command) or a table {program, arg, ...} handed to execp
+      --   posix.popen_pipeline(tasks, mode)                      lib/posix/init.lua:215-225,384 --
+      --       argument 1 is a table of such tasks, each ending in execp
+      -- Declared on the nixio.exec model, with one difference: nixio's argument 2 is always a
+      -- string flag, while luaposix's is an argv table or a string, so it is a sink here. The
+      -- program and the positions that carry the `sh -c` command are sinks; a constant
+      -- `--label` stays quiet, and strings from argument 4 on (`exec(p, '-l', '-a', x)`) are
+      -- not covered. A tainted
+      -- element of a task or argv table is reached through the table (the engine follows it).
+      -- `posix.exec.*`, declared before this, matched nothing: `exec` is a function, not a
+      -- namespace, and a `posix.spawn` that is not a task call does not exist either.
+      -- test/spec/luaposix_spec.lua pins the signatures above and every `posix.` declaration.
+      {pattern = "posix.exec", code = "701", kind = "exec", arg = {1, 2, 3}},
+      {pattern = "posix.execp", code = "701", kind = "exec", arg = {1, 2, 3}},
+      {pattern = "posix.unistd.exec", code = "701", kind = "exec", arg = {1, 2}},
+      {pattern = "posix.unistd.execp", code = "701", kind = "exec", arg = {1, 2}},
+      {pattern = "posix.execx", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},
+      {pattern = "posix.popen", code = "701", kind = "exec", arg = {1}},
+      {pattern = "posix.popen_pipeline", code = "701", kind = "exec", arg = {1}},
       {pattern = "luci.sys.call", code = "701", kind = "exec", arg = {1}},
       {pattern = "uci.set", code = "722", kind = "config", arg = {4}},
       {pattern = "uci.add", code = "722", kind = "config", arg = {4}},
