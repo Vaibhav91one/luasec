@@ -30,8 +30,10 @@ return {
    sinks = {
       {pattern = "ngx.exec", code = "701", kind = "exec", arg = {1}},
       {pattern = "ngx.pty.spawn", code = "701", kind = "exec", arg = {1}},
-      {pattern = "ngx.re.find", code = "728", kind = "pattern", arg = {2}},
-      {pattern = "ngx.re.gsub", code = "728", kind = "pattern", arg = {2}},
+      -- ngx.re.find and ngx.re.gsub are deliberately NOT declared here: a tainted pattern is
+      -- already 728 from the firmware rule (rules/firmware.lua PATTERN_APIS), and declaring
+      -- them as taint sinks added a 709 "command execution" (certain) for an API that executes
+      -- nothing (#310).
       -- CVE-2020-36309 (lua-nginx-module < 0.10.16): the API allows unsafe
       -- characters in an argument used to mutate a URI or a request or response
       -- header. Which message the bytes land in is what differs:

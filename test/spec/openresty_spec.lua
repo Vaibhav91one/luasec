@@ -179,4 +179,19 @@ describe("openresty profile", function()
          .. " findings, " .. #found .. " of them 730")
       assert_equal(found[1].source, "ngx.req.get_uri_arg")
    end)
+   it("reports a request parameter used as the pattern of ngx.re.find or ngx.re.gsub as 728 and nothing else (#310)", function()
+      -- ngx.re.* executes nothing: the engine's default 709 'command execution' (certain) used to
+      -- ride along with the 728 because the std also declared these as taint sinks.
+      for _, call in ipairs({
+         'ngx.re.find(ngx.var.uri, pattern, "jo")',
+         'ngx.re.gsub(ngx.var.uri, pattern, "x", "jo")',
+      }) do
+         local report = api.check_source("local pattern = ngx.req.get_uri_args().q\n" .. call .. "\n",
+            {std = "openresty"})
+         local codes = {}
+         for _, finding in ipairs(report) do codes[#codes + 1] = finding.code end
+         table.sort(codes)
+         assert_equal(table.concat(codes, ","), "728", call .. " reported " .. table.concat(codes, ","))
+      end
+   end)
 end)
