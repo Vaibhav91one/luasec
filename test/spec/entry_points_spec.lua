@@ -128,3 +128,46 @@ describe("entry points", function()
       assert_match(tostring(err2), "arg")
    end)
 end)
+
+-- The luci std's `*/controller/*.lua` is matched on the path's text, so the path is normalised
+-- first: a `..` that leads out of a controller directory no longer counts as being in one, and one
+-- that leads into it does (#248). `*` still crosses `/`, so nested controllers match.
+describe("entry point file globs and the path they see (#248)", function()
+   local GLOB_RULES = [[return {name = "x", entry_points = {{pattern = "*", file = "*/controller/*.lua", arg = {1}}}}]]
+   local SOURCE = "function setThing(obj)\n   os.execute(\"x \" .. obj.name)\nend\n"
+
+   local function is_709(relative)
+      local dir = harness.scratch_dir("entry_glob")
+      for _, sub in ipairs({"controller", "controller/admin", "other", "usr/lib/lua/luci/controller"}) do
+         os.execute(("mkdir -p %q"):format(dir .. "/" .. sub))
+      end
+      for _, file in ipairs({"controller/x.lua", "controller/admin/x.lua", "other/x.lua", "usr/lib/lua/luci/controller/x.lua"}) do
+         local handle = assert(io.open(dir .. "/" .. file, "w"))
+         handle:write(SOURCE)
+         handle:close()
+      end
+      local path = dir .. "/" .. relative
+      local report = api.analyze({path}, {rules = {write_tmp(GLOB_RULES)}})
+      os.execute(("rm -rf %q"):format(dir))
+      for _, finding in ipairs(report) do
+         if finding.code == "709" then return true end
+      end
+      return false
+   end
+
+   it("still matches a real controller path", function()
+      assert_true(is_709("usr/lib/lua/luci/controller/x.lua"), "a normal controller must stay a 709")
+   end)
+
+   it("still matches a nested controller, since * crosses /", function()
+      assert_true(is_709("controller/admin/x.lua"), "a nested controller must stay a 709")
+   end)
+
+   it("does not match a path that only contains /controller/ before a .. out of it", function()
+      assert_true(not is_709("controller/../other/x.lua"), "controller/../other/x.lua resolves outside a controller")
+   end)
+
+   it("matches a path that reaches a controller through ..", function()
+      assert_true(is_709("other/../controller/x.lua"), "other/../controller/x.lua resolves into a controller")
+   end)
+end)
