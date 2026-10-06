@@ -1,9 +1,9 @@
 rockspec_format = "3.0"
 package = "luasec-scanner"
-version = "0.4.0-1"
+version = "0.5.0-1"
 source = {
-   url = "https://github.com/Vaibhav91one/luasec/releases/download/v0.4.0/luasec-0.4.0.tar.gz",
-   dir = "luasec-0.4.0",
+   url = "https://github.com/Vaibhav91one/luasec/releases/download/v0.5.0/luasec-0.5.0.tar.gz",
+   dir = "luasec-0.5.0",
 }
 description = {
    summary = "Static security scanner for Lua in embedded firmware: finds remote code execution.",
