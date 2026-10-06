@@ -115,7 +115,8 @@ no call to any of them. `lua-resty-jwt` is crypto and encoding, where a false
 positive costs most, and it is the entry that most earned its place.
 
 **What the next person to extend this corpus should add is a deployed nginx
-configuration, not another library.** Nothing in this queue yet measures an
+configuration, not another library. (An authored one now exists, and says what it does not stand in
+for: see "An authored nginx.conf" below.)** Nothing in this queue yet measures an
 actual request handler reaching an OpenResty sink, and that is still the gap: a
 `server {}` / `location {}` block whose `content_by_lua_block` reads
 `ngx.var`, `ngx.req.get_uri_args()` or `ngx.req.get_headers()` and reaches
@@ -173,6 +174,53 @@ removed those two findings by relocating the git directories outside the corpus,
 and that was reverted on purpose — it hides the evidence, fixes nothing, and a
 corpus quietly shaped to stop tripping a defect makes that defect harder to find
 next time.
+
+### An authored nginx.conf (#296), and what it stands in for
+
+`test/fixtures/openresty-authored/nginx.conf` is **written by the maintainers**, not taken from a
+deployment: fifteen `location` blocks whose `content_by_lua_block` bodies are typical request
+handlers, each with the author's intent on its first line (`-- expect: 730`, or `-- expect: none`
+for a handler that is safe). `test/spec/openresty_authored_spec.lua` extracts every block, scans it
+with `--std openresty`, and compares what luasec reports with that intent.
+
+**What it stands in for:** the deployed `server {}` / `location {}` request handler that no upstream
+repository ships and that this queue has none of. **What it does not stand in for:** real-world
+recall or precision. The author wrote both the handlers and the intent, so it shows whether a known
+idiom is handled, never how often real deployments differ from the author's imagination. It sits
+outside `corpus/`, outside the golden and outside the 611 / 706 above; none of those moved.
+
+Authored OpenResty handlers: 8 reported as intended, 4 silent as intended, 1 missed, 2 reported although safe (15 handlers).
+
+| handler | intent | luasec reports | verdict |
+|---|---|---|---|
+| `/go` (`ngx.redirect` of a query parameter) | 730 | 730 certain | as intended |
+| `/forward-host` (`ngx.req.set_header` from a request header) | 730 | 730 certain | as intended |
+| `/cache-key` (`ngx.header[...] = ngx.var.uri`) | 730 | 730 medium | as intended |
+| `/handoff` (`ngx.exec` of a query parameter) | 709 | 709 medium | as intended |
+| `/ping` (`os.execute` with `ngx.var.arg_host`) | 709 | 709 medium | as intended |
+| `/dns` (`io.popen` with a query parameter) | 709 | 709 certain | as intended |
+| `/run` (`os.execute` of a JSON body field) | 709 | 709 high | as intended |
+| `/find` (a query parameter as the `ngx.re.find` pattern) | 728 | 728 high | as intended |
+| `/healthz`, `/next` (escaped redirect), `/fallback`, `/served-by` | none | nothing | as intended |
+| `/proxy` (a request value in the URI of `ngx.location.capture`) | 731 | nothing | **missed** |
+| `/ping-checked` (host validated with `string.match`, then `os.execute`) | none | 709 medium | **reported although safe** |
+| `/kill` (`tonumber` and `%d`, then `os.execute`) | none | 701 low | **reported although safe** |
+
+Why the three that differ, each pinned in the spec so it cannot change unnoticed:
+
+- `/proxy` is a miss by design, not by accident: the registry models only the options table of
+  `ngx.location.capture` (the CVE-2020-11724 request-framing defect), so a tainted subrequest
+  URI in argument 1 is not a sink.
+- `/ping-checked` is reported because luasec has no notion of a validating guard.
+- `/kill` is a low-confidence 701 shape finding: a non-constant argument to `os.execute`, whatever
+  made it safe.
+
+Building this found a defect that is now fixed: a tainted `ngx.re.find` or `ngx.re.gsub` pattern was
+reported as 728 **and** as a 709 "command execution" at certain confidence, for an API that executes
+nothing (#310).
+
+What is still not measured: extracting handler bodies from real `.conf` files rather than from one
+authored for the purpose, and any handler the author did not think of.
 
 ## Result
 
