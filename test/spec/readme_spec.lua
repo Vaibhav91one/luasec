@@ -377,4 +377,17 @@ describe("the README", function()
             "the README does not mention " .. phrase)
       end
    end)
+
+   -- #294: the collapsed OpenResty paragraph carried a present-tense per-code count ("gave it 15")
+   -- that nothing gated. It is written as history instead, which needs no gate, and the live figure
+   -- is pointed at docs/precision.md, where the claim grammar of precision_spec does gate it.
+   it("states the OpenResty 747 count as history and points at docs/precision.md", function()
+      local text = read("README.md")
+      local paragraph = text:match("On `747`, as history:(.-)\n\n")
+      assert_true(paragraph ~= nil, "the README's 747 paragraph is no longer written as history")
+      assert_true(paragraph:find("#262", 1, true) ~= nil, "the history is not tied to the change that made it (#262)")
+      assert_true(paragraph:find("docs/precision.md", 1, true) ~= nil,
+         "the live per-code figure is not pointed at docs/precision.md")
+      assert_true(paragraph:find("RFC%-mandated") == nil, "the unsupported RFC-mandated claim is back")
+   end)
 end)
