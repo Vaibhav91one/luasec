@@ -45,3 +45,24 @@ describe("rule doc pages", function()
       end
    end)
 end)
+
+describe("708 documented confidence matches what is emitted (#231)", function()
+   it("states in docs/rules/708.md the confidence that every emitted 708 carries", function()
+      local page = read("docs/rules/708.md")
+      assert_true(page, "docs/rules/708.md is missing")
+      local documented = page:match("Confidence: (%a+)")
+      assert_true(documented, "docs/rules/708.md has no 'Confidence: <level>' line")
+      local report = api.check_source(
+         "function h(x)\n  luci.sys.call(\"/bin/foo \" .. x)\nend\nreturn h\n", {std = "luci"})
+      local seen = 0
+      for _, finding in ipairs(report) do
+         if finding.code == "708" then
+            seen = seen + 1
+            assert_true(finding.confidence == documented,
+               "docs/rules/708.md says Confidence: " .. documented .. " but a 708 is emitted at " ..
+               tostring(finding.confidence))
+         end
+      end
+      assert_true(seen > 0, "the reproduction no longer emits a 708, so this spec checks nothing")
+   end)
+end)
