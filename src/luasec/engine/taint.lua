@@ -1120,8 +1120,8 @@ local function check_sink(node, item, state, chstate, opts)
       -- flow unquoted. A partly quoted command is the 712 case and keeps full strength.
       -- Only for an exec sink: quoting protects a shell command line and nothing else, so a
       -- quoted value reaching loadstring (710) or a header is still the same real flow.
-      local wholly_quoted = not any_unquoted(sources)
-      if wholly_quoted and kind == "exec" then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local wholly_quoted = kind == "exec" and not any_unquoted(sources)
+      if wholly_quoted then confidence = CONFIDENCE_DOWN[confidence] or confidence end
       local channels = channels_of(sources)
       local finding = emit(state, taint_spec, node, chstate, {
          name = path,

@@ -82,4 +82,18 @@ end
       end
       assert_equal(has_712, true, "the unquoted part earns its own 712")
    end)
+   it("does not label a non-exec flow as shell-quoted: quoting protects a shell line, nothing else (#303)", function()
+      local report = api.check_source([[
+local function go(host)
+   loadstring(luci.util.shellquote(http.formvalue("host")))()
+end
+]], {std = "luci"})
+      local finding
+      for _, f in ipairs(report) do
+         if f.code == "710" then finding = f end
+      end
+      assert_equal(finding ~= nil, true, "the quoted value reaching loadstring is still reported as 710")
+      assert_equal(finding.confidence, "certain", "no discount for a non-exec sink")
+      assert_equal(finding.sanitizer, nil, "a shell-quoting label on a dyncode sink would be false")
+   end)
 end)
