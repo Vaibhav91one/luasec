@@ -78,6 +78,7 @@ build = {
       ["luasec.rules.codes"] = "src/luasec/rules/codes.lua",
       ["luasec.rules.context"] = "src/luasec/rules/context.lua",
       ["luasec.rules.degraded"] = "src/luasec/rules/degraded.lua",
+      ["luasec.rules.file_role"] = "src/luasec/rules/file_role.lua",
       ["luasec.rules.firmware"] = "src/luasec/rules/firmware.lua",
       ["luasec.rules.payloads"] = "src/luasec/rules/payloads.lua",
       ["luasec.rules.rawscan"] = "src/luasec/rules/rawscan.lua",

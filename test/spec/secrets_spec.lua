@@ -37,11 +37,18 @@ end
 
 describe("hardcoded credentials", function()
    it("reports a password literal bound to a credential-named local as 747, without quoting the value", function()
+      -- The fixture is under test/fixtures/, so the file it lives in is a test
+      -- file and 747 lowers the finding to `low` (#290). Everything this test is
+      -- about - that the literal is found at all, that the name is the binding
+      -- and not the value, that the length and the masked form are what the
+      -- report carries - is unchanged by that, and the severity of a credential
+      -- in code that ships is what test/spec/secrets_scope_spec.lua covers.
       local report = fixture("hardcoded_password")
       local found = with_code(report, "747")
       assert_equal(#found, 1, "expected one 747, got " .. codes(report))
       assert_equal(found[1].name, "telnet_password", "the finding names the binding, not the value")
-      assert_equal(found[1].severity, "high")
+      assert_equal(found[1].severity, "low",
+         "the fixture is a file in a test tree, which is not shipped (#290)")
       assert_equal(found[1].kind, "password")
       assert_equal(found[1].length, 11, "the length is reported instead of the value")
       assert_no_secret(found[1], "s3cr3t-pass")

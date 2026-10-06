@@ -109,6 +109,29 @@ carries a base64 body is the key, and is reported whatever name it is filed
 under, at `high`. When a file holds a marker and a body as separate literals,
 the body is the finding.
 
+**Two contexts lower one finding to `low`, and neither drops it.** A demotion is
+a statement about exposure, not about detection, so everything 747 finds is still
+in the report and `luasec --only 747` still finds it. The first is **a file that
+is part of a test suite** - a path segment named `test`, `tests`, `spec`, `specs`
+or `t`, or a file whose own name begins or ends with one. A credential-shaped
+literal in a test fixture is the fixture: a parser's table of URLs has to carry a
+password containing `#` or the parser is not being tested. Nothing under a
+temporary root (`/var/folders/`, `/private/var/folders/`, `/tmp/`,
+`/private/tmp/`, and `$TMPDIR` when it is set) counts, matched on the resolved
+absolute path, so the scratch directory macOS hands every process
+(`/var/folders/<a>/<b>/T/`) does not demote anything through its own name while
+`t/` stays a real test suite. The second is **the identity an anonymous login
+sends** - a strong `password` name holding an anonymous account name (`anonymous`,
+`anon`, `ftp`, `guest`, `nobody`), an `@`, and then either nothing or a domain
+whose last label is letters. The domain is a shape and not a list, because every
+FTP client picks a different address and none of them is anybody else's to
+enumerate; the account names are a list, because there are a handful of them and
+no more, and `password = "admin@example.com"` is a credential somebody chose.
+**A PEM private key block is never demoted.** Both demotions are about a finding
+whose evidence is a *name*, and in a test suite a credential-named binding is
+exactly what a fixture is; a key block's evidence is the block itself, and a key
+is not a fixture shape.
+
 **What 747 does not report.** A value the program only *compares* against - a
 login check, a credential dictionary it tests input with - is the check, not a
 leak; a credential read out of a configuration file has no literal to report; a

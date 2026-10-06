@@ -13,8 +13,23 @@
 -- how long the value is, and a masked form of it, because a report is read by
 -- people who should not be handed the password by the tool that found it.
 --
+-- 747's registered severity is `high`, and it stays `high` wherever the value
+-- really is a credential somebody chose. Two contexts lower one finding to
+-- `low` and are the only two, because in both of them the value is a
+-- credential-shaped literal that the finding has misread as an exposure:
+--
+--   * the file is part of a test suite (see rules/file_role.lua), and
+--   * the value is the identity an anonymous login sends instead of a
+--     password (see is_login_identity below).
+--
+-- Both lower the severity and neither drops the finding. A demotion is a
+-- statement about exposure, not about detection, and the finding that only
+-- cost a false `high` is not the one this rule may lose.
+--
 -- Code this module owns: 747, 748. See docs/rules.md.
 local M = {}
+
+local file_role = require "luasec.rules.file_role"
 
 local detectors = {}
 
@@ -304,6 +319,55 @@ local function is_a_number(value)
    return value:match("^%d+$") ~= nil
 end
 
+-- The account names an anonymous login sends. This half is a LIST, and the
+-- asymmetry with the half below is the whole argument for it: there are a
+-- handful of account names an anonymous FTP login uses and no more, while
+-- `admin`, `svc-deploy` and `jenkins` are three accounts on three real systems
+-- and the next one is nobody's to enumerate. A shape that accepted any local
+-- part demoted every address-shaped password in the world, which is the one
+-- direction this change may not move - `password = "admin@example.com"` is a
+-- chosen password that happens to look like an address, not an identity a
+-- client chose to send.
+--
+-- `ftp` and `guest` are here because clients really do send them in the PASS
+-- field, and `nobody` because that is what a service account is called when the
+-- login is not a person. The comparison is in lower case, so `FTP@` and
+-- `Anonymous@` are the same claim however they are spelled.
+local LOGIN_LOCAL_PARTS = {
+   anonymous = true, anon = true, ftp = true, guest = true, nobody = true,
+}
+
+-- The identity an anonymous login sends in place of a password.
+--
+-- The convention is that a client logging in as `anonymous` puts an address in
+-- the PASS field, so that an administrator reading the server's log sees who
+-- asked rather than seeing a blank. Every FTP client does it and every one
+-- picks a different address, so the DOMAIN is recognised by shape and not by a
+-- list: a local part from the table above, an `@`, and then either nothing at
+-- all or a domain whose last label is letters.
+--
+-- The domain stays shape-based for the reason the account names do not have to
+-- be. `luasocket` picks `anonymous@anonymous.org`, `curl` picks
+-- `anonymous@`, and what luasocket's own source is doing here is hard-coding one
+-- project's domain - which is exactly what a table of allowed values would have
+-- to carry, and exactly what goes stale the moment the next library is read.
+--
+-- The bounds on the domain are what keep it from eating real passwords. A
+-- dotted domain with a non-alphabetic last label is an IPv4 literal
+-- (`root@10.0.0.5`), and an `@` with anything after it that is not a domain is
+-- a password that happens to contain one (`p@ssw0rd`). Every one of those
+-- bounds makes the rule demote LESS, which is the direction to err in: what is
+-- left behind is a `high` finding, which is the finding this rule would rather
+-- over-report than lose.
+local function is_login_identity(value)
+   local local_part, domain = value:match("^([%w][%w%.%-_]*)@(.*)$")
+   if not local_part then return false end
+   if not LOGIN_LOCAL_PARTS[local_part:lower()] then return false end
+   if domain == "" then return true end
+   if domain:find("[^%w%.%-]") then return false end
+   return domain:match("%.%a[%a]+$") ~= nil
+end
+
 -- A URL is a place a secret can be fetched from, not the secret.
 local function is_a_url(value)
    return value:find("://", 1, true) ~= nil
@@ -457,17 +521,45 @@ end
 
 -- ------------------------------------------------------------ 747
 
+-- The severity 747 reports one literal at, or nil for the registered one.
+--
+-- `in_test` is a fact about the FILE, decided once by the caller, and `kind` is
+-- what this finding's own evidence was: a credential-named binding, or a PEM
+-- block that says what it is whatever name it is filed under. The two are
+-- answered separately on purpose.
+--
+-- A PEM block is never demoted, and the reason is not that keys are common in
+-- a test tree. The demotion below is about a finding whose evidence is a NAME -
+-- and in a test suite a credential-named binding is the fixture, because
+-- testing a credential field is what a fixture with a credential field is for.
+-- A key block's evidence is the block itself, and a key is not a fixture shape:
+-- it is material that authenticates something, people paste real development
+-- keys into test directories, and the cost of reporting one is a line while the
+-- cost of not reporting one is a credential that is in the repository.
+--
+-- The anonymous-login case is answered from the value alone, and only under a
+-- strong PASSWORD name: a `token` that happens to hold an address is a token.
+local function severity_for(value, kind, tier, in_test)
+   if kind == "pem" then return nil end
+   if in_test then return "low" end
+   if tier == "strong" and kind == "password" and is_login_identity(value) then
+      return "low"
+   end
+   return nil
+end
+
 -- Report one secret. `label` is the name the value was bound to; the value
 -- itself never leaves this function. `tier` is how much the name was worth on
 -- its own, and it is what the confidence says: a value under a name that means
 -- credential is evidence in itself, a value under a bare `key` is only evidence
--- if it looks like a secret.
-local function report_secret(ctx, literal, label, kind, tier)
+-- if it looks like a secret. `in_test` is whether the file is a test file.
+local function report_secret(ctx, literal, label, kind, tier, in_test)
    local value = literal[1]
    ctx:emit("747", literal, {
       name = label,
       kind = kind,
       length = #value,
+      severity = severity_for(value, kind, tier, in_test),
       confidence = tier == "weak" and "low" or "high",
       -- A PEM block is redacted by its header: the body is the key.
       redacted = kind == "pem" and pem_mask(value) or mask(value),
@@ -746,6 +838,15 @@ end
 detectors[#detectors + 1] = function(ctx)
    local reported = {}
 
+   -- Whether this file is a test file, asked ONCE per file because it is a fact
+   -- about the file and not about any one literal in it.
+   --
+   -- `file_path` is what `analyze_source` was given the source as, and it is nil
+   -- when there was no file: `check_source` analyses a string. `file_role` reads
+   -- a missing path as "not a test file", which is the answer that keeps the
+   -- finding at its registered severity for a caller who never said otherwise.
+   local in_test = file_role.is_test(ctx.chstate and ctx.chstate.file_path)
+
    -- First pass: what is assigned to each table field. A call can appear
    -- before the assignment that defines it, so this is collected before any
    -- rule asks whether something is a config cursor.
@@ -835,7 +936,7 @@ detectors[#detectors + 1] = function(ctx)
       -- before the name is: the block says what it is.
       if pem_key(value) then
          reported[literal] = true
-         report_secret(ctx, literal, label, "pem")
+         report_secret(ctx, literal, label, "pem", nil, in_test)
          return
       end
       local tier = name_tier(label)
@@ -844,7 +945,7 @@ detectors[#detectors + 1] = function(ctx)
       if not looks_like_secret(value, floor) then return end
       if tier == "weak" and is_weak_value(value) then return end
       reported[literal] = true
-      report_secret(ctx, literal, label, kind_of(label), tier)
+      report_secret(ctx, literal, label, kind_of(label), tier, in_test)
    end
 
    ctx:each_node(function(node)
