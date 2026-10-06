@@ -34,7 +34,6 @@ return {
    },
    sinks = {
       {pattern = "luci.sys.call", code = "701", kind = "exec", arg = {1}},
-      {pattern = "luci.util.uci.*", code = "722", kind = "config", arg = {2, 3, 4}},
       {pattern = "luci.dispatcher.createtree", code = "724", kind = "expose", arg = {}},
    },
    propagators = {

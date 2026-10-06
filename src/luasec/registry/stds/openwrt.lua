@@ -104,7 +104,6 @@ return {
       {pattern = "posix.exec.*", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},
       {pattern = "luci.sys.call", code = "701", kind = "exec", arg = {1}},
-      {pattern = "luci.util.uci.*", code = "722", kind = "config", arg = {2, 3, 4}},
       {pattern = "uci.set", code = "722", kind = "config", arg = {4}},
       {pattern = "uci.add", code = "722", kind = "config", arg = {4}},
       {pattern = "uci.sets", code = "722", kind = "config", arg = {2}},
