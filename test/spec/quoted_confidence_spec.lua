@@ -54,3 +54,32 @@ end
       assert_equal(finding.confidence, "certain", "the unquoted part is still an injection")
    end)
 end)
+
+describe("the quoted discount is only for a shell sink (#287)", function()
+   it("does not downgrade a quoted value that reaches loadstring", function()
+      local report = api.check_source([[
+local function go()
+   loadstring(luci.util.shellquote(luci.http.formvalue("c")))()
+end
+]], {std = "luci"})
+      local found
+      for _, finding in ipairs(report) do
+         if finding.code == "710" then found = finding end
+      end
+      assert_equal(found ~= nil, true, "the code-execution flow must still be reported")
+      assert_equal(found.confidence, "certain", "shell quoting does nothing for code execution")
+   end)
+
+   it("a partly quoted command is also reported as 712", function()
+      local report = api.check_source([[
+local function go(prefix, rest)
+   os.execute(luci.util.shellquote(http.formvalue("prefix")) .. " " .. http.formvalue("rest"))
+end
+]], {std = "luci"})
+      local has_712 = false
+      for _, finding in ipairs(report) do
+         if finding.code == "712" then has_712 = true end
+      end
+      assert_equal(has_712, true, "the unquoted part earns its own 712")
+   end)
+end)

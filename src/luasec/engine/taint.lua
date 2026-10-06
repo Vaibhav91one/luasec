@@ -1100,8 +1100,10 @@ local function check_sink(node, item, state, chstate, opts)
       -- Every tainted part went through a shell-quoting helper: still reported, because quoting
       -- is easy to get wrong and the flow is real, but one confidence step lower than the same
       -- flow unquoted. A partly quoted command is the 712 case and keeps full strength.
+      -- Only for an exec sink: quoting protects a shell command line and nothing else, so a
+      -- quoted value reaching loadstring (710) or a header is still the same real flow.
       local wholly_quoted = not any_unquoted(sources)
-      if wholly_quoted then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      if wholly_quoted and kind == "exec" then confidence = CONFIDENCE_DOWN[confidence] or confidence end
       local channels = channels_of(sources)
       local finding = emit(state, taint_spec, node, chstate, {
          name = path,
