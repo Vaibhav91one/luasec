@@ -332,6 +332,22 @@ return handler
       os.remove(path)
    end)
 
+   it("does not write primaryLocationLineHash: that key is GitHub's own hash of the line (#311)", function()
+      -- luasec wrote "709:os.execute:2" there; GitHub recomputes the key, warns "inconsistent
+      -- fingerprint" on every result of every upload, and ignores ours. luasecFinding is the
+      -- identity a consumer keys on and stays.
+      local path = os.tmpname()
+      local handle = assert(io.open(path, "w"))
+      handle:write('local h = http.formvalue(request, "host")\nos.execute("ping " .. h)\n')
+      handle:close()
+      local doc = decode(harness.cli({"--format", "sarif", path}))
+      os.remove(path)
+      local fingerprints = doc.runs[1].results[1].partialFingerprints
+      assert_equal(fingerprints.primaryLocationLineHash, nil, "GitHub computes this key itself")
+      assert_true(type(fingerprints.luasecFinding) == "string" and #fingerprints.luasecFinding > 0,
+         "the stable finding identity must stay")
+   end)
+
    it("names only rules it declared, so every ruleId resolves", function()
       local doc = report({"--format", "sarif", "test/fixtures", "test/adversarial", "src"})
 

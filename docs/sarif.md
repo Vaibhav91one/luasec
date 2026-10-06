@@ -112,15 +112,17 @@ the sink last. Each step's `region.startLine` is that step's own line, and a
 non-sink step's columns are not the sink's columns - a location that points at
 the wrong text is worse than no location.
 
-**Fingerprints.** `partialFingerprints` carries two keys:
+**Fingerprints.** `partialFingerprints` carries one key:
 
-- `primaryLocationLineHash` — code, name and line. It is the key the SARIF
-  vocabulary suggests, and it moves with the line.
 - `luasecFinding` — code, name and file. **No line number.** This is the finding's
-  identity, and a statement that moved down the file is the same finding. Both
-  are emitted because the standard key cannot be stable under a line move, and a
-  code scanning UI that keys on it would report a known finding as new every time
+  identity, and a statement that moved down the file is the same finding, so a code
+  scanning UI that keys on it does not report a known finding as new every time
   somebody inserts a comment.
+
+`primaryLocationLineHash` is not written. It is GitHub's own hash of the source
+line, GitHub computes it on upload, and an earlier luasec wrote `code:name:line`
+there, which GitHub answered with an "inconsistent fingerprint" warning on every
+result (#311).
 
 **Score and category.** The run carries `properties.score` with the same
 `value`, `label`, `coverage_gaps` and `categories` counts as the JSON document's top-level
