@@ -15,7 +15,6 @@
 --     key is fine; a key present with a null value is not.
 local contract = require "luasec.report.findings"
 local codes = require "luasec.rules.codes"
-local util = require "luasec.util.util"
 local json = require "luasec.report.json"
 local version = require "luasec.version"
 local score = require "luasec.report.score"
@@ -92,13 +91,12 @@ function sarif.render(report, opts)
          ruleId = finding.code,
          level = level_for(finding),
          message = {text = finding.message ~= "" and finding.message or finding.code},
-         -- `primaryLocationLineHash` is a hash of the line, so it moves with the
-         -- line. `luasecFinding` is the finding's identity: code, name and file,
-         -- with no line in it, so a statement that moved is the same finding to
-         -- a code scanning UI. Both are emitted: the first for tools that expect
-         -- a standard key, the second because the standard key cannot be stable.
+         -- `luasecFinding` is the finding's identity: code, name and file, with no line in
+         -- it, so a statement that moved is the same finding to a code scanning UI.
+         -- `primaryLocationLineHash` is deliberately NOT written: it is GitHub's own hash of
+         -- the source line, GitHub computes it, and a value of ours ("709:os.execute:2")
+         -- only produced an "inconsistent fingerprint" warning on every result (#311).
          partialFingerprints = {
-            primaryLocationLineHash = util.fingerprint({finding.code, finding.name, finding.line}),
             luasecFinding = contract.fingerprint(finding),
          },
          properties = {
