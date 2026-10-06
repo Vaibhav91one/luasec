@@ -3,7 +3,8 @@
 --   ext/posix/unistd.c:289-356   runexec: exec = execv, execp = execvp, (path, argt-TABLE); no shell form
 --   lib/posix/deprecated.lua:295-350,653,663   posix.exec/execp(path, ...) : argv is a table OR the
 --        remaining string arguments, so `exec("/bin/sh", "-c", cmd)` has the command at argument 3
---   lib/posix/init.lua:117-123,236-244,337,375,397   execx/spawn(task, ...), popen(task, mode):
+--   lib/posix/init.lua:117-123,215-225,236-244,337,375,384,397   execx/spawn(task, ...), popen(task, mode),
+--        popen_pipeline(tasks, mode):
 --        argument 1 is a function or a table {program, arg, ...} handed to execp
 -- (#297, the luaposix half of #278). `posix.exec.*` was declared before and matched nothing.
 local harness = require "harness"
@@ -47,6 +48,12 @@ describe("luaposix command execution (#297)", function()
       expect_sink('local posix = require "posix"\nposix.spawn({"/bin/sh", "-c", http.formvalue("t")})\n', "posix.spawn")
       expect_sink('local posix = require "posix"\nposix.execx({http.formvalue("t")})\n', "posix.execx")
       expect_sink('local posix = require "posix"\nposix.popen({"/bin/sh", "-c", http.formvalue("t")}, "r")\n', "posix.popen")
+   end)
+
+   it("reports the sh -c command of posix.execp at argument 3 and of posix.popen_pipeline's tasks", function()
+      expect_sink('local posix = require "posix"\nposix.execp("/bin/sh", "-c", http.formvalue("c"))\n', "posix.execp")
+      expect_sink('local posix = require "posix"\nposix.popen_pipeline({{"/bin/sh", "-c", http.formvalue("t")}}, "r")\n',
+         "posix.popen_pipeline")
    end)
 
    it("stays quiet when every argument is a constant", function()

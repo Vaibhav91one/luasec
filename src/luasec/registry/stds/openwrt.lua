@@ -93,8 +93,13 @@ return {
       --   posix.execx(task, ...), posix.spawn(task, ...), posix.popen(task, mode)
       --       lib/posix/init.lua:117-123,236-244,337,375,397 -- `task` is argument 1, either a
       --       Lua function (not a command) or a table {program, arg, ...} handed to execp
-      -- Declared the way nixio.exec is: the program and the positions that carry the `sh -c`
-      -- command are sinks, so a constant `--label` in another position stays quiet. A tainted
+      --   posix.popen_pipeline(tasks, mode)                      lib/posix/init.lua:215-225,384 --
+      --       argument 1 is a table of such tasks, each ending in execp
+      -- Declared on the nixio.exec model, with one difference: nixio's argument 2 is always a
+      -- string flag, while luaposix's is an argv table or a string, so it is a sink here. The
+      -- program and the positions that carry the `sh -c` command are sinks; a constant
+      -- `--label` stays quiet, and strings from argument 4 on (`exec(p, '-l', '-a', x)`) are
+      -- not covered. A tainted
       -- element of a task or argv table is reached through the table (the engine follows it).
       -- `posix.exec.*`, declared before this, matched nothing: `exec` is a function, not a
       -- namespace, and a `posix.spawn` that is not a task call does not exist either.
@@ -106,6 +111,7 @@ return {
       {pattern = "posix.execx", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.spawn", code = "701", kind = "exec", arg = {1}},
       {pattern = "posix.popen", code = "701", kind = "exec", arg = {1}},
+      {pattern = "posix.popen_pipeline", code = "701", kind = "exec", arg = {1}},
       {pattern = "luci.sys.call", code = "701", kind = "exec", arg = {1}},
       {pattern = "uci.set", code = "722", kind = "config", arg = {4}},
       {pattern = "uci.add", code = "722", kind = "config", arg = {4}},
