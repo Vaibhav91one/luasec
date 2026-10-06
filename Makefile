@@ -177,8 +177,15 @@ precision: lua vendor
 	fi; \
 	$(LUA_RUN) scripts/precision-check.lua --corpus corpus --report $(PRECISION_REPORT)
 
+.PHONY: ci-verify-complete
+ci-verify-complete:
+	@if [ ! -d corpus ]; then \
+	  echo "ci-verify: INCOMPLETE - precision was skipped (corpus/ absent); this is not a pass"; \
+	  exit 1; \
+	fi
+
 .PHONY: ci-verify
-ci-verify: vendor-verify runner-selftest self-lint test adversarial precision
+ci-verify: vendor-verify runner-selftest self-lint test adversarial precision ci-verify-complete
 	@echo "ci-verify: PASS"
 
 # Accept the two positional shas of `make tdd-proof BASE HEAD` as goals. Make
