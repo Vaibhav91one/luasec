@@ -14,7 +14,6 @@ local profiles = require "luasec.registry.profiles"
 --   nixio.execp, nixio.exece   not declared at all (0 findings, 100/100)
 --   nixio.process.execute      declared; nixio exports no such function
 --   nixio.process.exec         declared; `nixio.process` is not a module
---   luci.util.uci.*            declared; not exported by any LuCI in the corpus
 --
 -- So this spec reads the implementations out of corpus/ and asserts that every
 -- name the registry declares is one the code actually exports.
@@ -56,11 +55,6 @@ local LUA_STANDARD = {
 -- that matter are new declarations, and known-bad ones are visible rather than
 -- silently tolerated.
 local KNOWN_NOT_EXPORTED = {
-   ["luci.util.uci.*"] =
-      "dead in both LuCI trees in corpus/, which reach config through " ..
-      "luci.model.uci; it was an alias in LuCI <= 17.01. Declared in " ..
-      "openwrt.lua and luci.lua, and removing a 722 sink from a profile this " ..
-      "issue does not own is a behaviour change of its own. Not #268.",
 }
 
 --------------------------------------------------------------------------------
