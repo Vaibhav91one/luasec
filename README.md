@@ -415,12 +415,14 @@ two of them are Perl and the file walker reads them as Lua (#288) — so read th
 OpenResty rows knowing that. What is still missing from this queue is a deployed
 `nginx.conf` with a `content_by_lua_block`.
 
-On `747`: it used to measure zero here, which is not the rule being blind but this
-corpus containing no credential. That is no longer true — the OpenResty entries
-gave it 15, and all 15 are false: one RFC-mandated anonymous-FTP default and
-fourteen upstream test fixtures asserting how a URL parser handles a `?` and a `#`
-inside a password. The rule has no true positive anywhere in this corpus, which
-makes it fixable against a real measurement instead of against fixtures alone.
+On `747`, as history: it used to measure zero here, which was not the rule being
+blind but this corpus containing no credential. When #262 added the OpenResty
+entries that stopped being true — they gave it 15, and all 15 were false: one
+anonymous-FTP default and fourteen upstream test fixtures asserting how a URL
+parser handles a `?` and a `#` inside a password. At that point the rule had no
+true positive anywhere in this corpus, which made it fixable against a real
+measurement instead of against fixtures alone. The current per-code figure is in
+[docs/precision.md](docs/precision.md), not here.
 
 </details>
 
