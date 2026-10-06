@@ -274,6 +274,11 @@ fixed number of arguments. It is the only way to reach a handler written
 {pattern = "*", file = "*/controller/*.lua", arg = "*"}
 ```
 
+A `file` glob is matched with `*` crossing `/`, so `*/controller/*.lua` means "the
+path contains `/controller/` and ends in `.lua`", nested controllers included. The
+path is normalised first (`.` and `..` segments are folded out textually), so
+`controller/../other/x.lua` is judged by where it resolves, not by the text it contains.
+
 That is what the luci std declares. Without it, `function(...)` and every
 argument past the first were reachable to nobody: a `...` has no parameter
 position to list and the positions past the node name were never declared.

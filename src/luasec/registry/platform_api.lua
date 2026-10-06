@@ -292,6 +292,21 @@ end
 -- the full name and then the short name after the last `.` or `:`. An entry with
 -- a `file` glob applies only to functions in a file whose path matches it, so it
 -- never matches source that has no path (check_source).
+-- Fold `.` and `..` segments out of a path, textually, before a `file` glob sees it. A path
+-- the walker produced has none; one a caller or a test assembled can, and
+-- `controller/../x.lua` must be judged by where it resolves, not by the text it contains.
+local function normalise_path(path)
+   local out = {}
+   for segment in path:gmatch("[^/]+") do
+      if segment == ".." then
+         out[#out] = nil
+      elseif segment ~= "." then
+         out[#out + 1] = segment
+      end
+   end
+   return (path:sub(1, 1) == "/" and "/" or "") .. table.concat(out, "/")
+end
+
 function platform_api.match_entry_point(name, path)
    -- A file-scoped entry whose glob matches is more specific than a global one
    -- and wins: it is how two profiles for the same handler-name convention in
@@ -302,7 +317,7 @@ function platform_api.match_entry_point(name, path)
    for _, entry in ipairs(entry_points) do
       if entry.file == nil then
          global[#global + 1] = entry
-      elseif path and util.wild_match(entry.file, path) then
+      elseif path and util.wild_match(entry.file, normalise_path(path)) then
          scoped[#scoped + 1] = entry
       end
    end
