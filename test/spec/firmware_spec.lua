@@ -22,6 +22,19 @@ local function with_code(report, code)
    return out
 end
 
+describe("722: the dead luci.util.uci.* alias is not a sink (#278)", function()
+   it("reports no configuration write for the LuCI <= 17.01 luci.util.uci.* alias", function()
+      local report = api.check_source([[
+local function go(name, kind)
+   luci.util.uci.set("firewall", "rule", name)
+   luci.util.uci.add("firewall", kind)
+end
+]], {std = "openwrt+luci", report_dynamic_sinks = false})
+      assert_equal(#with_code(report, "722"), 0,
+         "luci.util.uci.* is dead in every LuCI tree the corpus holds; it must not be declared as a 722 sink")
+   end)
+end)
+
 describe("722: configuration injection through uci", function()
    it("reports a config write whose value is computed as 722, naming the config path", function()
       local report = fixture("uci_dynamic_value.lua", {std = "openwrt"})
