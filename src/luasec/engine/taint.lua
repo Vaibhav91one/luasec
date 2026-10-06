@@ -1097,6 +1097,11 @@ local function check_sink(node, item, state, chstate, opts)
          if descriptor.validated_by then guard = descriptor.validated_by break end
       end
       if guard then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      -- Every tainted part went through a shell-quoting helper: still reported, because quoting
+      -- is easy to get wrong and the flow is real, but one confidence step lower than the same
+      -- flow unquoted. A partly quoted command is the 712 case and keeps full strength.
+      local wholly_quoted = not any_unquoted(sources)
+      if wholly_quoted then confidence = CONFIDENCE_DOWN[confidence] or confidence end
       local channels = channels_of(sources)
       local finding = emit(state, taint_spec, node, chstate, {
          name = path,
@@ -1105,7 +1110,7 @@ local function check_sink(node, item, state, chstate, opts)
          sources = sources,
          trace = build_trace(tainted_arg.node, sources),
          snippet = snippet_at(chstate, tainted_arg.node),
-         sanitizer = (not any_unquoted(sources)) and "shell-quoted" or nil,
+         sanitizer = wholly_quoted and "shell-quoted" or nil,
          channels = #channels > 0 and channels or nil,
       })
       if finding and #channels > 0 then
@@ -1124,7 +1129,7 @@ local function check_sink(node, item, state, chstate, opts)
       -- through a quoting helper and some was not. That is where an operator
       -- assumed the command was safe, so it gets its own finding naming the
       -- characters that break out. A wholly unquoted command is already the
-      -- critical 709, and a wholly quoted one is 709 with the flow noted, so
+      -- critical 709, and a wholly quoted one is 709 with the flow noted (one confidence step lower), so
       -- neither needs a second finding.
       if kind == "exec" and any_unquoted(sources) and any_quoted(sources) then
          emit(state, {code = "712", pattern = sink.pattern, name = path}, node, chstate, {
