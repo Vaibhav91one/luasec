@@ -1033,6 +1033,24 @@ end
 -- A sink has two identities: the code for "this argument is dynamic" and the
 -- code for "this argument is dynamic *and* carries untrusted data". Proven
 -- untrusted flow is the finding that matters, so it wins.
+-- The resolver const_eval asks "which definition reaches this use": exactly one, or nil. #229.
+--
+-- Soundness leans on luacheck: a variable that a closure also writes has TWO reaching definitions at
+-- the use (the closure's write is merged in), so `#reaching ~= 1` already refuses it. The specs in
+-- reaching_definitions_spec.lua that use an untracked source pin that behaviour.
+local function reaching_definition(item)
+   if not (item and item.used_values) then return nil end
+   return function(var)
+      local reaching = item.used_values[var]
+      if not reaching or #reaching ~= 1 or not reaching[1].node then return nil end
+      -- Only a variable declared WITH a value: that is the "held something, then was overwritten"
+      -- case. `local X` followed by an assignment keeps its documented conservative answer.
+      local declaration = var.values and var.values[1]
+      if not declaration or declaration.empty then return nil end
+      return reaching[1].node
+   end
+end
+
 local function check_sink(node, item, state, chstate, opts)
    local callee = node[1]
    local path = callee_path(callee, item, state, 0)
@@ -1187,7 +1205,7 @@ local function check_sink(node, item, state, chstate, opts)
 
    for _, index in ipairs(sink.arg or {1}) do
       local arg = args[index]
-      if arg and not const_eval.is_constant(arg) then
+      if arg and not const_eval.is_constant(arg, reaching_definition(item)) then
          emit(state, sink, node, chstate, {name = path, confidence = "low"})
       end
    end

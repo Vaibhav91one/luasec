@@ -33,6 +33,11 @@ local ARITH = {
 
 local fold_local
 
+-- The reaching-definition resolver for the fold in progress, or nil. A fold is synchronous and not
+-- reentrant, so it is held here (and restored by the entry points) instead of being threaded through
+-- every recursive call.
+local active_reaching
+
 local function fold(node, depth, seen)
    depth = depth or 0
    seen = seen or {}
@@ -119,6 +124,18 @@ fold_local = function(node, depth, seen)
    local var = node.var
    if not var or seen[var] then return false, nil end
 
+   -- The definition that reaches THIS use, when the caller can name exactly one: a variable
+   -- overwritten with a constant is that constant at the use, whatever it held before. The caller
+   -- answers nil whenever it cannot be sure (several definitions reach, or one is written from a
+   -- closure), and then the declaration-only rule below applies unchanged.
+   local reaching = active_reaching and active_reaching(var)
+   if reaching then
+      seen[var] = true
+      local ok, value = fold(reaching, depth, seen)
+      seen[var] = nil
+      return ok, value
+   end
+
    local values = var.values
    if not values or #values ~= 1 then return false, nil end
    local definition = values[1]
@@ -170,14 +187,23 @@ local function fold_call(fname, node, depth, seen)
 end
 
 --- Is this expression's value known at parse time?
-function const_eval.is_constant(node)
-   local ok = fold(node, 0)
+--- `reaching(var)` (optional) returns the one definition node that reaches the use, or nil.
+function const_eval.is_constant(node, reaching)
+   local saved = active_reaching
+   active_reaching = reaching
+   local ok_call, ok = pcall(fold, node, 0)
+   active_reaching = saved
+   if not ok_call then error(ok, 0) end
    return ok
 end
 
 --- Returns the folded value, or nil when the expression is not constant.
-function const_eval.value(node)
-   local ok, value = fold(node, 0)
+function const_eval.value(node, reaching)
+   local saved = active_reaching
+   active_reaching = reaching
+   local ok_call, ok, value = pcall(fold, node, 0)
+   active_reaching = saved
+   if not ok_call then error(ok, 0) end
    if not ok then return nil end
    return value
 end
