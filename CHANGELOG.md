@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.5.1 - 2026-10-07
+
+- The `shell-quoted` sanitizer label is only attached to an exec sink. It was set for every wholly-quoted flow while the confidence discount was already exec-only, so a quoted value reaching `loadstring` (710) was labelled `shell-quoted` (#303).
+- luaposix's execution calls are declared from the library's own source (v36.3), not guessed: `posix.exec`, `posix.execp`, `posix.unistd.exec`, `posix.unistd.execp`, `posix.execx`, `posix.spawn`, `posix.popen` and `posix.popen_pipeline`, with the argument positions the source shows (there is no shell form; the deprecated `posix.exec(path, ...)` takes the argv as a table or as strings, so the `sh -c` command is argument 3). `posix.exec.*` matched nothing and is removed (#297, #278).
+- A tainted `ngx.re.find` / `ngx.re.gsub` pattern is reported as 728 only. It was also reported as 709 "command execution" at certain confidence for an API that executes nothing (#310).
+- SARIF no longer writes `partialFingerprints.primaryLocationLineHash`: it is GitHub's own hash of the source line, and the value luasec put there (`709:os.execute:2`) made GitHub log an "inconsistent fingerprint" warning on every result of every upload. `luasecFinding`, the stable identity, is unchanged (#311).
+- An authored OpenResty `nginx.conf` of fifteen request handlers is measured by `test/spec/openresty_authored_spec.lua` (8 reported as intended, 4 silent as intended, 1 missed, 2 reported although safe), and `docs/precision.md` says what it stands in for and what it does not. It is outside `corpus/` and the golden, which did not move (#296, part).
+
 ## 0.5.0 - 2026-10-06
 
 - A wholly shell-quoted command is still reported, one confidence step lower. When every tainted part of an exec-sink argument went through a shell-quoting helper, the 709 now reports at one step below the same flow unquoted (certain to high) with `sanitizer: shell-quoted` kept on the finding and the severity unchanged; a partly quoted command still gets a 712 and keeps full strength. Only exec sinks: quoting does nothing for `loadstring` (710) or a header, so those keep their confidence. `docs/rules/709.md` now says so. Counts do not move (#287, #230).
