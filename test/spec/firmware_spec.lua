@@ -63,8 +63,8 @@ describe("722: configuration injection through uci", function()
       local report = api.check_source([[
 local function go(values, name, kind)
    uci.sets("system", values)
-   luci.util.uci.set("firewall", "rule", name)
-   luci.util.uci.add("firewall", kind)
+   uci.set("firewall", "rule", name, kind)
+   uci.add("firewall", kind)
 end
 ]], {std = "openwrt+luci", report_dynamic_sinks = false})
       local found = with_code(report, "722")
