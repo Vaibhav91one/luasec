@@ -55,6 +55,7 @@ return {
    propagators = {
       {pattern = "luci.util.shellquote", arg = {1}},
       {pattern = "luci.util.trim", arg = {1}},
+      {pattern = "luci.http.urldecode", arg = {1}},
    },
    sanitizers = {
       shell = {"luci.util.shellquote"},

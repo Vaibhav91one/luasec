@@ -95,15 +95,15 @@ return {
    scanned_files = 706,
    total = 610,
    codes = {
-      [701] = 46,
-      [702] = 14,
-      [703] = 20,
+      [701] = 45,
+      [702] = 13,
+      [703] = 19,
       [704] = 21,
       [705] = 22,
       [707] = 346,
       [708] = 21,
-      [709] = 27,
-      [710] = 1,
+      [709] = 29,
+      [710] = 2,
       -- Zero, and recorded for the same reason 741 and 747 are: a code measured
       -- at zero is an assertion that the rule stays quiet here. 711 was six
       -- backtick command literals, all six inside `.t` specs; 902 was six

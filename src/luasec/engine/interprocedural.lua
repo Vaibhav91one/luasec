@@ -76,8 +76,13 @@ local function bind_call(state, chstate, site)
       end
    end
 
+   -- A trailing `...` fills every formal past it (taint.lua's spread_dots does
+   -- the same for a followed return), so `parse_cmdline(...)` feeds both of
+   -- `parse_cmdline(cmdid, args)`'s formals, not only the first.
+   local trailing = arguments[#arguments]
+   if trailing and trailing.tag ~= "Dots" then trailing = nil end
    for index, var in ipairs(vars) do
-      local arg = arguments[index]
+      local arg = arguments[index] or trailing
       if not arg then break end
       bind_into(var, arg)
    end

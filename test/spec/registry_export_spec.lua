@@ -55,6 +55,10 @@ local LUA_STANDARD = {
 -- that matter are new declarations, and known-bad ones are visible rather than
 -- silently tolerated.
 local KNOWN_NOT_EXPORTED = {
+   -- luci/http.lua:264 is `urldecode = util.urldecode`: a name the module
+   -- publishes by assignment, which the export reader does not follow. The call
+   -- spelling `luci.http.urldecode(x)` is real (luci-app-commands uses it).
+   ["luci.http.urldecode"] = "published by alias assignment, not by a function definition",
 }
 
 --------------------------------------------------------------------------------

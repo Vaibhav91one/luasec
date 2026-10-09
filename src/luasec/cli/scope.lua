@@ -9,6 +9,8 @@ local scope = {}
 -- and paths, and each goes through quote() so the shell reads it as one word.
 local function run(command)
    -- luasec: ignore 702  literal git commands; refs are quote()d and a ref that starts with "-" is refused
+   -- luasec: ignore 709  a ref read back from an earlier git call (the "file read" source)
+   -- is quote()d again before it is used in the next one
    local pipe = io.popen(command .. " 2>/dev/null")
    if not pipe then return nil end
    local out = pipe:read("*a")
