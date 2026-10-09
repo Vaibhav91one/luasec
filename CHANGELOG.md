@@ -3,6 +3,12 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+- The luci std declares LuCI CBI request data: the `formvalue` and `formvaluetable` methods on any receiver (`ip:formvalue(section)`), and the `value` argument of `validate` and `write` callbacks in a `model/cbi/` file. A value from them reaching `luci.sys.call` or `os.execute` is a 709, not a 701/708 at low confidence. A method source no longer overrides a declared dotted path (`luci.http.formvalue` keeps its id and `certain`).
+- A trailing `...` in a call now fills every remaining parameter of a local function (`helper(...)` feeds `helper`'s second formal too), so a dispatcher's URL segments forwarded through `...` reach a sink in the helper.
+- Corpus: 611 -> 610 findings; 701 50 -> 46, 708 22 -> 21, 709 23 -> 27. Still 701 on `ddns/detail.lua:439`, `:867`, `:918` (the value goes through `DDNS.parse_url` in another module and a field read) and `commands.lua:163` (the argument is appended to a table with `argv[#argv+1] = v`, which taint does not follow) (#309, part).
+
 ## 0.6.0 - 2026-10-09
 
 Breaking: the JSON report is now the shared `doctor/1` envelope ([docs/doctor-contract.md](docs/doctor-contract.md)), the same contract the other doctor tools write. The old shape is gone, with no legacy flag.

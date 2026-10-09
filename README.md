@@ -380,7 +380,7 @@ image carries beside its `.lua` files:
 
 | | |
 | --- | --- |
-| Findings | **611** across 706 scanned files |
+| Findings | **610** across 706 scanned files |
 | Severity | 24 critical, 523 high, 34 medium, 30 low |
 
 Every per-code count in the table above is in
