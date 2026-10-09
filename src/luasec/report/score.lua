@@ -42,4 +42,11 @@ function score.summarize(list)
    return {score = value, label = label, categories = counts, coverage_gaps = gaps}
 end
 
+--- The doctor/1 score object (docs/doctor-contract.md section 3) for a summary.
+-- The formula is the one above; `model` names it and changes whenever it does.
+function score.envelope(summary)
+   return {value = summary.score, label = summary.label, model = "luasec/1",
+      coverage_gaps = summary.coverage_gaps}
+end
+
 return score

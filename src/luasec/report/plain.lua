@@ -2,6 +2,7 @@
 local contract = require "luasec.report.findings"
 local score = require "luasec.report.score"
 local categories = require "luasec.rules.categories"
+local sanitize = require("luasec.util.util").sanitize
 local plain = {}
 
 local SEVERITY_ORDER = {low = 1, medium = 2, high = 3, critical = 4}
@@ -23,7 +24,7 @@ end
 local function location(finding, opts, memo)
    local file = contract.open_file(finding, memo)
    if not file then return nil end
-   local place = file .. ":" .. tostring(finding.line) .. ":" .. tostring(finding.column)
+   local place = sanitize(file) .. ":" .. tostring(finding.line) .. ":" .. tostring(finding.column)
    if opts.ranges then
       place = place .. "-" .. tostring(finding.end_column)
    end
@@ -55,21 +56,22 @@ function plain.render(report, opts)
    for _, finding in ipairs(report) do
       local place = location(finding, opts, memo)
       local text = place and (place .. ": ") or ""
-      text = text .. string.format("[%s] %s: %s", finding.code, finding.severity, finding.message or "")
+      text = text .. string.format("[%s] %s: %s", sanitize(finding.code),
+         sanitize(finding.severity), sanitize(finding.message or ""))
       if finding.cwe and finding.cwe ~= "CWE-0" then
-         text = text .. " (" .. finding.cwe .. ")"
+         text = text .. " (" .. sanitize(finding.cwe) .. ")"
       end
       if finding.source then
-         text = text .. " [source: " .. finding.source .. "]"
+         text = text .. " [source: " .. sanitize(finding.source) .. "]"
       end
       if finding.sanitizer then
-         text = text .. " [through " .. finding.sanitizer .. "]"
+         text = text .. " [through " .. sanitize(finding.sanitizer) .. "]"
       end
       if finding.exposed_as then
-         text = text .. " [exposed as " .. finding.exposed_as .. "]"
+         text = text .. " [exposed as " .. sanitize(finding.exposed_as) .. "]"
       end
       if finding.snippet then
-         text = text .. "\n    " .. finding.snippet
+         text = text .. "\n    " .. sanitize(finding.snippet)
       end
       buffer[#buffer + 1] = text
    end

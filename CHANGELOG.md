@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.0 - 2026-10-09
+
+Breaking: the JSON report is now the shared `doctor/1` envelope ([docs/doctor-contract.md](docs/doctor-contract.md)), the same contract the other doctor tools write. The old shape is gone, with no legacy flag.
+
+- `--json` (alias of `--format json`) prints `{schema: "doctor/1", tool, version, exit_code, score, findings, data}`. Per finding: `code` is `id`; `file`/`line`/`column` are `location`; `snippet` is `evidence`; new `fingerprint` (16 hex), `category` and `remedy` (the rule page's "How to fix", or `null`); `cwe`, `name`, `sink`, `source`, `end_column`, `trace` and the rest stay as extra keys. `luasecVersion` is `version`, `reportVersion` and the per-category counts moved under `data`. Findings are ordered by severity, then id, then fingerprint (#316).
+- `score` is `{value, label, model: "luasec/1", coverage_gaps}`; the formula is unchanged. SARIF `properties.score` has the same shape, and `action.yml` still reads `.value`.
+- `--baseline` takes a `doctor/1` envelope and matches by `fingerprint`; a baseline from 0.5.x is refused with exit 2. `--json --baseline` lists every finding with `baseline_state` `new` or `unchanged` and adds `baseline: {new, unchanged, fixed}`; fixed findings are counted there, not listed. A new finding now takes precedence over a coverage gap (exit 3, not 1).
+- SARIF: `partialFingerprints.luasecFinding` is now `partialFingerprints["doctorFinding/v1"]` with the 16-hex fingerprint, `--sarif FILE` writes SARIF beside any other output, and `critical`/`high` are always `error` (a low-confidence one used to be a `warning`).
+- `--fail-on info` is accepted (below every severity luasec emits, so it fails on any finding).
+- New `luasec mcp`: an MCP server on stdio with one tool, `scan`, that returns the `--json` envelope byte for byte. Which flags it leaves out is in the README.
+- Human renderers (plain, the doctor view, `--summary`, `why`, the validator report) escape C0/C1 controls, bidi controls, zero-width characters and line separators in text taken from the scanned file, through one helper, `util.sanitize`. A scanned file could put an ESC sequence into a finding message and have it reach the terminal.
+- `json.encode(value, false)` no longer collapses runs of whitespace inside strings.
+- #316 ("no CLI scanner and no structured output") was filed when luasec was a library only; `bin/luasec` and `--format json` already existed. What it asked for that applies is the stable structured format and documented exit codes, which this release makes a shared contract.
+
 ## 0.5.1 - 2026-10-07
 
 - The `shell-quoted` sanitizer label is only attached to an exec sink. It was set for every wholly-quoted flow while the confidence discount was already exec-only, so a quoted value reaching `loadstring` (710) was labelled `shell-quoted` (#303).

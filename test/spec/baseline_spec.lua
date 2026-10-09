@@ -54,7 +54,8 @@ describe("--baseline", function()
 
       local out, code = harness.cli({"--format", "json", "--baseline", tmp .. ".json", tmp})
       assert_equal(code, 0, "no new finding, so the gate passes: " .. out)
-      assert_no_match(out, "709", "a finding already in the baseline is not new: " .. out)
+      assert_match(out, '"baseline_state": "unchanged"', "a finding already in the baseline is unchanged: " .. out)
+      assert_match(out, '"new": 0', "and nothing is new: " .. out)
 
       os.remove(tmp .. ".json")
       remove()
@@ -83,8 +84,8 @@ describe("--baseline", function()
       write(FIXED)
       local out, code = harness.cli({"--format", "json", "--baseline", tmp .. ".json", tmp})
       assert_equal(code, 0, "a fixed finding is not a new one, so the gate passes: " .. out)
-      assert_match(out, '"fixed"', "the finding must be reported as fixed: " .. out)
-      assert_match(out, "709", out)
+      assert_match(out, '"fixed": 1', "the finding must be counted as fixed: " .. out)
+      assert_match(out, '"findings": %[%]', "and is no longer listed: " .. out)
 
       os.remove(tmp .. ".json")
       remove()
@@ -97,7 +98,8 @@ describe("--baseline", function()
       write("-- a comment inserted above the function\n" .. VULNERABLE)
       local out, code = harness.cli({"--format", "json", "--baseline", tmp .. ".json", tmp})
       assert_equal(code, 0, "a moved statement is the same finding, so nothing is new: " .. out)
-      assert_no_match(out, '"new"', "the moved finding was reported as new: " .. out)
+      assert_match(out, '"new": 0', "the moved finding was reported as new: " .. out)
+      assert_match(out, '"unchanged": 1', "it is the same finding: " .. out)
 
       os.remove(tmp .. ".json")
       remove()
@@ -187,9 +189,7 @@ return handler
    it("reads back a report this tool wrote, so a baseline can be regenerated", function()
       -- The chain a CI job actually runs: record a plain report, compare against
       -- it, and the plain report of a later run replaces it. The baseline is a
-      -- plain `--format json` report, not the output of a baseline run: a
-      -- baseline run reports only what changed, so feeding its output back in
-      -- would forget everything it did not report. Verified by feeding the
+      -- plain `--format json` report. Verified by feeding the
       -- written file back in, not by reading its bytes: a file this tool cannot
       -- use as a baseline is not a baseline, whatever it looks like.
       write(VULNERABLE)

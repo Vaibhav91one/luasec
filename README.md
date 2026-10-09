@@ -50,7 +50,7 @@ luasec fix --print rootfs/
 ### 1. Install
 
 Four ways to get it. The npm, LuaRocks and Homebrew packages are published
-from the v0.5.1 release.
+from the v0.6.0 release.
 
 ```sh
 npx luasec <path>
@@ -280,7 +280,7 @@ It also reports the 0-100 health score as the `score` output.
 present. `--baseline` reports only what is new since a stored JSON report:
 
 ```sh
-bin/luasec --format json -o baseline.json test/fixtures/tainted_exec/
+bin/luasec --json -o baseline.json test/fixtures/tainted_exec/
 bin/luasec --baseline baseline.json test/fixtures/tainted_exec/
 ```
 
@@ -512,6 +512,31 @@ it is `pcall`, not a trust decision.
 
 </details>
 
+## Machine output and MCP
+
+`luasec --json <path>` prints one `doctor/1` envelope (the contract shared by the
+doctor tools, [docs/doctor-contract.md](docs/doctor-contract.md)): `schema`, `tool`,
+`version`, `exit_code`, `score`, `findings` and a free-form `data`. Each finding has
+`id`, a 16-hex `fingerprint` (a hash of rule, name and file, no line number),
+`severity`, `confidence`, `category`, `message`, `location`, `evidence` and `remedy`.
+`--sarif FILE` writes SARIF 2.1.0 beside any other output, and `--baseline FILE`
+takes a previous `--json` envelope. Field by field: [docs/sarif.md](docs/sarif.md).
+
+**Score, model `luasec/1`.** 100 minus, for each finding, its severity weight
+(critical 25, high 10, medium 4, low 1) times its confidence (certain or high 1,
+medium 0.6, low 0.3), rounded down and floored at 0. Labels: `good` at 90 and above,
+`needs work` at 60 and above, else `critical`; `incomplete` replaces `good` when a
+coverage gap (901-904 and the other "not analyzed" codes) was found.
+
+`luasec mcp` serves MCP over stdio with one tool, `scan`. It runs `luasec --json`
+as a child process and returns the envelope unchanged, byte for byte. Arguments:
+`path` (string or list), `baseline`, `fail_on`, `sarif`, `std`, `min_confidence`,
+`severity_threshold`, `whole_program`. Not offered over MCP: `--help`, `--version`,
+`--stdin`, `--validate`, `--format`, `-o`, `--view`, `--summary`, `--score`, the
+interactive, progress and colour flags, the config and rule-file flags, `--only`,
+`--ignore`, `--enable`, `--category`, the scope flags, `--jobs` and `--max-nodes`.
+A run that exits `2` comes back as a tool error carrying the message.
+
 ## Exit codes
 
 | | |
@@ -519,7 +544,8 @@ it is `pcall`, not a trust decision.
 | `0` | clean |
 | `1` | findings at or above the threshold, **or** ground not covered |
 | `2` | error — bad flag, unreadable rules file, unreadable path |
-| `3` | new findings since a `--baseline` |
+| `3` | new findings since a `--baseline` (takes precedence over `1`) |
+| `130` | interrupted |
 
 `2` is deliberately distinct from `1`. A typo in a flag is a configuration
 error and must not be reported to a CI as a security finding.
@@ -605,6 +631,7 @@ Scan is the default: `bin/luasec <file|directory>...` scans and reports.
 | `fix [--agent claude\|codex\|cursor] [--safe] [--print] <path>...` | hand the findings to an AI agent |
 | `install [--dir <project>] [claude] [cursor] [agents]` | write agent guidance into a project |
 | `install --hook [--dir <project>]` | write a pre-commit hook that scans staged files |
+| `mcp` | serve the `scan` tool over MCP on stdio (see Machine output and MCP) |
 | `ci install [--dir <project>] [--force]` | write a GitHub workflow that runs the luasec action |
 
 The most used flags:
@@ -624,8 +651,10 @@ The most used flags:
 | `--staged` | scan only files staged in git (for a pre-commit hook) |
 | `--std <names>` | platform API sets, `+` separated, e.g. `+openwrt+luci` |
 | `--only, --ignore <patterns>` | report only, or suppress, matching codes |
-| `--fail-on <severity>` | exit `1` at or above this severity |
-| `--baseline <file.json>` | report only what is new since that report |
+| `--json` | the machine-readable `doctor/1` envelope (same as `--format json`) |
+| `--sarif <file>` | also write SARIF 2.1.0 to this file |
+| `--fail-on <severity>` | exit `1` at or above this severity (`info`, `low`, `medium`, `high`, `critical`) |
+| `--baseline <file.json>` | report only what is new since that `--json` envelope |
 | `--severity-threshold, --min-confidence` | floor for reported severity, confidence |
 | `--whole-program` | follow `require` edges across files |
 | `--jobs <n>` | analyze files in n worker processes (same report; `--whole-program` stays in one) |

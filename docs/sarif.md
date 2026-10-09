@@ -8,69 +8,78 @@ is or in what order it appears.
 | Flag | For | Notes |
 | --- | --- | --- |
 | `--format plain` | a terminal | the default |
-| `--format json` | scripts, CI, a baseline | the stable machine contract |
-| `--format sarif` | a code scanning UI | SARIF 2.1.0, taint findings carry a `codeFlows` thread flow |
+| `--json` (`--format json`) | scripts, CI, a baseline | the `doctor/1` envelope, [docs/doctor-contract.md](doctor-contract.md) |
+| `--format sarif`, or `--sarif FILE` beside any other output | a code scanning UI | SARIF 2.1.0, taint findings carry a `codeFlows` thread flow |
 | `--format html` | a person, offline | one file, no external references |
 
 ## The finding contract
 
-One finding, in every format, has these fields and no others. A field that is
-not on this list is not part of the contract and may change without notice.
+`--json` writes the shared `doctor/1` envelope, specified in
+[docs/doctor-contract.md](doctor-contract.md) and identical across the doctor
+tools: `schema`, `tool`, `version`, `exit_code`, `score`, `findings`, `data`, and
+`baseline` under `--baseline`. A field outside the contract may change without
+notice, and a consumer must ignore keys it does not know.
+
+One luasec finding in the envelope:
 
 | Field | Type | Always present | Meaning |
 | --- | --- | --- | --- |
-| `code` | string | yes | the three-digit rule id |
+| `id` | string | yes | the three-digit rule id (was `code`) |
+| `fingerprint` | string | yes | 16 lowercase hex characters, see below |
 | `severity` | string | yes | `critical`, `high`, `medium`, `low` |
 | `confidence` | string | yes | `certain`, `high`, `medium`, `low` |
-| `cwe` | string | yes | e.g. `CWE-78`; `CWE-0` when no CWE applies |
+| `category` | string | yes | `exec`, `firmware`, `payload`, `artifact`, `meta` |
 | `message` | string | yes | the human sentence, with `{name}` filled in |
-| `name` | string | yes | what was reported, e.g. `os.execute` |
-| `sink` | string | yes | the sink path; `""` when the finding is not a flow |
-| `source` | string | yes | the untrusted input; `""` when the finding is not a flow |
-| `file` | string | yes | the analyzed path |
-| `line` | number | yes | 1-based |
-| `column` | number | yes | 1-based |
-| `end_column` | number | yes | one past the last column |
-| `trace` | array | no | the source-to-sink path; absent when there is none |
-| `status` | string | no | `new` or `fixed`; only ever present under `--baseline` |
+| `location` | object | yes | `{kind, ref, line, column}`; `kind` is `file`, or `none` when `ref` is a directory nothing can open |
+| `remedy` | string or null | yes | the first paragraph of the rule page's "How to fix" section; `null` when the page is not installed |
+| `evidence` | array | no | `[{"ref": "snippet", "value": ...}]` when the finding has a snippet |
+| `baseline_state` | string | with `--baseline` | `new` or `unchanged` |
+| `cwe`, `name`, `sink`, `source`, `end_column` | | yes | luasec extras: `""` rather than `null` when empty; `end_column` is one past the last column |
+| `trace`, `sanitizer`, `guarded_by`, `channels`, `exposed_as` | | no | luasec extras, present when they apply; `trace` is omitted when there is no proven flow |
 
-Two rules make the JSON stable enough to diff and to key on:
+What moved from the 0.5 document: `luasecVersion` is `version`, `reportVersion` is
+`data.report_version`, `score.categories` is `data.categories`, `code` is `id`,
+`file`/`line`/`column` are `location`, `snippet` is `evidence`, `status` is
+`baseline_state` (and `fixed` findings are counted in `baseline.fixed`, not
+listed). There is no legacy flag.
 
-- **Every string field is always present, and is `""` rather than `null` when the
-  finding has nothing to say there.** A consumer never has to ask whether a key
-  is missing or merely empty, and a serializer never has to invent a `null`.
-- **`trace` is the one key that is omitted when the finding has no flow.** An
-  empty array and an absent key mean different things: a finding with no proven
-  path has no trace, and writing `[]` would suggest the analysis looked and found
-  an empty flow.
+**The fingerprint** is the 64-bit FNV-1a hash of `code:name:file`, written as 16
+lowercase hex characters. The line is not in it. It is the same value as SARIF
+`partialFingerprints["doctorFinding/v1"]`.
+
+Rules that make the JSON stable enough to diff and to key on:
+
+- **Every string extra is always present, and is `""` rather than `null` when the
+  finding has nothing to say there.** `remedy` is the one `null`, as the contract
+  requires.
+- **`trace` is omitted when the finding has no flow.** An empty array and an
+  absent key mean different things: a finding with no proven path has no trace.
 
 And one rule makes a report readable rather than merely well shaped:
 
-- **No two findings in a report are identical in `file`, `code`, `line`,
-  `column`, `message` and `source`.** The same sentence about the same place is
-  one finding however many times an engine observed it, and the report says it
-  once. It holds for every producer - `check_source`, `analyze`, `--jobs`,
-  stdin, a baseline - because it is applied where the list is projected rather
-  than in any one rule. It does *not* merge findings that differ in anything
-  else: two exposures of one exported function naming different sinks, two taint
-  findings at one sink from two sources, and the same code on two lines are all
-  still separate rows. A field the contract gains later is not silently merged
-  away, because the merge happens after projection rather than before.
+- **No two findings in a report are identical in file, code, line, column,
+  message and source.** The same sentence about the same place is one finding
+  however many times an engine observed it, and the report says it once. It holds
+  for every producer - `check_source`, `analyze`, `--jobs`, stdin, a baseline -
+  because it is applied where the list is projected rather than in any one rule.
+  It does *not* merge findings that differ in anything else: two exposures of one
+  exported function naming different sinks, two taint findings at one sink from
+  two sources, and the same code on two lines are all still separate rows.
 
-A trace step is `{kind, line, name}`, where `kind` is `source`, `sink`, or a
+A trace step is `{kind, line, name, file}`, where `kind` is `source`, `sink`, or a
 propagation step. The order is **source first, sink last**, and that order is
 guaranteed by the contract rather than by whatever order an engine happened to
 produce them in.
 
-The JSON document carries a top-level `score` object beside `findings`, with
-`value`, `label` (`good`, `incomplete`, `needs work`, `critical`),
-`coverage_gaps` and per-category `categories`
-counts. It is computed from the findings, so the finding shape itself is unchanged.
-The score is 100 minus, for each finding, its severity weight (critical 25,
-high 10, medium 4, low 1) times its confidence (certain or high 1, medium 0.6,
-low 0.3), rounded down and floored at 0. A coverage gap (any 901, 902, 904,
-801, 803, 805 or 012 finding) turns "good" into "incomplete"; the number
-itself does not change. A gap the baseline marked fixed is not counted.
+The envelope's `score` is `{value, label, model, coverage_gaps}` with `model`
+`"luasec/1"`; the per-category counts are in `data.categories`. It is computed
+from the findings, so the finding shape itself is unchanged. The `luasec/1`
+formula: the score is 100 minus, for each finding, its severity weight (critical
+25, high 10, medium 4, low 1) times its confidence (certain or high 1, medium 0.6,
+low 0.3), rounded down and floored at 0. Labels: `good` at 90 and above, `needs
+work` at 60 and above, else `critical`. A coverage gap (any 901, 902, 904, 801,
+803, 805 or 012 finding) turns "good" into "incomplete"; the number itself does
+not change. A gap the baseline marked fixed is not counted.
 
 ## Determinism
 
@@ -80,13 +89,14 @@ on. Two things make it true:
 
 - **Key order is fixed.** Object keys are emitted in sorted order by
   `report/json.lua`, never in `pairs()` order, which is unspecified.
-- **Finding order is a total order:** `(file, line, column, code, name,
-  message)`, with a leading `status` when a baseline run is marking findings. So
+- **Finding order is a total order:** in the envelope `(severity, id, fingerprint,
+  file, line, column, message)`, severity critical first, as the contract says; in
+  `plain`, `sarif` and `html` `(file, line, column, code, name, message)`. So
   `--jobs 1`, `--jobs 8` and a different order of paths on the command line all
   produce the same bytes. Nothing in the report depends on the order the analyzer
   happened to visit files in.
 
-`plain`, `sarif` and `html` inherit the same order.
+`plain`, `sarif` and `html` share the second order.
 
 ### Strings round-trip
 
@@ -114,8 +124,8 @@ the wrong text is worse than no location.
 
 **Fingerprints.** `partialFingerprints` carries one key:
 
-- `luasecFinding` — code, name and file. **No line number.** This is the finding's
-  identity, and a statement that moved down the file is the same finding, so a code
+- `doctorFinding/v1` — the finding's fingerprint, a hash of code, name and file.
+  **No line number.** This is the finding's identity, and a statement that moved down the file is the same finding, so a code
   scanning UI that keys on it does not report a known finding as new every time
   somebody inserts a comment.
 
@@ -124,9 +134,11 @@ line, GitHub computes it on upload, and an earlier luasec wrote `code:name:line`
 there, which GitHub answered with an "inconsistent fingerprint" warning on every
 result (#311).
 
-**Score and category.** The run carries `properties.score` with the same
-`value`, `label`, `coverage_gaps` and `categories` counts as the JSON document's top-level
-`score`, and each result carries `properties.category` with the finding's
+**Level.** `critical` and `high` are `error`, `medium` is `warning`, `low` is
+`note`, whatever the confidence.
+
+**Score and category.** The run carries `properties.score`, the same object as the envelope's `score`
+(`value`, `label`, `model`, `coverage_gaps`), and each result carries `properties.category` with the finding's
 category id. The plain Score line names the count (", 1 coverage gap").
 
 ### Validation
@@ -154,12 +166,13 @@ reading of SARIF would allow:
 ## Baseline mode
 
 ```sh
-luasec --format json -o baseline.json src/          # record
+luasec --json -o baseline.json src/                 # record
 luasec --baseline baseline.json src/                # what is new since then
-luasec --baseline baseline.json -o baseline.json src/   # accept the fixes
+luasec --json --baseline baseline.json -o baseline.json src/   # accept the fixes
 ```
 
-The unit of comparison is a finding's **fingerprint**: `code`, `name` and `file`.
+The baseline is a previous `--json` envelope, matched by `fingerprint` only
+(a hash of `code`, `name` and `file`); an old 0.5 report is refused with exit 2.
 There is deliberately no line number. A baseline keyed on line numbers reports
 every finding as new the moment somebody inserts a comment above it, and a gate
 that cries wolf is a gate people turn off.
@@ -169,8 +182,8 @@ A finding is one of three things:
 | | In the baseline | In this run | Reported | Fails the build |
 | --- | --- | --- | --- | --- |
 | **new** | no | yes | yes | yes, if at or above `--fail-on` |
-| **known** | yes | yes | no | no |
-| **fixed** | yes | no | yes, as `status: "fixed"` | no |
+| **unchanged** | yes | yes | no in plain; yes in `--json` as `unchanged` | no |
+| **fixed** | yes | no | yes in plain/html/SARIF; in `--json` only counted in `baseline.fixed` | no |
 
 Only `new` findings fail a build. A fixed finding is reported because "the thing
 you were tracking is no longer there" is worth knowing, and it never costs
@@ -188,7 +201,8 @@ has to be looked at.
 | --- | --- |
 | 0 | clean, or nothing new under a baseline |
 | 1 | findings at or above `--fail-on`, no baseline in play |
-| 2 | error: unreadable input, or a baseline that is not a luasec report |
+| 2 | error: unreadable input, or a baseline that is not a `doctor/1` envelope |
+| 130 | interrupted |
 | 3 | `--baseline` only: at least one **new** finding at or above `--fail-on` |
 
 A separate code rather than reusing 1 is what lets a build script say "fail only
@@ -196,10 +210,12 @@ if something is new" without parsing the report. A baseline that cannot be read
 or is not a luasec report exits **2**, not 0: a mistyped path must stop the run,
 not silently turn the gate off.
 
-The baseline is a plain `--format json` report. It is *not* the output of a
-baseline run: a baseline run reports only what changed, so feeding its own output
-back in would forget everything it did not report. Regenerate it with a plain
-run.
+Under `--json --baseline` the envelope lists the whole run: every finding with
+`baseline_state` `new` or `unchanged`, plus `baseline: {new, unchanged, fixed}`.
+So its own output is a valid next baseline, and the `score` is the score of the
+whole tree. The other formats keep listing only what changed. A new finding takes
+precedence over a coverage gap in the exit code (3 over 1); a run with a coverage
+gap and nothing new still exits 1, because a baseline never suppresses a gap.
 
 ## HTML report
 

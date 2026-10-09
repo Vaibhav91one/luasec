@@ -14,12 +14,7 @@ local validate_report = {}
 -- Untrusted text, rendered so it cannot be mistaken for the tool's own. Control
 -- bytes become escapes: a payload cannot move the cursor, clear a line, or put a
 -- newline into a line the report is counting.
-local function payload_text(value)
-   return (tostring(value):gsub("[%c]", function(char)
-      if char == "\t" then return "\\t" end
-      return string.format("\\x%02x", char:byte())
-   end))
-end
+local payload_text = require("luasec.util.util").sanitize
 
 local function payload_block(label, value)
    local lines = {"  " .. label}

@@ -125,4 +125,29 @@ function util.fingerprint(parts)
    return table.concat(cleaned, ":")
 end
 
+-- Untrusted text bound for a terminal, Markdown, HTML or an LLM prompt (doctor/1
+-- contract section 8). C0 controls and DEL become \xNN (tab \t), and the
+-- invisible code points that can reorder or hide text become \u{XXXX}: C1
+-- controls, zero-width characters (U+200B-200D, U+FEFF), the line and paragraph
+-- separators (U+2028, U+2029) and the bidi controls (U+202A-202E, U+2066-2069).
+-- One helper, used by every human renderer; JSON and SARIF leave escaping to the
+-- serializer.
+local INVISIBLE = {
+   "\xC2[\x80-\x9F]", "\xE2\x80[\x8B-\x8D]", "\xE2\x80[\xA8-\xAE]",
+   "\xE2\x81[\xA6-\xA9]", "\xEF\xBB\xBF",
+}
+
+function util.sanitize(value)
+   local text = tostring(value):gsub("%c", function(char)
+      if char == "\t" then return "\\t" end
+      return string.format("\\x%02x", char:byte())
+   end)
+   for _, pattern in ipairs(INVISIBLE) do
+      text = text:gsub(pattern, function(sequence)
+         return string.format("\\u{%04X}", utf8.codepoint(sequence))
+      end)
+   end
+   return text
+end
+
 return util

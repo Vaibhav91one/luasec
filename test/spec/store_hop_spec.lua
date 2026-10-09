@@ -124,7 +124,7 @@ describe("store hop (729)", function()
          .. "test/fixtures/store_hop/writer.lua test/fixtures/store_hop/reader.lua 2>/dev/null"))
       local out = pipe:read("*a")
       pipe:close()
-      assert_match(out, '"code": ?"729"')
+      assert_match(out, '"id": ?"729"')
    end)
 
    it("rejects a store declaration with a position that is not a number, or a write of two shapes", function()

@@ -22,12 +22,10 @@ local categories = require "luasec.rules.categories"
 
 local sarif = {}
 
-local SARIF_LEVEL = {critical = "error", high = "error", medium = "warning", low = "note"}
+local SARIF_LEVEL = {critical = "error", high = "error", medium = "warning", low = "note", info = "note"}
 
+-- The doctor/1 mapping, with no confidence adjustment: critical and high are errors.
 local function level_for(finding)
-   if finding.confidence == "low" then
-      if finding.severity == "critical" or finding.severity == "high" then return "warning" end
-   end
    return SARIF_LEVEL[finding.severity] or "note"
 end
 
@@ -91,13 +89,14 @@ function sarif.render(report, opts)
          ruleId = finding.code,
          level = level_for(finding),
          message = {text = finding.message ~= "" and finding.message or finding.code},
-         -- `luasecFinding` is the finding's identity: code, name and file, with no line in
-         -- it, so a statement that moved is the same finding to a code scanning UI.
+         -- `doctorFinding/v1` is the finding's fingerprint (doctor/1 contract): a hash of
+         -- code, name and file, with no line in it, so a statement that moved is the same
+         -- finding to a code scanning UI.
          -- `primaryLocationLineHash` is deliberately NOT written: it is GitHub's own hash of
          -- the source line, GitHub computes it, and a value of ours ("709:os.execute:2")
          -- only produced an "inconsistent fingerprint" warning on every result (#311).
          partialFingerprints = {
-            luasecFinding = contract.fingerprint(finding),
+            ["doctorFinding/v1"] = contract.fingerprint(finding),
          },
          properties = {
             severity = finding.severity,
@@ -121,7 +120,7 @@ function sarif.render(report, opts)
          -- The schema's own vocabulary for this: a result the baseline did not
          -- have is "new", one the baseline had and the run no longer has is
          -- "absent", which a code scanning UI shows as resolved.
-         result.baselineState = finding.status == "fixed" and "absent" or "new"
+         result.baselineState = finding.status == "fixed" and "absent" or finding.status
       end
 
       if uri and finding.trace and #finding.trace > 0 then
@@ -158,7 +157,7 @@ function sarif.render(report, opts)
             rules = sarif.rules_table(),
          }},
          results = results,
-         properties = {score = {value = s.score, label = s.label, coverage_gaps = s.coverage_gaps, categories = s.categories}},
+         properties = {score = score.envelope(s)},
       }},
    })
 end

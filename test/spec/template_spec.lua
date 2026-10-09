@@ -132,7 +132,7 @@ describe("template pages", function()
       write(dir .. "/same.html", '<html>\n<?lua\nlocal h = http.formvalue("h")\nos.execute("ping " .. h)\n?>\n</html>\n')
       local _, write_code = harness.cli({"--format", "json", "-o", dir .. "/base.json", dir .. "/same.lua"})
       assert_equal(write_code, 1, "the .lua file holds a 709")
-      local out, code = harness.cli({"--format", "json", "--baseline", dir .. "/base.json",
+      local out, code = harness.cli({"--baseline", dir .. "/base.json",
          dir .. "/same.lua", dir .. "/same.html"})
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_equal(code, 3, "the page finding is new although the .lua one is known: " .. out)

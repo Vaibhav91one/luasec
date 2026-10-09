@@ -1,6 +1,6 @@
 {
   "name": "luasec",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Static security scanner for Lua in embedded firmware: finds remote code execution. Runs luasec without installing Lua tooling.",
   "bin": { "luasec": "bin/luasec.js" },
   "files": ["bin/luasec.js", "README.md"],

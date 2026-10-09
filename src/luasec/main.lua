@@ -47,7 +47,8 @@ local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
 local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the validated snippet "
    .. "chose; they are reported as data, not as luasec findings"
 
-local SEVERITY_RANK = {low = 1, medium = 2, high = 3, critical = 4}
+-- info is below every severity a rule emits, so --fail-on info fails on any finding.
+local SEVERITY_RANK = {info = 0, low = 1, medium = 2, high = 3, critical = 4}
 
 local function fail(message)
    io.stderr:write("luasec: " .. message .. "\n")
@@ -94,6 +95,15 @@ local function emit(list, format, opts)
          title = table.concat(opts.paths, ", "), verbose = opts.verbose})
    else
       output = render.render(list, format, opts)
+   end
+
+   -- --sarif FILE is a second output beside whatever --format prints. Under a
+   -- baseline it carries every finding of the run, fixed ones as "absent".
+   if opts.sarif then
+      local handle, open_error = io.open(opts.sarif, "wb")
+      if not handle then return fail("cannot write " .. opts.sarif .. ": " .. tostring(open_error)) end
+      handle:write(render.render(opts.sarif_list or list, "sarif", opts), "\n")
+      handle:close()
    end
 
    if opts.output then
@@ -172,6 +182,7 @@ end
 -- installation directory, and returns the exit code.
 local SUBCOMMANDS = {
    ci = "luasec.cli.ci_cmd",
+   mcp = "luasec.cli.mcp_cmd",
    fix = "luasec.cli.fix_cmd",
    install = "luasec.cli.install_cmd",
    rules = "luasec.cli.rules_cmd",
@@ -336,32 +347,43 @@ local function run(argv)
 
    local threshold_rank = SEVERITY_RANK[opts.fail_on or "low"] or 0
 
+   -- The exit code is decided before anything is written, because the json
+   -- envelope carries it.
    if opts.baseline then
       local known, baseline_error = baseline.read(opts.baseline)
       if not known then return fail(baseline_error) end
 
-      local list, exceeded = baseline.compare(report_contract.normalize(report), known,
+      local list, exceeded, compared = baseline.compare(report_contract.normalize(report), known,
          threshold_rank)
 
       -- Under a baseline only a new finding is a reason to fail. A known one is
       -- what the baseline is for, and a fixed one is an improvement. A finding
       -- below the threshold is reported and does not fail, exactly as it does
-      -- without a baseline.
-      local written = emit(list, opts.format or "plain", opts)
+      -- without a baseline. A new finding takes precedence over a coverage gap.
+      local code = exceeded and EXIT_NEW or ground_missing and EXIT_FINDINGS or EXIT_CLEAN
+      opts.exit_code, opts.baseline_counts = code, compared.counts
+      opts.sarif_list = {table.unpack(compared.current)}
+      table.move(compared.fixed, 1, #compared.fixed, #opts.sarif_list + 1, opts.sarif_list)
+      -- The json envelope lists the whole run with a state on each finding; the
+      -- other formats keep listing only what changed.
+      local format = opts.format or "plain"
+      local written = emit(format == "json" and compared.current or list, format, opts)
       if written then return written end
-      if ground_missing then return EXIT_FINDINGS end
-      return exceeded and EXIT_NEW or EXIT_CLEAN
+      return code
    end
 
    local list = report_contract.normalize(report)
+   local code = EXIT_CLEAN
+   if ground_missing then
+      code = EXIT_FINDINGS
+   elseif #list > 0 and (SEVERITY_RANK[worst_severity(list)] or 0) >= threshold_rank then
+      code = EXIT_FINDINGS
+   end
+   opts.exit_code = code
    local written = emit(list, opts.format or "plain", opts)
    if written then return written end
    if menu.wanted(opts, list, opts.format or "plain") then
       menu.run(list, {opts = opts, argv = argv, root = subcommand_root(), out = io.stdout, err = io.stderr})
-   end
-
-   if ground_missing then
-      return EXIT_FINDINGS
    end
 
    -- --only exists to select, so an empty selection is either a typo or the
@@ -377,15 +399,7 @@ local function run(argv)
          .. " (no finding matched; is the pattern what you meant?)\n")
    end
 
-   if #list == 0 then
-      return EXIT_CLEAN
-   end
-
-   if (SEVERITY_RANK[worst_severity(list)] or 0) >= threshold_rank then
-      return EXIT_FINDINGS
-   end
-
-   return EXIT_CLEAN
+   return code
 end
 
 os.exit(run(arg or {}))

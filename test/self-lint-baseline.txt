@@ -63,7 +63,6 @@ luasec/bytecode/protos.lua	431	self
 luasec/bytecode/protos.lua	431	self
 luasec/bytecode/protos.lua	431	self
 luasec/bytecode/protos.lua	432	pos
-luasec/cli/baseline.lua	631	nil
 luasec/cli/ci_cmd.lua	212	root
 luasec/cli/config.lua	631	nil
 luasec/cli/handoff.lua	111	_
@@ -125,7 +124,6 @@ luasec/report/findings.lua	431	text
 luasec/report/html.lua	311	opts
 luasec/report/plain.lua	631	nil
 luasec/report/sarif.lua	311	opts
-luasec/report/sarif.lua	631	nil
 luasec/rules/context.lua	211	Context
 luasec/rules/context.lua	211	context
 luasec/rules/firmware.lua	113	call_path

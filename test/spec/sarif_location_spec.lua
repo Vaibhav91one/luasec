@@ -135,17 +135,17 @@ describe("the same coverage gap as JSON", function()
       -- separately is whether the gap exists or what it says, so this asserts
       -- that the JSON document carries the one finding plain and SARIF printed.
       --
-      -- `file` stays, and that is deliberate: in JSON it is the record of what
-      -- the run was given and the key the baseline compares on, not a claim
-      -- that anything opens it. Nothing in a JSON document is navigable, so
+      -- The location's `ref` stays, and that is deliberate: in JSON it is the
+      -- record of what the run was given, with `kind` "none" because nothing
+      -- opens it. Nothing in a JSON document is navigable, so
       -- nothing there is the false promise the SARIF uri was.
       local dir = image_with_two_dangling_links("sarif_location_json")
       local out, code = harness.cli({"--format", "json", dir})
       drop(dir)
 
-      local _, count = out:gsub('"code": "901"', "")
+      local _, count = out:gsub('"id": "901"', "")
       assert_equal(count, 1, "the same single gap, not one per format:\n" .. out)
-      assert_match(out, '"file": "' .. dir .. '"',
+      assert_match(out, '"ref": "' .. dir .. '"',
          "json still records the root the run could not fully cover:\n" .. out)
       for _, link in ipairs({"lib/link1.lua", "lib/link2.lua"}) do
          assert_match(out, link, "the message names " .. link .. " as well:\n" .. out)

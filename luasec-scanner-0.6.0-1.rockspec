@@ -1,9 +1,9 @@
 rockspec_format = "3.0"
 package = "luasec-scanner"
-version = "0.5.1-1"
+version = "0.6.0-1"
 source = {
-   url = "https://github.com/Vaibhav91one/luasec/releases/download/v0.5.1/luasec-0.5.1.tar.gz",
-   dir = "luasec-0.5.1",
+   url = "https://github.com/Vaibhav91one/luasec/releases/download/v0.6.0/luasec-0.6.0.tar.gz",
+   dir = "luasec-0.6.0",
 }
 description = {
    summary = "Static security scanner for Lua in embedded firmware: finds remote code execution.",
@@ -34,6 +34,7 @@ build = {
        ["luasec.cli.fix_cmd"] = "src/luasec/cli/fix_cmd.lua",
        ["luasec.cli.handoff"] = "src/luasec/cli/handoff.lua",
       ["luasec.cli.install_cmd"] = "src/luasec/cli/install_cmd.lua",
+      ["luasec.cli.mcp_cmd"] = "src/luasec/cli/mcp_cmd.lua",
       ["luasec.cli.menu"] = "src/luasec/cli/menu.lua",
        ["luasec.cli.progress"] = "src/luasec/cli/progress.lua",
        ["luasec.cli.review"] = "src/luasec/cli/review.lua",
