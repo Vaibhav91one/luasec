@@ -23,7 +23,8 @@ local UNKNOWN_FORMAT = "unknown format '%s': expected plain, json, sarif or html
 -- format this tool knows.
 function render.render(list, name, opts)
    if name == "json" then
-      return json.encode(findings.document(list))
+      return json.encode(findings.document(list, {exit_code = opts and opts.exit_code,
+         baseline = opts and opts.baseline_counts}))
    elseif name == "sarif" then
       return sarif.render(list, opts)
    elseif name == "html" then

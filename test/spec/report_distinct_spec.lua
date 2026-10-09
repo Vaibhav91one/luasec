@@ -137,8 +137,15 @@ end
 
 --- Every finding of a report, as a consumer reads them: rendered to json by the
 -- public seam and read back, so nothing here can see a field the report omits.
+-- The doctor/1 finding flattened to the fields this spec compares by.
 local function rendered_findings(report, opts)
-   return decode_json(api.format(report, "json", opts)).findings
+   local out = decode_json(api.format(report, "json", opts)).findings
+   for _, finding in ipairs(out) do
+      finding.code, finding.file = finding.id, finding.location.ref
+      finding.line, finding.column = finding.location.line, finding.location.column
+      finding.evidence_snippet = nil
+   end
+   return out
 end
 
 -- The tuple two findings in one report must not share: #261's acceptance

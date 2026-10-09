@@ -1,16 +1,18 @@
 -- Baseline comparison. Given a previous run's json report, work out which
 -- findings are new and which are gone.
 --
--- The unit of comparison is a finding's fingerprint, from report/findings.lua:
+-- The baseline is a previous `--json` run (a doctor/1 envelope) and the unit of
+-- comparison is the finding's `fingerprint`, from report/findings.lua: a hash of
 -- code, name and file, with no line number. That is the whole reason a baseline
 -- is usable in practice. A line number would make every comment inserted above a
 -- function look like a new finding, and a build gate that cries wolf is a build
 -- gate people turn off.
 --
 -- A finding is one of three things:
---   new    not in the baseline - this is what the mode exists to report
---   fixed  in the baseline and no longer found - the other half of the question
---   known  in the baseline and still found - not reported at all
+--   new        not in the baseline - this is what the mode exists to report
+--   fixed      in the baseline and no longer found - the other half of the question
+--   unchanged  in the baseline and still found - not in the plain report, but
+--              listed in the json envelope with baseline_state "unchanged"
 --
 -- Only `new` findings fail a build. A fixed finding is good news and must not
 -- cost anybody a green pipeline.
@@ -38,18 +40,11 @@ function baseline.read(path)
 
    local known = {}
    for index, finding in ipairs(document.findings) do
-      if type(finding) ~= "table" then
-         return nil, ("cannot use baseline %s: finding %d is not a table"):format(path, index)
+      local fingerprint = type(finding) == "table" and finding.fingerprint
+      if type(fingerprint) ~= "string" or not fingerprint:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$") then
+         return nil, ("cannot use baseline %s: finding %d has no 16 hex character fingerprint"):format(path, index)
       end
-      for _, field in ipairs({"code", "name", "file"}) do
-         local value = finding[field]
-         if type(value) ~= "string" then
-            return nil, ("cannot use baseline %s: finding %d field '%s' is missing or not a string"):format(path, index, field)
-         end
-      end
-      known[contract.fingerprint({
-         code = finding.code, name = finding.name, file = finding.file,
-      })] = finding
+      known[fingerprint] = finding
    end
 
    return known
@@ -63,12 +58,25 @@ end
 -- both is not in the result at all - the mode answers "what changed", and a
 -- finding that did not change is not an answer.
 --
--- Returns the list and whether any new finding is at or above the threshold.
+-- Returns the list, whether any new finding is at or above the threshold, and
+-- {current = every finding of this run, marked new or unchanged, fixed = the
+-- fixed ones, counts = {new, unchanged, fixed}} for the json envelope and SARIF.
 local degraded = require "luasec.rules.degraded"
+
+-- A baseline entry is a doctor/1 finding; the renderers read the internal shape.
+local function from_envelope(finding)
+   local location = type(finding.location) == "table" and finding.location or {}
+   return {
+      code = finding.id, name = finding.name, file = location.ref, line = location.line,
+      column = location.column, end_column = finding.end_column, severity = finding.severity,
+      confidence = finding.confidence, message = finding.message, cwe = finding.cwe,
+      sink = finding.sink, source = finding.source,
+   }
+end
 
 function baseline.compare(current, known, threshold_rank)
    local result = {}
-   local seen, new_worst = {}, 0
+   local seen, new_worst, unchanged = {}, 0, 0
 
    for _, finding in ipairs(current) do
       local fingerprint = contract.fingerprint(finding)
@@ -87,8 +95,12 @@ function baseline.compare(current, known, threshold_rank)
          local rank = plain.severity_rank(finding.severity)
          if rank > new_worst then new_worst = rank end
          result[#result + 1] = finding
+      else
+         finding.status = "unchanged"
+         unchanged = unchanged + 1
       end
    end
+   local news = #result
 
    -- What the baseline had and this run did not. The baseline's own copy is
    -- reported, not the run's: the location it names is where the finding was,
@@ -96,7 +108,7 @@ function baseline.compare(current, known, threshold_rank)
    local fixed = {}
    for fingerprint, finding in pairs(known) do
       if seen[fingerprint] == nil then
-         local normalized = contract.normalize({finding}, "fixed")
+         local normalized = contract.normalize({from_envelope(finding)}, "fixed")
          fixed[#fixed + 1] = normalized[1]
       end
    end
@@ -111,8 +123,9 @@ function baseline.compare(current, known, threshold_rank)
       result[#result + 1] = finding
    end
 
-   local exceeded = threshold_rank ~= nil and new_worst >= threshold_rank
-   return result, exceeded
+   local exceeded = threshold_rank ~= nil and new_worst > 0 and new_worst >= threshold_rank
+   return result, exceeded, {current = current, fixed = fixed,
+      counts = {new = news, unchanged = unchanged, fixed = #fixed}}
 end
 
 return baseline

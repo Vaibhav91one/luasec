@@ -19,9 +19,11 @@ local FLAGS_WITH_VALUE = {
    ["--view"] = "view",
    ["--scope"] = "scope",
    ["--base"] = "base",
+   ["--sarif"] = "sarif",
 }
 
 local BOOLEAN_FLAGS = {
+   ["--json"] = "json",
    ["--version"] = "version",
    ["--help"] = "help",
    ["-h"] = "help",
@@ -115,6 +117,14 @@ function args.parse(argv)
       end
    end
 
+   -- --json is the doctor/1 spelling of --format json.
+   if opts.json then
+      if opts.format and opts.format ~= "json" then
+         return nil, "--json conflicts with --format " .. opts.format
+      end
+      opts.format = "json"
+   end
+
    -- --no-dynamic-sinks is a CLI-facing name; the engine reads report_dynamic_sinks.
    -- Translate here so the rest of the pipeline sees the flag it expects, and a
    -- library caller using report_dynamic_sinks directly is unaffected.
@@ -129,6 +139,7 @@ local USAGE = [[
 luasec - RCE checker and security analyzer for Lua in embedded firmware
 
 usage: luasec [options] <file|directory>...
+       luasec mcp
        luasec rules [list | explain <code>]
        luasec why <file>:<line> [options]
        luasec fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
@@ -141,6 +152,8 @@ input:
 
 output:
   --format <name>            plain (default), json, sarif, html
+  --json                     the machine-readable doctor/1 envelope (same as --format json)
+  --sarif <file>             also write SARIF 2.1.0 to this file
   -o, --output <file>        write the report to a file instead of stdout
   --ranges                   include the end column of each finding
   --quiet                    print nothing when there are no findings
@@ -168,8 +181,9 @@ selection:
   --severity-threshold <s>   lowest severity to report: low, medium, high, critical
                             (a file that could not be analyzed is always reported)
   --min-confidence <c>       lowest confidence to report: certain, high, medium, low
-  --baseline <file.json>    report only what is new since that json report
-  --fail-on <severity>       exit 1 at or above this severity
+  --baseline <file.json>    report only what is new since that --json envelope
+  --fail-on <severity>       exit 1 at or above this severity (info, low, medium, high,
+                             critical; default low)
   --config <file>            read settings from this file (default: luasec.config.lua
                              in the current directory, if present)
   --no-config                ignore luasec.config.lua
@@ -204,6 +218,7 @@ the sandbox itself failed.
 other:
   -h, --help                 this message
   --version                  print version and exit
+  mcp                        serve the scan tool over MCP (stdio)
   rules list | explain <code>  the rule catalogue, and one code's doc page
   rules set|enable|disable <code>  tune what this project reports (edits luasec.config.lua)
   why <file>:<line>          explain the findings on one line and how to fix them

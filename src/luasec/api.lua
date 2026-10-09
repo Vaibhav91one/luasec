@@ -150,11 +150,12 @@ local function validate_config(opts)
    -- build for a file full of criticals. All three are configuration, so a bad
    -- word is a config error -- the operator needs to know before any analysis.
    local SEVERITY_VALUES = {critical = true, high = true, medium = true, low = true}
+   local FAIL_ON_VALUES = {critical = true, high = true, medium = true, low = true, info = true}
    local CONFIDENCE_VALUES = {certain = true, high = true, medium = true, low = true}
 
    for _, option in ipairs({
       {key = "severity_threshold", flag = "--severity-threshold", valid = SEVERITY_VALUES},
-      {key = "fail_on", flag = "--fail-on", valid = SEVERITY_VALUES},
+      {key = "fail_on", flag = "--fail-on", valid = FAIL_ON_VALUES},
       {key = "min_confidence", flag = "--min-confidence", valid = CONFIDENCE_VALUES},
    }) do
       local value = opts[option.key]
@@ -162,6 +163,7 @@ local function validate_config(opts)
          if type(value) ~= "string" or not option.valid[value] then
             local valid = option.flag == "--min-confidence"
                and "certain, high, medium, low"
+               or option.flag == "--fail-on" and "critical, high, medium, low, info"
                or "critical, high, medium, low"
             return nil, ("%s needs one of %s, got %s"):format(option.flag, valid,
                type(value) == "string" and value or type(value))

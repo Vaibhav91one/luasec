@@ -3,6 +3,7 @@
 -- the few that matter; this is the one screen that says where to look first.
 local codes = require "luasec.rules.codes"
 local plain = require "luasec.report.plain"
+local sanitize = require("luasec.util.util").sanitize
 
 local summary = {}
 
@@ -62,7 +63,7 @@ function summary.render(list)
       local top_width = #tostring(ranked[1].count)
       out[#out + 1] = "Files with the most findings:"
       for index = 1, math.min(TOP_FILES, #ranked) do
-         out[#out + 1] = ("  %" .. top_width .. "d  %s"):format(ranked[index].count, ranked[index].file)
+         out[#out + 1] = ("  %" .. top_width .. "d  %s"):format(ranked[index].count, sanitize(ranked[index].file))
       end
    end
    out[#out + 1] = plain.score_line(list)

@@ -286,35 +286,49 @@ file.
 ### JSON
 
 ```sh
-bin/luasec --format json test/fixtures/tainted_exec/handler.lua
+bin/luasec --json test/fixtures/tainted_exec/handler.lua
 ```
 
 ```json
 {
+  "data": {
+    "categories": {"artifact": 0, "exec": 1, "firmware": 0, "meta": 0, "payload": 0},
+    "report_version": "1.0"
+  },
+  "exit_code": 1,
   "findings": [
     {
-      "code": "709",
-      "column": 4,
+      "category": "exec",
       "confidence": "certain",
       "cwe": "CWE-78",
-      "file": "test/fixtures/tainted_exec/handler.lua",
-      "line": 3,
+      "end_column": 50,
+      "fingerprint": "066caeef4f9219d8",
+      "id": "709",
+      "location": {"column": 4, "kind": "file", "line": 3,
+                   "ref": "test/fixtures/tainted_exec/handler.lua"},
       "message": "untrusted data reaches command execution (os.execute)",
       "name": "os.execute",
+      "remedy": "Do not build a shell command from request data; pass fixed arguments, ...",
       "severity": "critical",
       "sink": "os.execute",
       "source": "http.formvalue",
       "trace": [ ... ]
     }
   ],
-  "luasecVersion": "0.5.1",
-  "reportVersion": "1.0"
+  "schema": "doctor/1",
+  "score": {"coverage_gaps": 0, "label": "needs work", "model": "luasec/1", "value": 75},
+  "tool": "luasec",
+  "version": "0.6.0"
 }
 ```
 
-Exit code is `1` — JSON output does not change the exit contract. The `trace`
-array lists each source and sink step in the flow. This is the format `--baseline`
-stores internally, so a JSON report is what you pass to `--baseline`.
+(Shown compact; the tool prints indented JSON with sorted keys.) This is the
+`doctor/1` envelope, specified in [doctor-contract.md](doctor-contract.md);
+`--format json` is the same thing. `exit_code` is the exit code of the run, here
+`1`. The `trace` array lists each source and sink step in the flow. A JSON report
+is what you pass to `--baseline`. The 0.6.0 release replaced the earlier JSON
+shape (`code`, `file`, `luasecVersion`, `reportVersion`...) outright; the old
+fields are mapped in [sarif.md](sarif.md#the-finding-contract).
 
 ### SARIF
 
@@ -393,8 +407,9 @@ medium 0.6, low 0.3), floored at 0. Labels are good at 90 and above, needs
 work at 60 and above, else critical. A coverage gap (any 901, 902, 904, 801,
 803, 805 or 012 finding) turns "good" into "incomplete"; the number itself
 does not change. A gap the baseline marked fixed is not a gap. The plain
-Score line names the count (", 1 coverage gap"), and JSON and SARIF carry
-`coverage_gaps`.
+Score line names the count (", 1 coverage gap"), and the JSON
+envelope and SARIF carry `score` as `{value, label, model: "luasec/1",
+coverage_gaps}`.
 
 ```sh
 bin/luasec --score test/fixtures/tainted_exec/handler.lua
@@ -404,10 +419,10 @@ bin/luasec --score test/fixtures/tainted_exec/handler.lua
 75
 ```
 
-Under `--baseline` the score is computed from the findings the run reports —
-the new ones; a finding the baseline marks fixed costs nothing — so a tree
-whose only findings are already in the baseline scores 100. Use the plain score
-for the state of the whole tree.
+Under `--baseline` the plain `--score` is computed from the findings the run
+reports — the new ones; a finding the baseline marks fixed costs nothing — so a
+tree whose only findings are already in the baseline scores 100. The `--json`
+envelope's `score` is the score of the whole tree, unchanged findings included.
 
 ### Summary
 
@@ -658,7 +673,8 @@ Exit codes from a static scan:
 | `0` | clean — no findings at or above the threshold |
 | `1` | findings at or above the threshold, or ground not covered |
 | `2` | error — bad flag, unreadable rules file, unreadable path |
-| `3` | new findings since a `--baseline` |
+| `3` | new findings since a `--baseline` (takes precedence over `1`) |
+| `130` | interrupted |
 
 Exit code `2` is distinct from `1`. A typo in a flag is a configuration error,
 not a security finding. Do not treat `2` as a pass.
@@ -672,8 +688,9 @@ less ground than it was asked to.
 ### `--fail-on`
 
 Exit `1` when a finding at or above this severity is present. Takes `low`,
-`medium`, `high`, or `critical`. The default is `low`, which means any finding
-that passes `--severity-threshold` fails the run.
+`medium`, `high`, `critical`, or `info` (below every severity a rule emits, so it
+fails on any finding). The default is `low`, which means any finding that passes
+`--severity-threshold` fails the run.
 
 ```sh
 bin/luasec --fail-on high --std +openwrt+luci rootfs/
@@ -688,14 +705,16 @@ bin/luasec --std +openwrt --fail-on critical test/fixtures/firmware/uci_tainted_
 
 ### `--baseline`
 
-Report only what is new since a stored JSON report. A finding already in the
-baseline is not reported, and one that was in the baseline and is no longer
-found is reported as fixed: marked `"status": "fixed"` in JSON and
-`baselineState "absent"` in SARIF, but printed like a live finding in plain
-text.
+Report only what is new since a stored `--json` envelope, matched by
+`fingerprint`. In plain text a finding already in the baseline is not reported,
+and one that was in the baseline and is no longer found is printed like a live
+finding and counted as fixed (`baselineState "absent"` in SARIF). In `--json`
+every finding of the run is listed with `baseline_state` `new` or `unchanged`,
+and a top-level `baseline` object holds the counts `{new, unchanged, fixed}`.
+A baseline from 0.5.x or earlier is refused with exit `2`: record a new one.
 
 ```sh
-bin/luasec --format json -o baseline.json rootfs/
+bin/luasec --json -o baseline.json rootfs/
 bin/luasec --baseline baseline.json rootfs/
 ```
 

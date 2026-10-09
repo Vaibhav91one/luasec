@@ -99,7 +99,7 @@ if not document then usage(opts.report .. ": " .. tostring(document_error)) end
 local measured = {}
 local total = 0
 for _, finding in ipairs(document.findings) do
-   local code = tostring(finding.code)
+   local code = tostring(finding.id)
    measured[code] = (measured[code] or 0) + 1
    total = total + 1
 end

@@ -7,6 +7,7 @@ local findings = require "luasec.report.findings"
 local plain = require "luasec.report.plain"
 local selection = require "luasec.cli.selection"
 local config = require "luasec.cli.config"
+local sanitize = require("luasec.util.util").sanitize
 
 local why = {}
 
@@ -29,7 +30,7 @@ local function code_frame(file, line, column)
    local handle = io.open(file, "rb")
    if not handle then return nil end
    local lines = {}
-   for text in handle:lines() do lines[#lines + 1] = (text:gsub("\t", " ")) end
+   for text in handle:lines() do lines[#lines + 1] = sanitize((text:gsub("\t", " "))) end
    handle:close()
    if line < 1 or line > #lines then return nil end
    local first, last = math.max(1, line - 2), math.min(#lines, line + 2)
@@ -51,7 +52,7 @@ function why.lines(finding, root)
    lines[#lines + 1] = (plain.render({finding}):match("^[^\n]*"))
    if finding.trace then
       for _, step in ipairs(finding.trace) do
-         lines[#lines + 1] = ("  %-6s  %s  %s:%d"):format(step.kind, step.name, step.file, step.line)
+         lines[#lines + 1] = sanitize(("  %-6s  %s  %s:%d"):format(step.kind, step.name, step.file, step.line))
       end
    else
       lines[#lines + 1] = NO_FLOW:gsub("\n$", "")

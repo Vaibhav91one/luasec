@@ -7,6 +7,7 @@ local codes = require "luasec.rules.codes"
 local score = require "luasec.report.score"
 local summary = require "luasec.report.summary"
 local term = require "luasec.cli.term"
+local sanitize = require("luasec.util.util").sanitize
 
 local doctor = {}
 
@@ -89,7 +90,7 @@ function doctor.render(list, opts)
    -- Only the label and the filled blocks carry colour. The padding is counted
    -- on the uncoloured text, so the box stays aligned with colour on or off.
    local head = " luasec"
-   if opts.title then head = head .. "  " .. fit(opts.title, BOX_WIDTH - 9) end
+   if opts.title then head = head .. "  " .. fit(sanitize(opts.title), BOX_WIDTH - 9) end
    local numbers = (" %d / 100  "):format(result.score)
    local numbers_len = utf8.len(numbers .. label) or #numbers
    local cells = math.max(0, math.min(BAR_CELLS, math.floor(result.score / 100 * BAR_CELLS + 0.5)))
@@ -139,7 +140,7 @@ function doctor.render(list, opts)
       -- Two findings on one line are one place to look at, so a location is listed once.
       local seen, places = {}, {}
       for _, finding in ipairs(group.findings) do
-         local place = ("%s:%d"):format(finding.file, finding.line)
+         local place = ("%s:%d"):format(sanitize(finding.file), finding.line)
          if not seen[place] then
             seen[place] = true
             places[#places + 1] = place

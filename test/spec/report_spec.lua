@@ -115,13 +115,16 @@ local function report(args)
 end
 
 describe("json report", function()
-   it("names the report contract version, the tool version, and the findings", function()
+   it("is the doctor/1 envelope: the schema, the tool, its version, the exit code and the findings", function()
       local doc, code = report({"--format", "json", "test/fixtures/tainted_exec/handler.lua"})
       assert_equal(code, 1, "a critical finding is present, so the run is not clean")
 
       local version = require "luasec.version"
-      assert_match(doc.reportVersion, "^%d+%.%d+$", "the document needs a contract version")
-      assert_equal(doc.luasecVersion, version.luasec, "the document needs the tool's own version")
+      assert_equal(doc.schema, "doctor/1", "the document names the contract")
+      assert_equal(doc.tool, "luasec")
+      assert_equal(doc.version, version.luasec, "the document needs the tool's own version")
+      assert_equal(doc.exit_code, 1, "the envelope carries the exit code of the run")
+      assert_match(doc.data.report_version, "^%d+%.%d+$", "the old report version moved under data")
       assert_true(type(doc.findings) == "table" and #doc.findings == 1,
          "expected exactly one finding, got " .. tostring(doc.findings and #doc.findings))
    end)
@@ -130,9 +133,13 @@ describe("json report", function()
       local doc = report({"--format", "json", "test/fixtures/tainted_exec/handler.lua"})
       local finding = doc.findings[1]
 
-      local allowed = {code = true, severity = true, confidence = true, cwe = true,
-                       message = true, name = true, sink = true, source = true, file = true,
-                       line = true, column = true, end_column = true, trace = true}
+      local allowed = {id = true, fingerprint = true, severity = true, confidence = true,
+                       category = true, message = true, location = true, evidence = true,
+                       remedy = true, baseline_state = true,
+                       -- extra keys the contract allows
+                       cwe = true, name = true, sink = true, source = true, end_column = true,
+                       trace = true, sanitizer = true, guarded_by = true, channels = true,
+                       exposed_as = true}
       for key in pairs(finding) do
          assert_true(allowed[key], "the finding carries '" .. key ..
             "', which is not in the documented contract")
@@ -143,23 +150,26 @@ describe("json report", function()
       local doc = report({"--format", "json", "test/fixtures/tainted_exec/handler.lua"})
       local finding = doc.findings[1]
 
-      for _, field in ipairs({"code", "severity", "confidence", "cwe", "message", "name",
-                              "sink", "source", "file", "line", "column", "end_column"}) do
+      for _, field in ipairs({"id", "fingerprint", "severity", "confidence", "category", "cwe",
+                              "message", "name", "sink", "source", "location", "end_column", "remedy"}) do
          assert_true(finding[field] ~= nil,
             "the contract requires '" .. field .. "'; it is absent from the finding")
       end
 
-      assert_equal(finding.code, "709")
+      assert_equal(finding.id, "709")
+      assert_equal(finding.category, "exec")
       assert_equal(finding.severity, "critical")
       assert_equal(finding.confidence, "certain")
       assert_equal(finding.cwe, "CWE-78")
       assert_equal(finding.name, "os.execute")
       assert_equal(finding.sink, "os.execute")
       assert_equal(finding.source, "http.formvalue")
-      assert_equal(finding.file, "test/fixtures/tainted_exec/handler.lua")
-      assert_equal(finding.line, 3)
-      assert_equal(finding.column, 4)
-      assert_true(finding.end_column > finding.column, "the end column is the far edge of the sink")
+      assert_equal(finding.location.kind, "file")
+      assert_equal(finding.location.ref, "test/fixtures/tainted_exec/handler.lua")
+      assert_equal(finding.location.line, 3)
+      assert_equal(finding.location.column, 4)
+      assert_true(finding.end_column > finding.location.column, "the end column is the far edge of the sink")
+      assert_true(type(finding.remedy) == "string", "709 has a How to fix section on its rule page")
    end)
 
    it("carries a source-to-sink trace on a taint finding and no trace key on one without a flow", function()
@@ -174,32 +184,30 @@ describe("json report", function()
       local shape = report({"--format", "json", "test/fixtures/payload/undecoded_loader.lua"})
       local no_trace
       for _, finding in ipairs(shape.findings) do
-         if finding.code == "708" then no_trace = finding end
+         if finding.id == "708" then no_trace = finding end
       end
       assert_true(no_trace ~= nil, "expected a 708 in the fixture")
       assert_true(no_trace.trace == nil, "a finding with no proven flow must not carry a trace key")
    end)
 
-   it("orders findings by file, then line, column and code", function()
+   it("orders findings by severity, then id, then fingerprint", function()
       local doc = report({"--format", "json", "test/fixtures/reports/taint_order_b.lua",
                           "test/fixtures/reports/taint_order.lua"})
 
-      -- Compared numerically, not as text: line 10 comes after line 9, which a
-      -- string sort would get backwards and would then blame on the tool.
-      local function before(a, b)
-         if a.file ~= b.file then return a.file < b.file end
-         if a.line ~= b.line then return a.line < b.line end
-         if a.column ~= b.column then return a.column < b.column end
-         return a.code < b.code
+      local rank = {critical = 1, high = 2, medium = 3, low = 4, info = 5}
+      local function before(x, y)
+         if x.severity ~= y.severity then return rank[x.severity] < rank[y.severity] end
+         if x.id ~= y.id then return x.id < y.id end
+         return x.fingerprint <= y.fingerprint
       end
 
+      assert_true(#doc.findings > 1, "the fixtures give more than one finding")
       for i = 2, #doc.findings do
          local previous, current = doc.findings[i - 1], doc.findings[i]
          assert_true(before(previous, current),
-            "finding " .. i .. " (" .. current.file .. ":" .. current.line .. ":" ..
-            current.column .. " " .. current.code .. ") is out of order after " ..
-            previous.file .. ":" .. previous.line .. ":" .. previous.column .. " " ..
-            previous.code)
+            "finding " .. i .. " (" .. current.severity .. " " .. current.id .. " " ..
+            current.fingerprint .. ") is out of order after " .. previous.severity .. " " ..
+            previous.id .. " " .. previous.fingerprint)
       end
    end)
 
@@ -317,8 +325,8 @@ return handler
          return doc.runs[1].results[1].locations[1].physicalLocation.region.startLine
       end
       local function fingerprint(doc)
-         local printed = doc.runs[1].results[1].partialFingerprints.luasecFinding
-         assert_true(type(printed) == "string" and #printed > 0,
+         local printed = doc.runs[1].results[1].partialFingerprints["doctorFinding/v1"]
+         assert_true(type(printed) == "string" and printed:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$"),
             "a result needs a fingerprint a consumer can key on")
          return printed
       end
@@ -334,7 +342,7 @@ return handler
 
    it("does not write primaryLocationLineHash: that key is GitHub's own hash of the line (#311)", function()
       -- luasec wrote "709:os.execute:2" there; GitHub recomputes the key, warns "inconsistent
-      -- fingerprint" on every result of every upload, and ignores ours. luasecFinding is the
+      -- fingerprint" on every result of every upload, and ignores ours. doctorFinding/v1 is the
       -- identity a consumer keys on and stays.
       local path = os.tmpname()
       local handle = assert(io.open(path, "w"))
@@ -344,7 +352,7 @@ return handler
       os.remove(path)
       local fingerprints = doc.runs[1].results[1].partialFingerprints
       assert_equal(fingerprints.primaryLocationLineHash, nil, "GitHub computes this key itself")
-      assert_true(type(fingerprints.luasecFinding) == "string" and #fingerprints.luasecFinding > 0,
+      assert_true(type(fingerprints["doctorFinding/v1"]) == "string" and #fingerprints["doctorFinding/v1"] == 16,
          "the stable finding identity must stay")
    end)
 
@@ -535,7 +543,7 @@ describe("a baseline and ground we did not cover", function()
       f:write('local x = "unterminated\n')
       f:close()
       local base = assert(io.open(scratch .. "/base.json", "w"))
-      base:write('{"findings":[],"luasecVersion":"0","reportVersion":1}')
+      base:write('{"schema":"doctor/1","findings":[]}')
       base:close()
 
       local out, code = harness.cli({ "--baseline", scratch .. "/base.json", scratch })
@@ -545,32 +553,32 @@ describe("a baseline and ground we did not cover", function()
       assert_true(code ~= 0, "and the run still fails:\n" .. out)
    end)
 
-   it("refuses a baseline whose finding is missing name or file", function()
+   it("refuses a baseline whose finding has no fingerprint", function()
       local scratch = harness.scratch_dir("spec_baseline_absent_fields")
       local base = assert(io.open(scratch .. "/base.json", "w"))
-      base:write('{"findings":[{"code":"701","file":"x.lua"}]}')
+      base:write('{"schema":"doctor/1","findings":[{"id":"701"}]}')
       base:close()
 
       local out, code = harness.cli({"--format", "json", "--baseline", scratch .. "/base.json",
          "test/fixtures/clean/report.lua"})
       os.execute("rm -rf " .. string.format("%q", scratch))
 
-      assert_equal(code, 2, "a finding missing name is malformed:\n" .. out)
-      assert_match(out, "field 'name'", out)
+      assert_equal(code, 2, "a finding without a fingerprint is malformed:\n" .. out)
+      assert_match(out, "fingerprint", out)
       assert_no_match(out, "stack traceback", out)
    end)
 
-   it("refuses a baseline whose finding code is not a string", function()
+   it("refuses a baseline whose fingerprint is not 16 hex characters", function()
       local scratch = harness.scratch_dir("spec_baseline_bad_code")
       local base = assert(io.open(scratch .. "/base.json", "w"))
-      base:write('{"findings":[{"code":701,"name":"os.execute","file":"x.lua"}]}')
+      base:write('{"schema":"doctor/1","findings":[{"id":"701","fingerprint":701}]}')
       base:close()
 
       local out, code = harness.cli({"--format", "json", "--baseline", scratch .. "/base.json",
          "test/fixtures/clean/report.lua"})
       os.execute("rm -rf " .. string.format("%q", scratch))
 
-      assert_equal(code, 2, "a finding with a non-string code is malformed:\n" .. out)
+      assert_equal(code, 2, "a finding with a non-hex fingerprint is malformed:\n" .. out)
       assert_match(out, "baseline", out)
       assert_no_match(out, "stack traceback", out)
    end)

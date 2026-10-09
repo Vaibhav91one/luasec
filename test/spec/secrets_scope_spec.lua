@@ -64,7 +64,7 @@ local function severity_in_json(path)
    local handle = assert(io.open(path, "r"))
    local text = handle:read("*a")
    handle:close()
-   return text:match('"code"%s*:%s*"747"[^}]*"severity"%s*:%s*"(%a+)"')
+   return text:match('"id"%s*:%s*"747".-"severity"%s*:%s*"(%a+)"')
 end
 
 --- Run the CLI from `dir` over a RELATIVE path, with `$PWD` naming nothing.
@@ -343,7 +343,7 @@ describe("a credential in a test file", function()
       local function severity_with(env)
          local out = harness.cli({"--format", "json", path},
             env and {env = "TMPDIR=" .. string.format("%q", dir)} or nil)
-         local findings = out:match('"code"%s*:%s*"747"[^}]*"severity"%s*:%s*"(%a+)"')
+         local findings = out:match('"id"%s*:%s*"747".-"severity"%s*:%s*"(%a+)"')
          assert_true(findings ~= nil, "luasec reported no 747 at all for " .. path)
          return findings
       end

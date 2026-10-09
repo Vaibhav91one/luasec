@@ -141,8 +141,18 @@ end
 -- the file it is in: no line number, so a statement that moved is still the
 -- same finding, and a different code for the same name is a different finding.
 -- SARIF publishes it as a partial fingerprint and the baseline compares it.
+--
+-- The doctor/1 fingerprint is 16 lowercase hex characters: the 64-bit FNV-1a
+-- hash of `code:name:file`. FNV-1a because Lua has no stdlib hash and this one
+-- is eight lines; Lua 5.3+ integers wrap on overflow, which is the mod 2^64 the
+-- algorithm wants.
 function findings.fingerprint(finding)
-   return table.concat({finding.code, finding.name, finding.file}, ":")
+   local identity = table.concat({finding.code, finding.name, finding.file}, ":")
+   local hash = 0xcbf29ce484222325 -- the FNV offset basis
+   for index = 1, #identity do
+      hash = (hash ~ identity:byte(index)) * 0x100000001b3
+   end
+   return string.format("%016x", hash)
 end
 
 -- Whether `path` names a directory. Opening it is not the test: POSIX open(2)
@@ -267,20 +277,88 @@ function findings.normalize(report, status)
    return findings.sort(findings.distinct(out))
 end
 
---- The machine-readable document: what version of the contract, which tool, and
--- the findings. `list` is already normalized by `findings.normalize`.
-function findings.document(list)
-   local s = require("luasec.report.score").summarize(list or {})
+local SEVERITY_ORDER = {critical = 1, high = 2, medium = 3, low = 4, info = 5}
+
+-- The first paragraph of the code's "How to fix" section in docs/rules/<code>.md,
+-- or nil when the page is not installed (a rock ships no docs). The root is found
+-- from this file's own place in the tree, so the library and the CLI agree.
+local function remedy_for(code, memo)
+   if memo[code] == nil then
+      local path = package.searchpath("luasec.report.findings", package.path) or ""
+      local root = path:match("^(.*)/src/luasec/report/findings%.lua$")
+      local fix = root and require("luasec.cli.why_cmd").how_to_fix(root, code)
+      memo[code] = fix and fix:match("^(.-)\n%s*\n") or fix or false
+   end
+   return memo[code] or nil
+end
+
+--- One finding as the doctor/1 contract (docs/doctor-contract.md section 2) spells
+-- it. The fields the old document carried that have no contract key (cwe, name,
+-- sink, source, trace...) stay as extra keys, which consumers must ignore.
+local function doctor_finding(finding, ctx, memo)
+   local json = require "luasec.report.json"
+   local file = findings.open_file(finding, memo.dirs)
+   local out = {
+      id = finding.code,
+      fingerprint = findings.fingerprint(finding),
+      severity = finding.severity,
+      category = require("luasec.rules.categories").of(finding.code) or "other",
+      message = finding.message,
+      location = {kind = file and "file" or "none", ref = finding.file,
+         line = finding.line, column = finding.column},
+      remedy = remedy_for(finding.code, memo.remedies) or json.null,
+      cwe = finding.cwe, name = finding.name, sink = finding.sink, source = finding.source,
+      end_column = finding.end_column, sanitizer = finding.sanitizer,
+      guarded_by = finding.guarded_by, channels = finding.channels,
+      exposed_as = finding.exposed_as, trace = finding.trace,
+   }
+   if finding.confidence ~= "" then out.confidence = finding.confidence end
+   if finding.snippet then out.evidence = {{ref = "snippet", value = finding.snippet}} end
+   if ctx.baseline then out.baseline_state = finding.status end
+   return out
+end
+
+--- The machine-readable document, the doctor/1 envelope. `list` is already
+-- normalized by `findings.normalize`. `ctx.exit_code` is the code this run
+-- returns, `ctx.baseline` the {new, unchanged, fixed} counts when a baseline was
+-- given.
+-- A finding a baseline marked fixed is counted there and not listed.
+function findings.document(list, ctx)
+   ctx = ctx or {}
+   list = list or {}
+   local score = require "luasec.report.score"
+   local memo = {dirs = {}, remedies = {}}
+   local out = {}
+   for _, finding in ipairs(list) do
+      if finding.status ~= "fixed" then out[#out + 1] = doctor_finding(finding, ctx, memo) end
+   end
+   table.sort(out, function(a, b)
+      if a.severity ~= b.severity then
+         return (SEVERITY_ORDER[a.severity] or 9) < (SEVERITY_ORDER[b.severity] or 9)
+      end
+      if a.id ~= b.id then return a.id < b.id end
+      if a.fingerprint ~= b.fingerprint then return a.fingerprint < b.fingerprint end
+      -- Same identity, different place: the contract leaves the tie open, so close it.
+      if a.location.ref ~= b.location.ref then return a.location.ref < b.location.ref end
+      if a.location.line ~= b.location.line then return a.location.line < b.location.line end
+      if a.location.column ~= b.location.column then return a.location.column < b.location.column end
+      return a.message < b.message
+   end)
+   local summary = score.summarize(list)
    return {
-      reportVersion = REPORT_VERSION,
-      luasecVersion = require("luasec.version").luasec,
-      score = {value = s.score, label = s.label, coverage_gaps = s.coverage_gaps, categories = s.categories},
-      findings = list or {},
+      schema = "doctor/1",
+      tool = "luasec",
+      version = require("luasec.version").luasec,
+      exit_code = ctx.exit_code or (#out > 0 and 1 or 0),
+      score = score.envelope(summary),
+      findings = out,
+      baseline = ctx.baseline,
+      data = {report_version = REPORT_VERSION, categories = summary.categories},
    }
 end
 
---- Read a document this tool wrote. Returns the findings, or nil plus a
--- message; a baseline file is just a previous run's report.
+--- Read a document this tool wrote (a doctor/1 envelope). Returns it, or nil
+-- plus a message; a baseline file is just a previous run's `--json` output.
 function findings.read_document(text)
    if type(text) ~= "string" or text:match("^%s*$") then
       return nil, "the file is empty"
@@ -290,8 +368,9 @@ function findings.read_document(text)
    if not ok then
       return nil, "not a json report: " .. tostring(parsed)
    end
-   if type(parsed) ~= "table" or type(parsed.findings) ~= "table" then
-      return nil, "not a luasec json report: no findings array"
+   if type(parsed) ~= "table" or parsed.schema ~= "doctor/1" or type(parsed.findings) ~= "table" then
+      return nil, "not a doctor/1 envelope (schema \"doctor/1\" with a findings array); "
+         .. "regenerate it with --json"
    end
    return parsed
 end

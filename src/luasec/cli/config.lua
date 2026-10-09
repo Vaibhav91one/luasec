@@ -28,8 +28,8 @@ function config.check(value, path)
    if value.std ~= nil and type(value.std) ~= "string" then
       return bad("std must be a string such as '+openwrt+luci'")
    end
-   if value.fail_on ~= nil and not SEVERITIES[value.fail_on] then
-      return bad("fail_on must be one of " .. SEVERITY_LIST)
+   if value.fail_on ~= nil and not (SEVERITIES[value.fail_on] or value.fail_on == "info") then
+      return bad("fail_on must be one of " .. SEVERITY_LIST .. ", info")
    end
    if value.disable ~= nil then
       if type(value.disable) ~= "table" then return bad("disable must be a list of code patterns") end
