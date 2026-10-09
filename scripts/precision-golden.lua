@@ -99,7 +99,7 @@
 return {
    corpus_files = 691,
    scanned_files = 707,
-   total = 620,
+   total = 670,
    codes = {
       [701] = 46,
       [702] = 13,
@@ -116,6 +116,7 @@ return {
       -- unsupported-dialect reports, all six on the same specs.
       [711] = 0,
       [712] = 3,
+      [722] = 50,
       [724] = 25,
       [725] = 2,
       [727] = 16,

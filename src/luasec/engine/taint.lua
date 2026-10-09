@@ -25,6 +25,7 @@
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
+local uci_cursor = require "luasec.util.uci_cursor"
 
 local taint = {}
 
@@ -1207,13 +1208,42 @@ local function reaching_definition(item)
    end
 end
 
+-- A write through a UCI cursor handle (`c:set(...)`, `c:section(...)`) is a
+-- config sink like `uci.set`, but only a value carrying request data is
+-- reported: a cursor write with a constant or merely computed value is the
+-- normal case in firmware (#317). Reuses the handle tracking of rule 747.
+--
+-- The arguments that carry a value, by method: `set(config, section, option,
+-- value)` (or `set(config, section, type)`), `section(config, type, name,
+-- values)`, `tset(config, section, values)`. A section or config name is not a
+-- written value and is left alone.
+local CURSOR_VALUE_ARGS = {
+   set = {3, 4}, add_list = {4}, set_list = {4}, setlist = {4},
+   section = {4}, tset = {3}, add = {3},
+}
+
+local function cursor_sink(method)
+   return {pattern = "uci:" .. method, code = "722", kind = "config", cursor = true,
+           arg = CURSOR_VALUE_ARGS[method], taint_code = "722", taint_only = true}
+end
+
 local function check_sink(node, item, state, chstate, opts)
    local callee = node[1]
-   local path = callee_path(callee, item, state, 0)
-   if not path then return end
-
-   local sink = platform_api.match_sink(path)
-   if not sink then return end
+   local path, sink
+   if node.tag == "Invoke" and platform_api.match_sink("uci.set") then
+      uci_cursor.prepare(chstate.ast)
+      if uci_cursor.cursor_write(node) then
+         local method = node[2][1]
+         sink = cursor_sink(method)
+         path = sink.pattern
+      end
+   end
+   if not sink then
+      path = callee_path(callee, item, state, 0)
+      if not path then return end
+      sink = platform_api.match_sink(path)
+      if not sink then return end
+   end
 
    local args = args_of(node)
    local kind = sink.kind or "shell"
@@ -1221,7 +1251,7 @@ local function check_sink(node, item, state, chstate, opts)
    -- Writing attacker data into a configuration that a service later executes is
    -- a different finding (722) with the path it can reach, so the firmware rule
    -- module owns it.
-   if kind == "config" then
+   if kind == "config" and not sink.cursor then
       return
    end
 
