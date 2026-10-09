@@ -663,6 +663,37 @@ local MAX_CURSOR_DEFS = 4
 -- the answer cannot differ between them.
 local CURSOR_MEMO = {}
 
+-- Functions this file defines, by the spelling a call reaches them with: `open`
+-- for a global `function open()`, `M.open` for `function M.open()` or
+-- `M.open = function`. Built in the same pre-pass as FIELD_VALUES. A name given
+-- two different functions is dropped, so a call never follows a guess.
+local FUNCTIONS = {}
+
+-- A function's `return` expressions, not those of functions nested in it.
+-- RETURNS_MEMO holds the answer per Function node for the file; the list is cut
+-- at MAX_CURSOR_DEFS so a function with a hundred returns costs what four do.
+local RETURNS_MEMO = {}
+
+local function return_exprs(function_node)
+   local memo = RETURNS_MEMO[function_node]
+   if memo then return memo end
+   local found = {}
+   local function walk(node, depth)
+      if type(node) ~= "table" or depth > 64 or #found >= MAX_CURSOR_DEFS then return end
+      if node.tag == "Function" and node ~= function_node then return end
+      if node.tag == "Return" then
+         for _, expr in ipairs(node) do
+            if #found < MAX_CURSOR_DEFS then found[#found + 1] = expr end
+         end
+         return
+      end
+      for _, child in ipairs(node) do walk(child, depth + 1) end
+   end
+   walk(function_node, 0)
+   RETURNS_MEMO[function_node] = found
+   return found
+end
+
 local function is_uci_module(node, depth)
    if type(node) ~= "table" or (depth or 0) > MAX_CURSOR_HOPS then return false end
    if node.tag == "Invoke" or node.tag == "Call" then
@@ -696,7 +727,30 @@ local function is_uci_module(node, depth)
    return false
 end
 
-local function is_cursor(node, depth)
+-- The Function node a call's callee names in this file, or nil: a local
+-- (its reaching definitions, newest first), a global, or a `M.name` field.
+local function function_of(callee)
+   if callee.tag == "Id" then
+      if callee.var then
+         local values = callee.var.values or {}
+         for index = #values, math.max(1, #values - MAX_CURSOR_DEFS + 1), -1 do
+            local value = values[index]
+            if value and value.node and value.node.tag == "Function" then return value.node end
+         end
+         return nil
+      end
+      return FUNCTIONS[callee[1]] or nil
+   end
+   if callee.tag == "Index" then
+      local key = field_key(callee[1], string_value(callee[2]))
+      return key and FUNCTIONS[key] or nil
+   end
+   return nil
+end
+
+local is_cursor
+
+is_cursor = function(node, depth)
    if type(node) ~= "table" then return false end
    depth = depth or 0
    if depth > MAX_CURSOR_HOPS then return false end
@@ -717,6 +771,22 @@ local function is_cursor(node, depth)
       if name == "" then return false end
       if string.find(name, "uci", 1, true) then return true end
       local callee = node[1]
+      -- A factory this file defines is decided by what it returns, not by what
+      -- it is called: `open_section()` that ends in `return uci.cursor()` hands
+      -- back a handle, and `sqlite.cursor()` wrapped the same way does not (#317).
+      -- A handle on any return path is a handle, as for a field above. The memo
+      -- is set before the walk so a factory that returns its own call settles
+      -- on false instead of recursing.
+      local function_node = type(callee) == "table" and function_of(callee)
+      if function_node then
+         CURSOR_MEMO[node] = false
+         for _, expr in ipairs(return_exprs(function_node)) do
+            if is_cursor(expr, depth + 1) then
+               CURSOR_MEMO[node] = true
+               return true
+            end
+         end
+      end
       if type(callee) == "table" and callee.tag == "Index" then
          -- A module access, so the module is the base: `require("uci").cursor()`
          -- is the documented way to get one, and `sqlite.cursor()` is a
@@ -852,6 +922,33 @@ detectors[#detectors + 1] = function(ctx)
    -- rule asks whether something is a config cursor.
    for key in pairs(FIELD_VALUES) do FIELD_VALUES[key] = nil end
    for node in pairs(CURSOR_MEMO) do CURSOR_MEMO[node] = nil end
+   for key in pairs(FUNCTIONS) do FUNCTIONS[key] = nil end
+   for node in pairs(RETURNS_MEMO) do RETURNS_MEMO[node] = nil end
+   -- Functions first, in a pass of their own: a factory can be defined below
+   -- the assignment that calls it, and is_cursor reads this table.
+   ctx:each_node(function(node)
+      if node.tag == "Set" or node.tag == "Local" then
+         local targets, values = node[1], node[2]
+         if type(targets) == "table" and type(values) == "table" then
+            for index, target in ipairs(targets) do
+               local defined = values[index]
+               if type(target) == "table" and type(defined) == "table"
+                     and defined.tag == "Function" then
+                  local key = target.tag == "Id" and not target.var and type(target[1]) == "string"
+                     and target[1]
+                     or (target.tag == "Index" and field_key(target[1], string_value(target[2])))
+                  if key then
+                     if FUNCTIONS[key] == nil then
+                        FUNCTIONS[key] = defined
+                     elseif FUNCTIONS[key] ~= defined then
+                        FUNCTIONS[key] = false
+                     end
+                  end
+               end
+            end
+         end
+      end
+   end)
    ctx:each_node(function(node)
       if node.tag == "Set" or node.tag == "OpSet" or node.tag == "Local" then
          local targets, values = node[1], node[2]

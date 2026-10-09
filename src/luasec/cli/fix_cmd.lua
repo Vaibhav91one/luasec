@@ -142,6 +142,8 @@ function fix.run(argv, root, out, err)
       command = command .. " " .. agent.skip
    end
    -- luasec: ignore 701  the agent name is from the AGENTS table and the prompt is single-quoted
+   -- luasec: ignore 709  the prompt comes from luasec's own docs/rules page (the "file read"
+   -- source) and is quote()d; reported one step lower as a quoted flow, which is what this is
    local launched = os.execute(command .. " " .. quote(prompt))
    return launched and 0 or 1
 end

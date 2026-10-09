@@ -143,13 +143,22 @@ function callgraph.call_sites(chstate)
    local sites = {}
    local globals = globals_of(chstate)
 
-   local function record(node, item)
-      if type(node) ~= "table" then return end
+   -- Nested calls are sites too: `ipairs(parse(x))` and `os.execute(run(x))`
+   -- evaluate `parse` and `run` just as `local r = parse(x)` does, and a callee
+   -- that only ever appears inside another call's arguments was never bound.
+   -- A Function node is not entered: its body is its own line. Depth-capped so
+   -- a pathological expression cannot recurse without bound.
+   local function record(node, item, depth)
+      depth = depth or 0
+      if type(node) ~= "table" or depth > 64 or node.tag == "Function" then return end
       if node.tag == "Call" or node.tag == "Invoke" then
          local callee = resolve_callee(node[1], item, globals, 0)
          if callee then
             sites[#sites + 1] = {callee = callee, args = args_of(node), item = item}
          end
+      end
+      for _, child in ipairs(node) do
+         if type(child) == "table" then record(child, item, depth + 1) end
       end
    end
 

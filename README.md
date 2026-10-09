@@ -381,7 +381,7 @@ image carries beside its `.lua` files:
 | | |
 | --- | --- |
 | Findings | **610** across 706 scanned files |
-| Severity | 24 critical, 523 high, 34 medium, 30 low |
+| Severity | 31 critical, 500 high, 34 medium, 45 low |
 
 Every per-code count in the table above is in
 [docs/precision.md](docs/precision.md), and it is the only place one appears.
@@ -439,9 +439,16 @@ than one that does not have the feature.
   (e.g. `m.id(x)`, or `m:id(x)`) is followed too. A method call on any other
   object, a function passed as a value, and a `require(...)` called inline inside
   an expression are not: that flow is missed.
-- **A call that returns a cursor is opaque to the credential rule.** A factory
-  named `open_section()` that returns `uci.cursor()` is not recognised as a
-  config handle, so a credential written through it is not reported.
+- **Tables are tainted whole.** A table that was given a tainted element
+  (`argv[#argv+1] = v`, `table.insert`) is tainted, and so is every element read
+  back from it by a computed index or a loop; a named field stays exact
+  (`t.safe` is not tainted by `t.cmd = x`). A table returned by a function
+  carries what the call's arguments put in it.
+- **A cursor factory is followed only inside its own file.** A function that
+  returns `uci.cursor()` is a config handle for the credential rule, but a
+  factory defined in another file is not. A tainted or computed value written
+  through a cursor handle (`c:set(...)`) is not a 722 either: that rule matches
+  the `uci.set` spelling only.
 - **Bytecode is triaged, never decompiled.** A `.luac` file is identified and
   its header and prototypes walked; its logic is not recovered.
 - **One scan root is bounded.** A tree that resolves to more than 50,000 paths

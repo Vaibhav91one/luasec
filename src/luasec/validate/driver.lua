@@ -385,6 +385,8 @@ local function capture(interpreter, program, limits, token)
 
    local command = "(\n" .. table.concat(lines, "\n") .. "\n) 2>/dev/null"
    -- luasec: ignore 702  the command is built from quoted, sandboxed fragments, not from request data
+   -- luasec: ignore 712  the same command: a partly quoted flow whose "file read" sources are
+   -- luasec's own child.lua and the random nonce it reads from /dev/urandom
    -- luasec: ignore 709  same, and for the same reason. #281 made this visible:
    -- the two things that reach `command` are `child_source()` reading luasec's
    -- own child.lua, and `opts.lua or os.getenv("LUASEC_LUA") or os.getenv(

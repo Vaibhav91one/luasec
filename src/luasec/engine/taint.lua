@@ -11,6 +11,17 @@
 -- --whole-program a required module's function return is followed too. What is
 -- not followed: a method call (M:m), a function passed as a value, and
 -- anything past the depth cap. Sinks consume taint and produce findings.
+--
+-- Tables. A named field is tracked exactly (`t.cmd = x` taints `t.cmd` only). An
+-- element put in by a computed key, `t[#t+1] = x` or `table.insert` taints the
+-- variable holding the table (container_write), a table used as a whole carries
+-- every field written to it (whole_fields), and the names of a `for ... in` loop
+-- carry what the loop iterates. There is no per-slot model of an array. A
+-- function that builds and returns a table is re-evaluated under each call's own
+-- arguments (return_taint's bindings), so the summary is per call and not the
+-- merge of every caller. Bounds: whole_fields answers once per table per
+-- propagation round or rebinding (`stamp`), `visiting` cuts a cycle, and the
+-- 20-round MAX_ITERATIONS and the depth cap of 32 apply as to every expression.
 local platform_api = require "luasec.registry.platform_api"
 local codes = require "luasec.rules.codes"
 local const_eval = require "luasec.util.const_eval"
@@ -43,7 +54,7 @@ end
 
 -- Forward declarations: these helpers refer to each other, so their definition
 -- order in this file is not significant.
-local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint
+local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint, taint_of_expr
 local check_assignment_sink
 
 -- ------------------------------------------------------------ taint sets
@@ -220,6 +231,13 @@ local function new_state()
       value_taint = setmetatable({}, {__mode = "k"}),  -- luacheck value -> taint set
       global_taint = {},                              -- dotted global path -> taint set
       table_fields = setmetatable({}, {__mode = "k"}), -- Table node -> {key -> taint set}
+      -- Every value written to a Table node's fields, with the item it was
+      -- written at: [{node, item}], so the whole table can be evaluated again
+      -- under another call's argument bindings (whole_fields).
+      field_writes = setmetatable({}, {__mode = "k"}),
+      visiting = {},                                   -- Table nodes whole_fields is inside
+      whole_cache = setmetatable({}, {__mode = "k"}),  -- Table node -> {stamp, set}
+      stamp = 0,                                       -- moves when a cached whole table may be stale
       -- The same table's fields as AST nodes rather than taint. Kept apart
       -- because `table_fields` is keyed by field name, and a table with a
       -- field called `nodes` is a table like any other.
@@ -304,6 +322,38 @@ local function table_fields_of(base, item, state)
       state.table_fields[table_node] = fields
    end
    return fields
+end
+
+-- What a table carries when it is used as a whole -- returned, passed on, joined
+-- into a string -- rather than read at one literal field: everything written to
+-- any of its fields. A field read (`t.safe`) does not come through here, so it
+-- keeps its own field's taint; the whole table is the union (#317, #309).
+--
+-- The writes are re-evaluated here instead of read back from `table_fields`, so
+-- that a function which builds and returns a table is summarised under the
+-- argument bindings of the call being followed (return_taint) and not under the
+-- merge of every caller: `parse("fixed").path` stays clean next to a tainted
+-- `parse(x)`. `visiting` stops `t.me = t` from recursing into itself.
+local function whole_fields(base, item, state, depth)
+   local table_node = resolve_table_node(base, item, state)
+   local writes = table_node and state.field_writes[table_node]
+   if not writes then return new_set() end
+   -- Answered once per table per stamp. Without this, tables that each store the
+   -- previous one twice (`t2.a, t2.b = t1, t1`) are re-expanded along every path,
+   -- 2^n evaluations for n tables; `visiting` only stops a cycle, not a diamond.
+   -- The stamp moves whenever the answer can: each propagation round, and each
+   -- time return_taint rebinds the formals.
+   local cached = state.whole_cache[table_node]
+   if cached and cached.stamp == state.stamp then return cached.set end
+   if state.visiting[table_node] then return new_set() end
+   state.visiting[table_node] = true
+   local out = new_set()
+   for _, write in ipairs(writes) do
+      set_union_into(out, taint_of_expr(write.node, write.item, state, (depth or 0) + 1))
+   end
+   state.visiting[table_node] = nil
+   state.whole_cache[table_node] = {stamp = state.stamp, set = out}
+   return out
 end
 
 -- The AST node a table field was given, or nil when this scan cannot see the
@@ -446,7 +496,6 @@ end
 
 -- ------------------------------------------------------------ expressions
 
-local taint_of_expr
 
 -- Taint of a variable at a given item: union over the reaching definitions.
 -- When flow-sensitive dataflow was skipped, fall back to the last assignment
@@ -529,7 +578,13 @@ end
 
 local function taint_of_index(node, item, state, depth)
    local result = new_set()
-   set_union_into(result, taint_of_expr(node[1], item, state, depth + 1))
+   -- A named variable is read bare here: `t.safe` must not pick up `t.cmd`
+   -- just because the whole of `t` would (taint_of_expr's Id branch).
+   if node[1].tag == "Id" then
+      set_union_into(result, taint_of_var(node[1], item, state))
+   else
+      set_union_into(result, taint_of_expr(node[1], item, state, depth + 1))
+   end
    set_union_into(result, taint_of_expr(node[2], item, state, depth + 1))
 
    local read = source_of_value(node, item, state, depth)
@@ -540,6 +595,9 @@ local function taint_of_index(node, item, state, depth)
    local table_node = resolve_table_node(node[1], item, state)
    if fields and node[2] and node[2].tag == "String" then
       set_union_into(result, fields[node[2][1]] or new_set())
+   elseif fields then
+      -- `t[i]`, `t[#t]`, `t[k]`: no field name to narrow by, so any field.
+      set_union_into(result, whole_fields(node[1], item, state, depth))
    end
 
    -- A value read back from a whole row (store key `T.*`) and then indexed by a
@@ -588,6 +646,12 @@ local function spread_dots(arg_nodes, arg_taints, fn)
    if last == 0 or arg_nodes[last].tag ~= "Dots" then return end
    for i = last + 1, #(fn[1] or {}) do arg_taints[i] = arg_taints[last] end
 end
+
+-- The string library functions whose result is made of their first argument.
+local STRING_METHODS = {
+   byte = true, sub = true, gsub = true, gmatch = true, match = true,
+   lower = true, upper = true, rep = true, reverse = true,
+}
 
 -- A call expression: sources introduce taint, propagators pass it through.
 local function taint_of_call(node, item, state, depth)
@@ -696,6 +760,14 @@ local function taint_of_call(node, item, state, depth)
             end
          end
       end
+   end
+
+   -- `str:sub(i, j)` is `string.sub(str, i, j)`: the `string.*` propagator names
+   -- the library spelling, and a colon call on a string says the same thing with
+   -- the receiver first. Only the string library's own names, so `obj:get()` on
+   -- a tainted object is not read as a string operation.
+   if node.tag == "Invoke" and method_name and STRING_METHODS[method_name] then
+      set_union_into(result, taint_of_expr(callee, item, state, depth + 1))
    end
 
    -- Anything else: the result can still carry taint from the callee itself
@@ -813,7 +885,9 @@ taint_of_expr = function(node, item, state, depth)
 
    local tag = node.tag
    if tag == "Id" then
-      return taint_of_var(node, item, state)
+      local result = taint_of_var(node, item, state)
+      if node.var then set_union_into(result, whole_fields(node, item, state, depth)) end
+      return result
    elseif tag == "Index" then
       return taint_of_index(node, item, state, depth)
    elseif tag == "Call" or tag == "Invoke" then
@@ -869,6 +943,7 @@ return_taint = function(fn, arg_taints, state, depth)
       state.arg_binding[var] = arg_taint
    end
    state.returning[fn] = true
+   state.stamp = state.stamp + 1
 
    -- Cache key: sorted descriptor ids of each bound argument, joined
    -- by formals with ";", so the same argument taint rebinds at once.
@@ -896,6 +971,7 @@ return_taint = function(fn, arg_taints, state, depth)
          for i, var in ipairs(formals) do
             state.arg_binding[var] = saved[i]
          end
+         state.stamp = state.stamp + 1
          error(err)
       end
       -- Store a copy so later mutation of result cannot corrupt the cache.
@@ -910,6 +986,7 @@ return_taint = function(fn, arg_taints, state, depth)
    for i, var in ipairs(formals) do
       state.arg_binding[var] = saved[i]
    end
+   state.stamp = state.stamp + 1
 
    return result
 end
@@ -923,6 +1000,21 @@ local function record_table_write(node, value_node, item, state, depth)
    depth = depth or 0
    if depth > 16 or type(node) ~= "table" then return end
    local tag = node.tag
+
+   local function note_write(table_node, value, at)
+      local writes = state.field_writes[table_node]
+      if not writes then
+         writes = {seen = {}}
+         state.field_writes[table_node] = writes
+      end
+      if not writes.seen[value] then
+         writes.seen[value] = true
+         writes[#writes + 1] = {node = value, item = at}
+         -- A new write can change what a whole table already read this round
+         -- was found to hold, so the round is not the last one.
+         state.grew = true
+      end
+   end
 
    local function hold(table_node, key, held)
       -- `M.run = L` is a field write with no reaching definition, so the value
@@ -946,6 +1038,7 @@ local function record_table_write(node, value_node, item, state, depth)
                state.table_fields[node] = fields
             end
             hold(node, pair_node[1][1], pair_node[2])
+            note_write(node, pair_node[2], item)
             set_union_into(field_set(fields, pair_node[1][1]),
                taint_of_expr(pair_node[2], item, state, depth + 1))
          end
@@ -954,13 +1047,64 @@ local function record_table_write(node, value_node, item, state, depth)
       local fields = table_fields_of(node[1], item, state)
       if fields and value_node then
          local table_node = resolve_table_node(node[1], item, state)
-         if table_node then hold(table_node, node[2][1], value_node) end
+         if table_node then
+            hold(table_node, node[2][1], value_node)
+            note_write(table_node, value_node, item)
+         end
          set_union_into(field_set(fields, node[2][1]),
             taint_of_expr(value_node, item, state, depth + 1))
       end
    elseif tag == "Paren" then
       record_table_write(node[1], value_node, item, state, depth + 1)
    end
+end
+
+-- A tainted element put into a table makes the table tainted, at the level of
+-- the variable that holds it: `argv[#argv+1] = v`, `t[k] = v` and
+-- `table.insert(t, v)` add `v`'s taint to every definition of `t` that reaches
+-- the write, so a later read of `t` as a whole (a command line built from it, a
+-- `return t`, an argument to another function) carries it.
+--
+-- The trade-off is deliberate and one-sided. A table that has ever been given a
+-- tainted element is tainted whole, and an index by a variable or a counter
+-- reads that whole taint; there is no per-slot model of an array, so a constant
+-- `t[1]` read from a table whose `t[2]` was tainted is tainted too. Named
+-- fields are the exception and stay exact: `t.safe` is not tainted by
+-- `t.cmd = x` (see taint_of_index and whole_fields). A write through a
+-- sanitizer-quoted value stays quoted, because the descriptor goes in as-is.
+local function container_write(base, written, item, state)
+   if type(base) ~= "table" or base.tag ~= "Id" or type(written) ~= "table" then
+      return
+   end
+   local added = taint_of_expr(written, item, state, 1)
+   if set_is_empty(added) then return end
+   if base.var then
+      for _, value in ipairs(value_nodes(base.var, item)) do
+         local existing = state.value_taint[value]
+         if not existing then
+            existing = new_set()
+            state.value_taint[value] = existing
+         end
+         if set_union_into(existing, added) then state.grew = true end
+      end
+   else
+      local existing = state.global_taint[base[1]]
+      if not existing then
+         existing = new_set()
+         state.global_taint[base[1]] = existing
+      end
+      if set_union_into(existing, added) then state.grew = true end
+   end
+end
+
+-- Does `lhs = value` write an element the field-exact model cannot place? A
+-- computed key, or a field of a table this scan cannot see (a parameter, a
+-- call's result): both are container writes.
+local function note_element_write(lhs, written, item, state)
+   if lhs.tag ~= "Index" then return end
+   local named = lhs[2] and lhs[2].tag == "String"
+   if named and resolve_table_node(lhs[1], item, state) then return end
+   container_write(lhs[1], written, item, state)
 end
 
 -- ------------------------------------------------------------ sinks
@@ -1379,6 +1523,12 @@ local function check_calls_in(expr, item, state, chstate, opts, depth)
       check_shape(expr, item, state, chstate, opts)
       check_sink(expr, item, state, chstate, opts)
       check_store_write(expr, item, state)
+      if expr.tag == "Call" and #expr >= 3 then
+         local path = callee_path(expr[1], item, state, 0)
+         if path == "table.insert" then
+            container_write(expr[2], expr[#expr], item, state)
+         end
+      end
    end
    for _, child in ipairs(expr) do
       if type(child) == "table" then
@@ -1411,12 +1561,44 @@ local function propagate(chstate, state, opts)
       -- Cached return taint is only valid for the current value_taint snapshot:
       -- taint only grows, so a cached answer computed before growth may be stale.
       state.return_cache = {}
+      state.grew = false
+      state.stamp = state.stamp + 1
 
       for _, line in ipairs(chstate.lines) do
+         -- A generic `for` is a Noop on the loop, an Eval per iterated
+         -- expression, then a Local with the loop names and no right-hand side.
+         -- These two maps join the Local back to what it iterates.
+         local forin_of, eval_of = {}, {}
          for _, item in ipairs(line.items) do
             local tag = item.tag
+            if tag == "Noop" and type(item.node) == "table" and item.node.tag == "Forin" then
+               forin_of[item.node[1]] = item.node
+            elseif tag == "Eval" and type(item.node) == "table" then
+               eval_of[item.node] = item
+            end
 
             if tag == "Local" or tag == "Set" or tag == "OpSet" then
+               -- The loop names of `for k, v in ipairs(t)` hold what `t` holds:
+               -- an element read out of a tainted container is tainted, which is
+               -- the read half of the container model (container_write).
+               local forin = not item.rhs and forin_of[item.lhs]
+               if forin then
+                  local loop_taint = new_set()
+                  for _, expr in ipairs(forin[2] or {}) do
+                     set_union_into(loop_taint, taint_of_expr(expr, eval_of[expr] or item, state, 0))
+                  end
+                  if not set_is_empty(loop_taint) then
+                     for _, value in pairs(item.set_variables or {}) do
+                        local existing = state.value_taint[value]
+                        if not existing then
+                           existing = new_set()
+                           state.value_taint[value] = existing
+                        end
+                        if set_union_into(existing, loop_taint) then changed = true end
+                     end
+                  end
+               end
+
                -- Check every RHS expression for calls and invokes used as
                -- values (e.g. `local f = loadstring(x)`), so sinks are
                -- found wherever their result is consumed.
@@ -1435,6 +1617,7 @@ local function propagate(chstate, state, opts)
                   local written = item.rhs and item.rhs[index]
                   if lhs_node.tag == "Index" then
                      record_table_write(lhs_node, written, item, state, 0)
+                     note_element_write(lhs_node, written, item, state)
                   end
                end
 
@@ -1496,7 +1679,7 @@ local function propagate(chstate, state, opts)
          end
       end
 
-      if not changed then
+      if not changed and not state.grew then
          return
       end
    end
