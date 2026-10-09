@@ -7,6 +7,7 @@
 local walk = {}
 
 local template = require "luasec.cli.template"
+local nginxconf = require "luasec.cli.nginxconf"
 
 local LUA_EXTENSIONS = {".lua", ".luac", ".rockspec"}
 
@@ -164,11 +165,11 @@ local function is_binary(head)
       or head:find("[\1-\8\11\12\14-\31\127]") ~= nil
 end
 
--- A template page counts as Lua only when it holds a Lua block, which means
+-- A template page or nginx.conf counts as Lua only when it holds a Lua block, which means
 -- reading the whole file. Past 2 MiB the page is skipped rather than read.
 local TEMPLATE_MAX_BYTES = 2000000
 
-local function template_file_has_lua(path)
+local function file_has_lua(path, has_lua)
    local handle = io.open(path, "rb")
    if not handle then return false end
    local size = handle:seek("end")
@@ -180,7 +181,7 @@ local function template_file_has_lua(path)
    local text = handle:read("*a")
    handle:close()
    if not text then return false end
-   return template.has_lua(text, path)
+   return has_lua(text, path)
 end
 
 -- Is this file Lua? An extension decides it when it is one we know. Otherwise
@@ -209,8 +210,10 @@ local function looks_like_lua(path)
    end
 
    if template.is_template_path(path) and path:lower():sub(-3) ~= ".lp" then
-      return template_file_has_lua(path)
+      return file_has_lua(path, template.has_lua)
    end
+   -- An nginx.conf is Lua only through a `*_by_lua_block` (#296); `.conf` is otherwise not Lua.
+   if nginxconf.is_conf_path(path) then return file_has_lua(path, nginxconf.has_lua) end
 
    local by_extension = is_lua_extension(path)
    if by_extension == true then return true end

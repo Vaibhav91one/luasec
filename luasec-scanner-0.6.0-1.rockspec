@@ -37,6 +37,7 @@ build = {
       ["luasec.cli.mcp_cmd"] = "src/luasec/cli/mcp_cmd.lua",
       ["luasec.cli.menu"] = "src/luasec/cli/menu.lua",
        ["luasec.cli.progress"] = "src/luasec/cli/progress.lua",
+       ["luasec.cli.nginxconf"] = "src/luasec/cli/nginxconf.lua",
        ["luasec.cli.review"] = "src/luasec/cli/review.lua",
       ["luasec.cli.rules_cmd"] = "src/luasec/cli/rules_cmd.lua",
       ["luasec.cli.scope"] = "src/luasec/cli/scope.lua",

@@ -38,6 +38,10 @@ root=${1:-corpus}
 # it is the only list: clone() appends to it, verify() and --list read it, so
 # there is no second copy to fall out of step with the first.
 CORPUS=()
+# name|source dir (relative to the repo root). Entries that live in this repository rather than
+# upstream, so there is no revision to pin: they are copied in and verified byte for byte.
+LOCAL=()
+repo=$(cd "$(dirname "$0")/.." && pwd)
 
 clone() {
   local name=$1 url=$2 rev=${3:-} min_lua=${4:-0} what=${5:-}
@@ -139,6 +143,22 @@ clone lua-nginx-module https://github.com/openresty/lua-nginx-module.git 4b21d8f
 clone lua-resty-lock https://github.com/openresty/lua-resty-lock.git 9dc550e56b6f3b1a2f1a31bb270a91813b5b6861 1 \
   "openresty/lua-resty-lock v0.09, shared-dict locking in one line of Lua"
 
+# An authored nginx.conf (#296), the only entry written by the maintainers. It is copied from the
+# repository, not cloned, and --verify diffs it against its source, so an edit to the fixture that
+# is not followed by a re-measure fails here and names the entry.
+local_entry() {
+  local name=$1 src=$2 what=$3
+  CORPUS+=("$name||0|$what")
+  LOCAL+=("$name|$src")
+  if [ "$mode" != clone ]; then return 0; fi
+  echo ">> copying $name from $src"
+  rm -rf "${root:?}/$name"
+  mkdir -p "$root/$name"
+  cp -R "$repo/$src/." "$root/$name/"
+}
+local_entry openresty-authored test/fixtures/openresty-authored \
+  "authored nginx.conf of 15 content_by_lua_block handlers (maintainer-written, not a deployment)"
+
 # ---------------------------------------------------------------- verification
 
 lua_count() { find "$1" -name '*.lua' -type f 2>/dev/null | wc -l | tr -d ' '; }
@@ -187,6 +207,17 @@ verify() {
         continue
       fi
     fi
+
+    local item lname lsrc
+    for item in "${LOCAL[@]}"; do
+      IFS='|' read -r lname lsrc <<<"$item"
+      if [ "$lname" = "$name" ] && ! diff -r "$repo/$lsrc" "$dir" >/dev/null 2>&1; then
+        echo "corpus-verify: FAIL  $name: $dir differs from $lsrc ($what)"
+        echo "corpus-verify:       run \`make corpus\` to copy it again, then re-measure"
+        problems=$((problems + 1))
+        continue 2
+      fi
+    done
 
     echo "corpus-verify: ok    $name${rev:+ @ ${rev:0:12}}  $(lua_count "$dir") .lua  - $what"
   done
