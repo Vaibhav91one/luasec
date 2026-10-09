@@ -581,6 +581,14 @@ local function args_of(node)
    return args
 end
 
+-- A trailing `...` in a call expands to fill every formal past it, so
+-- f(...) feeds all of f's parameters, not just the first.
+local function spread_dots(arg_nodes, arg_taints, fn)
+   local last = #arg_nodes
+   if last == 0 or arg_nodes[last].tag ~= "Dots" then return end
+   for i = last + 1, #(fn[1] or {}) do arg_taints[i] = arg_taints[last] end
+end
+
 -- A call expression: sources introduce taint, propagators pass it through.
 local function taint_of_call(node, item, state, depth)
    local result = new_set()
@@ -603,7 +611,9 @@ local function taint_of_call(node, item, state, depth)
    -- Hoisted so the fallback (below the `if path then` block) can read it.
    local sanitized
 
-   if method_name then
+   -- A dotted path a profile declares (`luci.http.formvalue`) names the source
+   -- exactly; the method name is the fallback for a receiver we cannot name.
+   if method_name and not (path and platform_api.match_source(path)) then
       local by_method = platform_api.match_method_source(method_name)
       if by_method then
          set_add(result, {
@@ -718,6 +728,7 @@ local function taint_of_call(node, item, state, depth)
          for i = 1, #arg_nodes do
             arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
          end
+         spread_dots(arg_nodes, arg_taints, fn)
          set_union_into(result, return_taint(fn, arg_taints, state, depth))
       end
    elseif not sanitized and node.tag == "Call"
@@ -734,6 +745,7 @@ local function taint_of_call(node, item, state, depth)
          for i = 1, #arg_nodes do
             arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
          end
+         spread_dots(arg_nodes, arg_taints, fn)
          if looks_like_shell_quote(fn) then
             -- A quoting field helper neutralizes the shell sink: each argument's
             -- taint is quoted rather than propagated raw, and the return is not

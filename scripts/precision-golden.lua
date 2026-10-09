@@ -93,16 +93,16 @@
 return {
    corpus_files = 691,
    scanned_files = 706,
-   total = 611,
+   total = 610,
    codes = {
-      [701] = 50,
+      [701] = 46,
       [702] = 14,
       [703] = 20,
       [704] = 21,
       [705] = 22,
       [707] = 346,
-      [708] = 22,
-      [709] = 23,
+      [708] = 21,
+      [709] = 27,
       [710] = 1,
       -- Zero, and recorded for the same reason 741 and 747 are: a code measured
       -- at zero is an assertion that the rule stays quiet here. 711 was six

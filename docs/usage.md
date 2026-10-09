@@ -125,6 +125,11 @@ The LuCI web interface, which adds HTTP request parameters (`luci.http.formvalue
 and the request environment (`luci.http.getenv`, which is how a handler reads
 `REMOTE_ADDR` and the `HTTP_*` headers) as sources with `certain` confidence, and
 a dispatch-tree exposure sink (`724`).
+The CBI form is a source too: a `field:formvalue(section)` method call is request
+data whatever the field is named (`high`, matched on the method name, so it only
+applies under this std), and so is the `value` a model's `field.validate(self,
+value, section)` and `field.write(self, section, value)` callbacks are called with
+(`medium`, only in a file under `model/cbi/`, like the dispatcher arguments).
 
 It also declares the dispatcher's own calling convention. `luci.dispatcher`
 resolves `/admin/luci/<module>/<action>/<segment>...` and calls the module's
