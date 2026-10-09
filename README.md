@@ -380,8 +380,8 @@ image carries beside its `.lua` files:
 
 | | |
 | --- | --- |
-| Findings | **620** across 707 scanned files |
-| Severity | 36 critical, 504 high, 35 medium, 45 low |
+| Findings | **670** across 707 scanned files |
+| Severity | 36 critical, 554 high, 35 medium, 45 low |
 
 Every per-code count in the table above is in
 [docs/precision.md](docs/precision.md), and it is the only place one appears.
@@ -445,10 +445,16 @@ than one that does not have the feature.
   (`t.safe` is not tainted by `t.cmd = x`). A table returned by a function
   carries what the call's arguments put in it.
 - **A cursor factory is followed only inside its own file.** A function that
-  returns `uci.cursor()` is a config handle for the credential rule, but a
-  factory defined in another file is not. A tainted or computed value written
-  through a cursor handle (`c:set(...)`) is not a 722 either: that rule matches
-  the `uci.set` spelling only.
+  returns `uci.cursor()` is a config handle for the credential rule (747) and
+  for 722, but a factory defined in another file is not, even under
+  `--whole-program`: that pass carries taint across files, not "this call
+  returns a handle", and handle tracking is a per-file walk with its own memo.
+  Wiring the two would need a cross-file resolver inside that walk.
+- **A value written through a cursor handle is a 722 only when tainted.**
+  `c:set(...)`, `c:section(...)`, `c:tset(...)` and the list methods report a
+  value that request data reaches. A constant or merely computed value is not
+  reported (the literal `uci.set` form still reports a computed one), and
+  neither is a tainted section or config name.
 - **Bytecode is triaged, never decompiled.** A `.luac` file is identified and
   its header and prototypes walked; its logic is not recovered.
 - **One scan root is bounded.** A tree that resolves to more than 50,000 paths

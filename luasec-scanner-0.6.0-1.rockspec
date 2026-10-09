@@ -87,6 +87,7 @@ build = {
       ["luasec.rules.registry"] = "src/luasec/rules/registry.lua",
       ["luasec.rules.secrets"] = "src/luasec/rules/secrets.lua",
       ["luasec.util.const_eval"] = "src/luasec/util/const_eval.lua",
+      ["luasec.util.uci_cursor"] = "src/luasec/util/uci_cursor.lua",
       ["luasec.util.util"] = "src/luasec/util/util.lua",
       ["luasec.validate.child"] = "src/luasec/validate/child.lua",
       ["luasec.validate.driver"] = "src/luasec/validate/driver.lua",

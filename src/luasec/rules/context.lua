@@ -36,6 +36,8 @@ local function walk(node, visit, depth)
    end
 end
 
+M.walk = walk
+
 function M.new(chstate, source, opts)
    local self = setmetatable({
       chstate = chstate,
