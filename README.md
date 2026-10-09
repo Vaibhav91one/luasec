@@ -374,14 +374,14 @@ make corpus && make precision
 
 Over **691 files** of real Lua: upstream LuCI (current and the `openwrt-18.06`
 branch, pinned to a commit), LuaJIT, the OpenWrt package tree, and six OpenResty
-repositories pinned to released tags. The walker selects **706** of them — the
+repositories pinned to released tags. The walker selects **707** of them — the
 extra paths are the extensionless CGI handlers and generated scripts a firmware
 image carries beside its `.lua` files:
 
 | | |
 | --- | --- |
-| Findings | **610** across 706 scanned files |
-| Severity | 31 critical, 500 high, 34 medium, 45 low |
+| Findings | **620** across 707 scanned files |
+| Severity | 36 critical, 504 high, 35 medium, 45 low |
 
 Every per-code count in the table above is in
 [docs/precision.md](docs/precision.md), and it is the only place one appears.

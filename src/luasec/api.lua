@@ -15,6 +15,7 @@ local inline_directives = require "luasec.engine.inline_directives"
 local detect = require "luasec.bytecode.detect"
 local bytecode_triage = require "luasec.bytecode.triage"
 local template = require "luasec.cli.template"
+local nginxconf = require "luasec.cli.nginxconf"
 local render = require "luasec.report.render"
 local report_contract = require "luasec.report.findings"
 local pipeline = require "luasec.engine.pipeline"
@@ -321,7 +322,16 @@ local function analyze_files(paths, opts)
       else
          -- A template page is scanned by its Lua blocks, blanked to the page's
          -- own lines and columns; a page with no block is skipped, not parsed.
-         local analysed, skipped = file.source, false
+         local analysed, skipped, file_opts = file.source, false, opts
+         if nginxconf.is_conf_path(file.path) then
+            -- An nginx.conf's Lua is ngx.* code whatever --std says (#296).
+            if nginxconf.has_lua(file.source) then
+               analysed = nginxconf.extract(file.source)
+               file_opts = setmetatable({std = (opts.std or "") .. "+openresty"}, {__index = opts})
+            else
+               skipped = true
+            end
+         end
           if template.is_template_path(file.path) then
              if template.has_lua(file.source, file.path) then
                 analysed = template.extract(file.source, file.path)
@@ -332,7 +342,7 @@ local function analyze_files(paths, opts)
          if skipped then
             result = {path = file.path, findings = {}, final = true}
          else
-            result = pipeline.analyze_source(analysed, opts, file.path)
+            result = pipeline.analyze_source(analysed, file_opts, file.path)
             result.path = file.path
          end
       end

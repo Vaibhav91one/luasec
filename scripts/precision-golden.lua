@@ -47,6 +47,12 @@
 -- update this file and docs/precision.md in the same commit. The gate is built so
 -- that updating one without the other fails, which is the whole point of it.
 
+-- #296 added a seventh kind of entry: `openresty-authored`, one nginx.conf of 15 handlers the
+-- maintainers wrote, copied in from test/fixtures by clone-corpus.sh. It is the only entry
+-- that is not a .lua file (so corpus_files stays 691) and the only one the walk reads through
+-- its `*_by_lua_block` bodies. It added exactly 10 findings in 1 file: 701 +1, 709 +5, 728 +1,
+-- 730 +3, and nothing else moved: the other ten entries are finding for finding what they were.
+--
 -- The corpus grew in #262: six OpenResty entries joined the four firmware ones,
 -- and every number in that change was larger than the one before it. The growth
 -- was new measurement surface and nothing else, and the split was taken before
@@ -92,17 +98,17 @@
 --      allowed to move.
 return {
    corpus_files = 691,
-   scanned_files = 706,
-   total = 610,
+   scanned_files = 707,
+   total = 620,
    codes = {
-      [701] = 45,
+      [701] = 46,
       [702] = 13,
       [703] = 19,
       [704] = 21,
       [705] = 22,
       [707] = 346,
       [708] = 21,
-      [709] = 29,
+      [709] = 34,
       [710] = 2,
       -- Zero, and recorded for the same reason 741 and 747 are: a code measured
       -- at zero is an assertion that the rule stays quiet here. 711 was six
@@ -113,8 +119,9 @@ return {
       [724] = 25,
       [725] = 2,
       [727] = 16,
-      [728] = 1,
+      [728] = 2,
       [741] = 0,
+      [730] = 3,
       [747] = 15,
       [901] = 10,
       [902] = 0,
