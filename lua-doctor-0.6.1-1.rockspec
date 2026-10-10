@@ -1,9 +1,9 @@
 rockspec_format = "3.0"
 package = "lua-doctor"
-version = "0.6.0-1"
+version = "0.6.1-1"
 source = {
-   url = "https://github.com/doctor-labs/lua-doctor/releases/download/v0.6.0/lua-doctor-0.6.0.tar.gz",
-   dir = "lua-doctor-0.6.0",
+   url = "https://github.com/doctor-labs/lua-doctor/releases/download/v0.6.1/lua-doctor-0.6.1.tar.gz",
+   dir = "lua-doctor-0.6.1",
 }
 description = {
    summary = "Static security scanner for Lua in embedded firmware: finds remote code execution.",
