@@ -1,6 +1,6 @@
 # Architecture
 
-`luasec` is two things: a static analyzer that finds untrusted data reaching
+`lua-doctor` is two things: a static analyzer that finds untrusted data reaching
 execution, and a set of detectors for malicious Lua that is already present.
 Both work on the same parsed program.
 
@@ -102,7 +102,7 @@ The static pass answers "could this data reach execution". The validator answers
 the complementary question: given a candidate payload, does running it actually
 reach execution, and how far does it get before it is stopped.
 
-It is the only part of luasec that executes anything, so it is built around one
+It is the only part of lua-doctor that executes anything, so it is built around one
 rule: **the payload never runs in the analyzer's process.** `validate/driver.lua`
 assembles `validate/child.lua`, the payload and the limits into a single
 `lua -e` program, spawns it, and reads back a verdict. The parent only ever sees
@@ -217,7 +217,7 @@ argument it passed to a sink (`sinks_reached[].arg`) and its own error message
 The plain report labels them, escapes control bytes in them and prints them in a
 `payload|` gutter; the JSON names them `payload_*` and carries a `note` saying
 which fields they are. The chain, the sink names, the kinds, the line numbers and
-the verdict itself are luasec's, and come from the sandbox rather than the payload.
+the verdict itself are lua-doctor's, and come from the sandbox rather than the payload.
 
 ## What is out of scope
 

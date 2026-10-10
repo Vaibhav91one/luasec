@@ -120,7 +120,7 @@ describe("store hop (729)", function()
    end)
 
    it("pairs across --jobs workers", function()
-      local pipe = assert(io.popen("./bin/luasec --no-progress --std cgilua --jobs 2 --format json "
+      local pipe = assert(io.popen("./bin/lua-doctor --no-progress --std cgilua --jobs 2 --format json "
          .. "test/fixtures/store_hop/writer.lua test/fixtures/store_hop/reader.lua 2>/dev/null"))
       local out = pipe:read("*a")
       pipe:close()

@@ -9,8 +9,8 @@ const assert = require('assert');
 
 const repo = path.resolve(__dirname, '..');
 const pkg = require('./package.json');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'luasec-npm-'));
-const name = `luasec-${pkg.version}`;
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lua-doctor-npm-'));
+const name = `lua-doctor-${pkg.version}`;
 const tarball = path.join(tmp, `${name}.tar.gz`);
 const stage = path.join(tmp, 'stage', name);
 
@@ -20,16 +20,16 @@ for (const file of tracked.concat(execFileSync('find', ['vendor/luacheck', '-typ
   fs.mkdirSync(path.join(stage, path.dirname(file)), { recursive: true });
   fs.copyFileSync(path.join(repo, file), path.join(stage, file));
 }
-fs.chmodSync(path.join(stage, 'bin', 'luasec'), 0o755);
+fs.chmodSync(path.join(stage, 'bin', 'lua-doctor'), 0o755);
 execFileSync('tar', ['czf', tarball, '-C', path.join(tmp, 'stage'), name]);
 
-const env = Object.assign({}, process.env, { LUASEC_TARBALL: tarball, LUASEC_CACHE: path.join(tmp, 'cache') });
-const launcher = path.join(__dirname, 'bin', 'luasec.js');
+const env = Object.assign({}, process.env, { LUA_DOCTOR_TARBALL: tarball, LUA_DOCTOR_CACHE: path.join(tmp, 'cache') });
+const launcher = path.join(__dirname, 'bin', 'lua-doctor.js');
 const run = (args) => spawnSync(process.execPath, [launcher].concat(args), { env, encoding: 'utf8' });
 
 const version = run(['--version']);
 assert.strictEqual(version.status, 0, version.stderr);
-assert.match(version.stdout, new RegExp(`^luasec ${pkg.version.replace(/\./g, '\\.')} `));
+assert.match(version.stdout, new RegExp(`^lua-doctor ${pkg.version.replace(/\./g, '\\.')} `));
 
 const finding = run([path.join(repo, 'test/fixtures/tainted_exec/handler.lua')]);
 assert.strictEqual(finding.status, 1, finding.stderr);
@@ -39,7 +39,7 @@ const again = run(['--score', path.join(repo, 'test/fixtures/clean/report.lua')]
 assert.strictEqual(again.status, 0, again.stderr);
 assert.strictEqual(again.stdout.trim(), '100');
 
-const raceEnv = Object.assign({}, env, { LUASEC_CACHE: path.join(tmp, 'race-cache') });
+const raceEnv = Object.assign({}, env, { LUA_DOCTOR_CACHE: path.join(tmp, 'race-cache') });
 const runAsync = (args) => new Promise((resolve) => {
   const child = spawn(process.execPath, [launcher].concat(args), { env: raceEnv });
   let stderr = '';

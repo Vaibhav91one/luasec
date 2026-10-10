@@ -89,8 +89,8 @@ function doctor.render(list, opts)
    if result.coverage_gaps > 0 then label = label .. ", " .. plural(result.coverage_gaps, "coverage gap") end
    -- Only the label and the filled blocks carry colour. The padding is counted
    -- on the uncoloured text, so the box stays aligned with colour on or off.
-   local head = " luasec"
-   if opts.title then head = head .. "  " .. fit(sanitize(opts.title), BOX_WIDTH - 9) end
+   local head = " lua-doctor"
+   if opts.title then head = head .. "  " .. fit(sanitize(opts.title), BOX_WIDTH - #head - 2) end
    local numbers = (" %d / 100  "):format(result.score)
    local numbers_len = utf8.len(numbers .. label) or #numbers
    local cells = math.max(0, math.min(BAR_CELLS, math.floor(result.score / 100 * BAR_CELLS + 0.5)))
@@ -158,11 +158,11 @@ function doctor.render(list, opts)
       local hidden = 0
       for index = shown + 1, #groups do hidden = hidden + #groups[index].findings end
       out[#out + 1] = ""
-      out[#out + 1] = paint.dim(("%s with %s hidden. luasec --verbose lists everything, --view list is the flat report.")
+      out[#out + 1] = paint.dim(("%s with %s hidden. lua-doctor --verbose lists everything, --view list is the flat report.")
          :format(plural(#groups - shown, "more code"), plural(hidden, "finding")))
    end
    out[#out + 1] = ""
-   out[#out + 1] = paint.dim("Next: luasec why <file>:<line>  ·  luasec rules explain <code>  ·  luasec fix <path>  ·  luasec --summary")
+   out[#out + 1] = paint.dim("Next: lua-doctor why <file>:<line>  ·  lua-doctor rules explain <code>  ·  lua-doctor fix <path>  ·  lua-doctor --summary")
    return table.concat(out, "\n")
 end
 

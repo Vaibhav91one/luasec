@@ -52,7 +52,7 @@ end
 -- a caller iterates it, so `nil` in its place would turn one clear config error
 -- into "bad argument #1 to 'ipairs'" somewhere further out.
 local function raise_config_error(message)
-   error({luasec_config_error = true, message = message}, 0)
+   error({lua_doctor_config_error = true, message = message}, 0)
 end
 
 --- Install the platform profiles and rule files named by `opts`.
@@ -396,7 +396,7 @@ local function finalize(result, opts)
 
    sort_findings(findings)
 
-   -- In-source directives are applied last, so `-- luasec: enable` can undo a
+   -- In-source directives are applied last, so `-- lua-doctor: enable` can undo a
    -- config-level suppression.
    -- The table behind the 012 channel is keyed by line, and a line number in
    -- one file says nothing about a line number in the next. Cleared per file:
@@ -417,7 +417,7 @@ local function finalize(result, opts)
       return findings
    end
 
-   -- In-source directives are applied last, so `-- luasec: enable` can undo a
+   -- In-source directives are applied last, so `-- lua-doctor: enable` can undo a
    -- config-level suppression. allows_all decides the survival of every finding
    -- in one pass: one scan of the directive list for the depth prefix, then each
    -- directive matched at most once per (code, name) key, instead of once per
@@ -426,7 +426,7 @@ local function finalize(result, opts)
    -- a directive we could
    -- not read, and `only` takes the "not selected" branch for a pattern that
    -- cannot match - so the directive suppressed the finding that reports the
-   -- directive, and `-- luasec: only [709` turned a file with a hardcoded root
+   -- directive, and `-- lua-doctor: only [709` turned a file with a hardcoded root
    -- password into a clean report with exit 0. The invariant this whole mechanism
    -- exists to keep is that a broken suppression never hides anything, and here
    -- the broken one hid everything, silently, in the one action that selects
@@ -459,7 +459,7 @@ local function finalize(result, opts)
             kept[#kept + 1] = {
             code = "012", line = unreadable.line, column = 1, end_column = 1,
             severity = "low", confidence = "certain", name = "inline directive",
-            message = ("luasec directive has an unreadable code pattern '%s'")
+            message = ("lua-doctor directive has an unreadable code pattern '%s'")
                :format(unreadable.pattern),
          }
       end

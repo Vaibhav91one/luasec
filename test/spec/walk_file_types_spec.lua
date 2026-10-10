@@ -64,7 +64,7 @@ local TAINTED = "local function ping(host)\n   os.execute(\"ping -c1 \" .. http.
 
 -- What a Test::Nginx spec actually is: a Perl program with a vim modeline, a
 -- `use` line, and the Lua it exercises inside heredocs. The Lua inside is real
--- and luasec does see it through the lexical fallback - that capability is a
+-- and lua-doctor does see it through the lexical fallback - that capability is a
 -- known gap, filed separately - but the file is Perl, and every one of these
 -- parses as a 901/902/903 triple. The heredoc carries a real sink so the test
 -- cannot pass by the file simply having nothing in it.

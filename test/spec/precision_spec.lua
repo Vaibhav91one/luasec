@@ -311,7 +311,7 @@ describe("the measured precision document", function()
    end)
 
    it("says how many files it measured, and which of the two numbers that is", function()
-      -- 562 is what `make corpus` collects; 566 is what luasec analyzed. The
+      -- 562 is what `make corpus` collects; 566 is what lua-doctor analyzed. The
       -- headline carries the second, because that is the denominator the 249
       -- findings were divided by, and the document says so rather than leaving
       -- a reader to guess which number the headline borrowed from the table.
@@ -328,7 +328,7 @@ describe("the measured precision document", function()
       assert_equal(corpus_files, golden.corpus_files,
          "the corpus table claims " .. corpus_files .. " files; the frozen "
          .. "measurement collected " .. golden.corpus_files)
-      assert_true(text:find("luasec selects", 1, true) ~= nil,
+      assert_true(text:find("lua-doctor selects", 1, true) ~= nil,
          "the document does not say which of the two numbers the headline is")
    end)
 
@@ -336,7 +336,7 @@ describe("the measured precision document", function()
       -- A measurement nobody can re-run is an assertion. The command is the
       -- difference between the two, so its absence is a failure.
       local text = read_precision_doc()
-      assert_true(text:find("bin/luasec", 1, true) ~= nil,
+      assert_true(text:find("bin/lua-doctor", 1, true) ~= nil,
          "the document does not say how to reproduce the measurement")
    end)
 

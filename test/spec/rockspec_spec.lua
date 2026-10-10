@@ -22,13 +22,13 @@ local function lua_files(dir)
 end
 
 describe("rockspec", function()
-   local path = "luasec-scanner-" .. version.luasec .. "-1.rockspec"
+   local path = "lua-doctor-" .. version.luasec .. "-1.rockspec"
 
-   it("exists for this version and names the rock luasec-scanner", function()
+   it("exists for this version and names the rock lua-doctor", function()
       local spec = load_rockspec(path)
-      assert_equal(spec.package, "luasec-scanner", "luasec is LuaSec's name on LuaRocks")
+      assert_equal(spec.package, "lua-doctor", "the rock is named for the tool")
       assert_equal(spec.version, version.luasec .. "-1", "version")
-      assert_equal(spec.build.install.bin.luasec, "bin/luasec.lua", "installs the luasec command")
+      assert_equal(spec.build.install.bin["lua-doctor"], "bin/lua-doctor.lua", "installs the lua-doctor command")
    end)
 
    it("lists every module under src/ and vendor/, and nothing else", function()

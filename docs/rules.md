@@ -5,7 +5,7 @@ where one applies, a CWE reference. Each code has its own page under [docs/rules
 
 The 0xx-6xx range is [luacheck](https://github.com/lunarmodules/luacheck)'s
 vocabulary and a code in it is never reused here - a spec fails the build on a
-collision with the reserved set. The one exception is `012`, which is luasec's
+collision with the reserved set. The one exception is `012`, which is lua-doctor's
 and was not always: the suppression-directive code sat on `021`, which is
 luacheck's, so the same finding meant one thing in this report and another in
 luacheck's.
@@ -18,7 +18,7 @@ default), `low` (shape only, no proven flow).
 
 | Code | Severity | CWE | Meaning |
 | --- | --- | --- | --- |
-| 012 | low | CWE-0 | a `-- luasec:` suppression directive could not be read |
+| 012 | low | CWE-0 | a `-- lua-doctor:` suppression directive could not be read |
 
 ## 7xx - execution and dynamic code
 
@@ -111,7 +111,7 @@ the body is the finding.
 
 **Two contexts lower one finding to `low`, and neither drops it.** A demotion is
 a statement about exposure, not about detection, so everything 747 finds is still
-in the report and `luasec --only 747` still finds it. The first is **a file that
+in the report and `lua-doctor --only 747` still finds it. The first is **a file that
 is part of a test suite** - a path segment named `test`, `tests`, `spec`, `specs`
 or `t`, or a file whose own name begins or ends with one. A credential-shaped
 literal in a test fixture is the fixture: a parser's table of URLs has to carry a
@@ -152,7 +152,7 @@ embedding it.
 
 ### 8xx notes
 
-`luasec` does not decompile. A bytecode file always carries an 801: the source is
+`lua-doctor` does not decompile. A bytecode file always carries an 801: the source is
 not available to analyze, and any statement about what the chunk does is a
 statement about its data, not about its code.
 

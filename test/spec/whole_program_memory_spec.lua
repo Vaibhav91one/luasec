@@ -33,7 +33,7 @@ local describe, it = harness.describe, harness.it
 local assert_true, assert_false = harness.assert_true, harness.assert_false
 
 -- The interpreter running this suite, and the package.path the Makefile gives
--- it, so the measuring process resolves luasec exactly as this process did.
+-- it, so the measuring process resolves lua-doctor exactly as this process did.
 local PACKAGE_PATH = table.concat({"./src/?.lua", "./src/?/init.lua",
    "./vendor/?.lua", "./vendor/?/init.lua"}, ";") .. ";"
 local LUA_RUN = "./build/lua-5.4.9/src/lua -e 'package.path=\"" .. PACKAGE_PATH .. "\"..package.path'"

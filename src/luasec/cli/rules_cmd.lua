@@ -1,4 +1,4 @@
--- `luasec rules`: the rule catalogue from the command line. `list` prints one
+-- `lua-doctor rules`: the rule catalogue from the command line. `list` prints one
 -- line per code and `explain` prints a code's doc page. The pages live in
 -- docs/rules/ beside the installation, the same files the repository renders.
 local api = require "luasec.api"
@@ -22,7 +22,7 @@ end
 
 local function explain(code, root, out, err)
    if not code then
-      err:write("luasec: rules explain needs a code\n")
+      err:write("lua-doctor: rules explain needs a code\n")
       return 2
    end
    local known = false
@@ -30,13 +30,13 @@ local function explain(code, root, out, err)
       if rule.code == code then known = true end
    end
    if not known then
-      err:write(("luasec: unknown code '%s': run 'luasec rules list' to see them\n"):format(code))
+      err:write(("lua-doctor: unknown code '%s': run 'lua-doctor rules list' to see them\n"):format(code))
       return 2
    end
    local path = root .. "/docs/rules/" .. code .. ".md"
    local handle, open_error = io.open(path, "rb")
    if not handle then
-      err:write("luasec: cannot read " .. path .. ": " .. tostring(open_error) .. "\n")
+      err:write("lua-doctor: cannot read " .. path .. ": " .. tostring(open_error) .. "\n")
       return 2
    end
    out:write(handle:read("*a"))
@@ -67,8 +67,8 @@ end
 
 local function tune(argv, command, _root, out, err)
    local code = argv[2]
-   local need = command == "set" and "luasec: rules set needs a code and a severity\n"
-      or ("luasec: rules " .. command .. " needs a code\n")
+   local need = command == "set" and "lua-doctor: rules set needs a code and a severity\n"
+      or ("lua-doctor: rules " .. command .. " needs a code\n")
    if command == "set" and (not argv[2] or not argv[3]) then
       err:write(need)
       return 2
@@ -79,11 +79,11 @@ local function tune(argv, command, _root, out, err)
    end
    local severity = argv[3]
    if command == "set" and not SEVERITIES[severity] then
-      err:write("luasec: expected off, low, medium, high or critical\n")
+      err:write("lua-doctor: expected off, low, medium, high or critical\n")
       return 2
    end
    if not codes.exists(tostring(code)) then
-      err:write(("luasec: unknown code '%s': run 'luasec rules list' to see them\n"):format(code))
+      err:write(("lua-doctor: unknown code '%s': run 'lua-doctor rules list' to see them\n"):format(code))
       return 2
    end
    local rest = {}
@@ -91,7 +91,7 @@ local function tune(argv, command, _root, out, err)
    for index = first, #argv do rest[#rest + 1] = argv[index] end
    local path = config_path(rest)
    if not path then
-      err:write("luasec: --config needs a value\n")
+      err:write("lua-doctor: --config needs a value\n")
       return 2
    end
    local hint
@@ -107,7 +107,8 @@ local function tune(argv, command, _root, out, err)
       local text = probe:read("*a")
       probe:close()
       if text and text:find("--", 1, true) then
-         err:write(("luasec: %s has comments that a rewrite would lose; add this by hand instead: %s\n"):format(path, hint))
+         err:write(("lua-doctor: %s has comments that a rewrite would lose; add this by hand instead: %s\n")
+            :format(path, hint))
          return 2
       end
    end
@@ -118,7 +119,7 @@ local function tune(argv, command, _root, out, err)
          exists:close()
          local loaded, load_error = config.load(path)
          if not loaded then
-            err:write("luasec: " .. tostring(load_error) .. "\n")
+            err:write("lua-doctor: " .. tostring(load_error) .. "\n")
             return 2
          end
          value = loaded
@@ -153,7 +154,7 @@ local function tune(argv, command, _root, out, err)
    end
    local handle, open_error = io.open(path, "wb")
    if not handle then
-      err:write("luasec: cannot write " .. path .. ": " .. tostring(open_error) .. "\n")
+      err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(open_error) .. "\n")
       return 2
    end
    handle:write(config.serialize(value))
@@ -162,7 +163,7 @@ local function tune(argv, command, _root, out, err)
    return 0
 end
 
---- Run `luasec rules <argv...>`. `argv` is what follows `rules`; `root` is the
+--- Run `lua-doctor rules <argv...>`. `argv` is what follows `rules`; `root` is the
 -- installation directory. Returns the exit code.
 function rules_cmd.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
@@ -172,7 +173,8 @@ function rules_cmd.run(argv, root, out, err)
    if command == "set" then return tune(argv, "set", root, out, err) end
    if command == "disable" then return tune(argv, "disable", root, out, err) end
    if command == "enable" then return tune(argv, "enable", root, out, err) end
-   err:write(("luasec: unknown rules command '%s': expected list, explain, set, enable or disable\n"):format(command))
+   err:write(("lua-doctor: unknown rules command '%s': expected list, explain, set, enable or disable\n")
+      :format(command))
    return 2
 end
 

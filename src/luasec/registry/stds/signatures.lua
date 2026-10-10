@@ -1,11 +1,11 @@
--- The luasec signature pack: known exploits and malware, as data.
+-- The lua-doctor signature pack: known exploits and malware, as data.
 --
--- This file is a declaration and nothing else. `luasec` requires it, matches
+-- This file is a declaration and nothing else. `lua-doctor` requires it, matches
 -- every pattern in it against the file being analyzed, and reports a 750 for
 -- each signature that matches. Adding a signature is a data change, and so is
 -- retiring one.
 
--- luasec: ignore 750
+-- lua-doctor: ignore 750
 -- Every string below is a signature, so this file matches every signature it
 -- holds. That is the one file in the tree where the finding is true and the
 -- finding is not news, and the directive says so where a reader of the file

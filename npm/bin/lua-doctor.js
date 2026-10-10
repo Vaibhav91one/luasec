@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// npx luasec: fetch the luasec release that matches this package's version into
+// npx lua-doctor: fetch the lua-doctor release that matches this package's version into
 // a cache directory once, then run it. Nothing but Node built-ins, the system
 // tar, and (only when no Lua 5.3+ is on PATH) make and a C compiler.
 const { spawnSync } = require('child_process');
@@ -10,15 +10,15 @@ const os = require('os');
 const path = require('path');
 
 const { version } = require('../package.json');
-const name = `luasec-${version}`;
-const url = `https://github.com/Vaibhav91one/luasec/releases/download/v${version}/${name}.tar.gz`;
-const cache = process.env.LUASEC_CACHE
-  || path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'luasec');
+const name = `lua-doctor-${version}`;
+const url = `https://github.com/doctor-labs/lua-doctor/releases/download/v${version}/${name}.tar.gz`;
+const cache = process.env.LUA_DOCTOR_CACHE
+  || path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'lua-doctor');
 const root = path.join(cache, name);
-const entry = path.join(root, 'bin', 'luasec');
+const entry = path.join(root, 'bin', 'lua-doctor');
 
 function fail(message) {
-  process.stderr.write(`luasec (npm): ${message}\n`);
+  process.stderr.write(`lua-doctor (npm): ${message}\n`);
   process.exit(2);
 }
 
@@ -51,16 +51,16 @@ function hasLua() {
 async function install() {
   fs.mkdirSync(cache, { recursive: true });
   const staging = fs.mkdtempSync(path.join(cache, '.staging-'));
-  const tarball = process.env.LUASEC_TARBALL || path.join(staging, `${name}.tar.gz`);
-  if (!process.env.LUASEC_TARBALL) {
-    process.stderr.write(`luasec (npm): downloading ${url}\n`);
+  const tarball = process.env.LUA_DOCTOR_TARBALL || path.join(staging, `${name}.tar.gz`);
+  if (!process.env.LUA_DOCTOR_TARBALL) {
+    process.stderr.write(`lua-doctor (npm): downloading ${url}\n`);
     await download(url, tarball);
   }
   const untar = spawnSync('tar', ['xzf', tarball, '-C', staging], { stdio: 'inherit' });
   if (untar.status !== 0) fail(`cannot extract ${tarball}`);
-  if (!fs.existsSync(path.join(staging, name, 'bin', 'luasec'))) fail(`${tarball} has no ${name}/bin/luasec`);
+  if (!fs.existsSync(path.join(staging, name, 'bin', 'lua-doctor'))) fail(`${tarball} has no ${name}/bin/lua-doctor`);
   if (!hasLua()) {
-    process.stderr.write('luasec (npm): no Lua 5.3+ on PATH; building Lua once with make (needs a C compiler)\n');
+    process.stderr.write('lua-doctor (npm): no Lua 5.3+ on PATH; building Lua once with make (needs a C compiler)\n');
     const built = spawnSync('make', ['lua'], { cwd: path.join(staging, name), stdio: ['ignore', 2, 2] });
     if (built.status !== 0) fail('building Lua failed; install Lua 5.3+ or a C compiler and try again');
   }

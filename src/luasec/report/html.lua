@@ -151,10 +151,10 @@ function html.render(report, opts)
       "<!doctype html>",
       "<html lang='en'><head><meta charset='utf-8'>",
       "<meta name='viewport' content='width=device-width,initial-scale=1'>",
-      "<title>luasec report</title>",
+      "<title>lua-doctor report</title>",
       "<style>", STYLE, "</style>",
       "</head><body>",
-      "<h1>luasec " .. escape(version.luasec) .. " report</h1>",
+      "<h1>lua-doctor " .. escape(version.luasec) .. " report</h1>",
       "<p class='sub'>" .. tostring(#report) .. " finding" .. (#report == 1 and "" or "s")
          .. (#report == 0 and " - nothing to report" or "") .. "</p>",
       #pills > 0 and ("<p>" .. table.concat(pills) .. "</p>") or "",

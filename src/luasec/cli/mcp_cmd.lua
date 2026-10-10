@@ -1,7 +1,7 @@
--- `luasec mcp`: an MCP server on stdio (newline-delimited JSON-RPC 2.0) with one
+-- `lua-doctor mcp`: an MCP server on stdio (newline-delimited JSON-RPC 2.0) with one
 -- tool, `scan`. The tool runs the CLI itself, as a child process with --json, and
 -- hands back its standard output untouched, so the envelope is byte-identical to
--- `luasec --json <path>` for the same arguments and there is no second scan path
+-- `lua-doctor --json <path>` for the same arguments and there is no second scan path
 -- to drift from the first. Over MCP the CLI's `--help`, `--version`, `--stdin`,
 -- `--validate`, `--format`, `-o`, the interactive and progress flags and the
 -- config/selection flags other than the ones below are not offered.
@@ -44,7 +44,7 @@ end
 local function interpreter()
    local lowest = 0
    while arg[lowest - 1] do lowest = lowest - 1 end
-   return os.getenv("LUASEC_LUA") or arg[lowest]
+   return os.getenv("LUA_DOCTOR_LUA") or arg[lowest]
 end
 
 -- Run the scan. Returns the CLI's stdout and true, or an explanation and false.
@@ -67,7 +67,7 @@ local function scan(args)
    end
 
    local errors = os.tmpname()
-   -- luasec: ignore 709  every word is shell-quoted, and client values only follow `--flag=` or `--`
+   -- lua-doctor: ignore 709  every word is shell-quoted, and client values only follow `--flag=` or `--`
    local handle = io.popen(table.concat(words, " ") .. " 2>" .. quote(errors), "r")
    local out = handle:read("a")
    local _, _, code = handle:close()
@@ -86,13 +86,13 @@ local function handle_request(request)
    if method == "initialize" then
       return {protocolVersion = params.protocolVersion or "2024-11-05",
          capabilities = {tools = {listChanged = false}},
-         serverInfo = {name = "luasec", version = version.luasec}}
+         serverInfo = {name = "lua-doctor", version = version.luasec}}
    elseif method == "ping" then
       return json.object
    elseif method == "tools/list" then
       return {tools = {{name = "scan", inputSchema = SCHEMA,
          description = "Scan Lua code for security findings. Returns the doctor/1 JSON envelope, "
-            .. "the same text as `luasec --json <path>`."}}}
+            .. "the same text as `lua-doctor --json <path>`."}}}
    elseif method == "tools/call" then
       if params.name ~= "scan" then return nil, -32602, "unknown tool " .. tostring(params.name) end
       local text, ok = scan(type(params.arguments) == "table" and params.arguments or {})

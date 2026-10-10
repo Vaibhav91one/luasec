@@ -39,7 +39,7 @@ local emit = function(first, second) return RECORD:write(first, second) end
 -- than reporting an outcome it cannot vouch for.
 local SUPPORTED_DIALECTS = {["Lua 5.3"] = true, ["Lua 5.4"] = true, ["LuaJIT"] = true}
 
-local DEFAULT_SOURCE = "luasec-payload"
+local DEFAULT_SOURCE = "lua-doctor-payload"
 
 -- The verdict vocabulary the parent speaks.
 --
@@ -529,7 +529,7 @@ local function guarded_load(chunk, chunkname, mode)
    -- naming it "=..." means a sink reached inside one is attributed to the
    -- payload's own line that called into it - a place the operator can go and
    -- look - instead of to this generated chunk, which is nowhere on their disk.
-   local fn, err = real_load(chunk, "=luasec-generated", "t", env) -- luasec: ignore 703  real_load is load; compiling the screened chunk is the validator's whole job
+   local fn, err = real_load(chunk, "=lua-doctor-generated", "t", env) -- lua-doctor: ignore 703  real_load is load; compiling the screened chunk is the validator's whole job
    if not fn then return nil, err end
    return with_depth(fn)
 end
@@ -700,7 +700,7 @@ function __luasec_sandbox(payload, options)
       return build_verdict(true, stop_reason or tostring(screen_error))
    end
 
-   local chunk, compile_error = real_load(payload, "@" .. source_name, "t", env) -- luasec: ignore 703  real_load is load; compiling the payload is what is being validated
+   local chunk, compile_error = real_load(payload, "@" .. source_name, "t", env) -- lua-doctor: ignore 703  real_load is load; compiling the payload is what is being validated
    if not chunk then
       return {verdict = "error", reason = "payload could not be compiled: " .. tostring(compile_error)}
    end

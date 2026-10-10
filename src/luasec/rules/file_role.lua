@@ -194,10 +194,10 @@ end
 -- than a thousand. Memoised for the run, which cannot change under it - the
 -- same argument `cwd()` makes for `$PWD`.
 --
--- luasec: ignore 702 [push]
+-- lua-doctor: ignore 702 [push]
 -- The command is constant; the path is not in it. `$(cat <tmpfile>)` rather than
 -- interpolating the path, because Lua's %q escapes only " and \ and a directory
--- named `/tmp/$(cmd)` would otherwise run a command substitution inside luasec
+-- named `/tmp/$(cmd)` would otherwise run a command substitution inside lua-doctor
 -- itself - and SECURITY.md says filenames come from attackers. A named region
 -- rather than a bare `ignore` because the latter is file-wide and this file has
 -- more in it than one shell call.
@@ -229,7 +229,7 @@ local function physical_directory(directory)
    physical_directories[directory] = answer or false
    return answer
 end
--- luasec: pop
+-- lua-doctor: pop
 
 -- Does `path` land under a temporary root once its links are followed?
 --

@@ -2,10 +2,10 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
--- Loading luasec's modules must not add anything to _G.
+-- Loading lua-doctor's modules must not add anything to _G.
 --
 -- A global that a module defines on load is invisible everywhere: `make
--- selfscan` runs luasec over src/ and luasec has no rule for it, so the function
+-- selfscan` runs lua-doctor over src/ and lua-doctor has no rule for it, so the function
 -- works, the build is green, and the leak ships. That is how `callee_path`
 -- reached a release as a global (#277).
 --
@@ -46,7 +46,7 @@ for name in pairs(_G) do before[name] = true end
 
 local failed, skipped, loaded = {}, {}, 0
 for _, path in ipairs(files) do
-   -- src/luasec/foo/bar.lua is require "luasec.foo.bar".
+   -- src/luasec/foo/bar.lua is require "lua-doctor.foo.bar".
    local module_name = path:gsub("^src/", ""):gsub("%.lua$", ""):gsub("/init$", ""):gsub("/", ".")
    if module_name == "luasec.main" then
       -- The CLI entry point ends in `os.exit(run(arg))`, so requiring it parses
@@ -75,7 +75,7 @@ io.write("modules ", loaded, "\n")
 for _, name in ipairs(gained) do io.write("global ", name, "\n") end
 ]==]
 
--- Globals luasec's modules add to _G today. This is a ratchet, not an
+-- Globals lua-doctor's modules add to _G today. This is a ratchet, not an
 -- endorsement: every entry below is a real leak, and none of them was caught
 -- before #277 added this spec.
 --
@@ -120,10 +120,10 @@ local function run_probe()
 end
 
 describe("module load", function()
-   it("loads every luasec module, so a walk that finds nothing cannot pass", function()
+   it("loads every lua-doctor module, so a walk that finds nothing cannot pass", function()
       local modules = run_probe()
       assert_true(modules > 1,
-         ("expected the probe to load luasec's modules, it loaded %d"):format(modules))
+         ("expected the probe to load lua-doctor's modules, it loaded %d"):format(modules))
    end)
 
    it("defines no global", function()

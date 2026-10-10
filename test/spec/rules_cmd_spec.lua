@@ -5,7 +5,7 @@ local assert_equal, assert_match, assert_true =
 
 local api = require "luasec.api"
 
-describe("luasec rules", function()
+describe("lua-doctor rules", function()
    it("lists every registered code with its category, severity and cwe", function()
       local out, code = harness.cli({"rules", "list"})
       assert_equal(code, 0, out)
@@ -18,7 +18,7 @@ describe("luasec rules", function()
    it("lists with no subcommand too", function()
       local listed = harness.cli({"rules", "list"})
       local bare = harness.cli({"rules"})
-      assert_equal(bare, listed, "luasec rules is luasec rules list")
+      assert_equal(bare, listed, "lua-doctor rules is lua-doctor rules list")
    end)
 
    it("explains a code by printing its doc page", function()

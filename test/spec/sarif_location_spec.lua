@@ -117,7 +117,7 @@ describe("a scan that stopped early at the walk bound", function()
          handle:write("local x = 1\n")
          handle:close()
       end
-      local out, code = harness.cli({"--format", "sarif", dir}, {env = "LUASEC_MAX_WALK_PATHS=2"})
+      local out, code = harness.cli({"--format", "sarif", dir}, {env = "LUA_DOCTOR_MAX_WALK_PATHS=2"})
       drop(dir)
 
       assert_match(out, '"ruleId": "901"', out)

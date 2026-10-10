@@ -49,13 +49,13 @@ end
 --- The first clipboard tool on PATH, or nil. Pure enough to test with a
 -- restricted PATH: each probe is a constant `command -v` for a fixed tool.
 function handoff.clipboard_command()
-   -- luasec: ignore 701  the command -v probes are constant tool names, never user input
+   -- lua-doctor: ignore 701  the command -v probes are constant tool names, never user input
    if os.execute("command -v pbcopy >/dev/null 2>&1") then return "pbcopy" end
-   -- luasec: ignore 701  the command -v probes are constant tool names, never user input
+   -- lua-doctor: ignore 701  the command -v probes are constant tool names, never user input
    if os.execute("command -v wl-copy >/dev/null 2>&1") then return "wl-copy" end
-   -- luasec: ignore 701  the command -v probes are constant tool names, never user input
+   -- lua-doctor: ignore 701  the command -v probes are constant tool names, never user input
    if os.execute("command -v xclip >/dev/null 2>&1") then return "xclip" end
-   -- luasec: ignore 701  the command -v probes are constant tool names, never user input
+   -- lua-doctor: ignore 701  the command -v probes are constant tool names, never user input
    if os.execute("command -v xsel >/dev/null 2>&1") then return "xsel" end
    return nil
 end
@@ -64,7 +64,7 @@ local function flush(out)
    if out.flush then out:flush() end
 end
 
--- luasec: ignore 708  the stty commands are constant mode switches, never user input
+-- lua-doctor: ignore 708  the stty commands are constant mode switches, never user input
 local function read_line(context, tty, prompt)
    context.out:write(prompt)
    flush(context.out)
@@ -88,12 +88,12 @@ local function do_copy(context, prompt)
       local tmp = os.tmpname()
       local handle = io.open(tmp, "wb")
       if not handle then
-         context.out:write("luasec: cannot copy the prompt\n")
+         context.out:write("lua-doctor: cannot copy the prompt\n")
          return
       end
       handle:write(prompt)
       handle:close()
-      -- luasec: ignore 701  the clipboard command is from the fixed table and reads a temp file, never the prompt
+      -- lua-doctor: ignore 701  the clipboard command is from the fixed table and reads a temp file, never the prompt
       os.execute(CLIPBOARDS[tool] .. " < " .. quote(tmp))
       os.remove(tmp)
       context.out:write("copied with " .. tool .. "\n")
@@ -106,7 +106,7 @@ end
 local function prompt_or_warn(list, context)
    local prompt, message = fix_cmd.prompt_for(context.argv or {}, context.root or ".")
    if not prompt then
-      context.out:write("luasec: " .. tostring(message) .. "\n")
+      context.out:write("lua-doctor: " .. tostring(message) .. "\n")
       _ = list
       return nil
    end
@@ -120,11 +120,11 @@ function handoff.run(list, context, tty)
    context.out = context.out or io.stdout
    context.err = context.err or io.stderr
    local installed = {}
-   -- luasec: ignore 701  the command -v probe is a constant agent name, never user input
+   -- lua-doctor: ignore 701  the command -v probe is a constant agent name, never user input
    installed.claude = os.execute("command -v claude >/dev/null 2>&1") and true or false
-   -- luasec: ignore 701  the command -v probe is a constant agent name, never user input
+   -- lua-doctor: ignore 701  the command -v probe is a constant agent name, never user input
    installed.codex = os.execute("command -v codex >/dev/null 2>&1") and true or false
-   -- luasec: ignore 701  the command -v probe is a constant agent name, never user input
+   -- lua-doctor: ignore 701  the command -v probe is a constant agent name, never user input
    installed.cursor = os.execute("command -v cursor-agent >/dev/null 2>&1") and true or false
    local items = {}
    for _, agent in ipairs(AGENTS) do

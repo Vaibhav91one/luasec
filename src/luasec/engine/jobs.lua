@@ -1,7 +1,7 @@
 -- `--jobs N`: a per-file scan split over N child interpreters.
 --
 -- Lua has no threads, so a worker is a child process: the same interpreter
--- (`$LUASEC_LUA`, which bin/luasec exports) running `api.analyze` over a
+-- (`$LUA_DOCTOR_LUA`, which bin/lua-doctor exports) running `api.analyze` over a
 -- contiguous slice of the file list and writing its findings back as a Lua
 -- table. Slices are contiguous and collected in order, so the parent sees the
 -- findings in the same order a serial run produces them, and the report is
@@ -57,18 +57,18 @@ local function read_value(path)
    if not handle then return nil end
    local text = handle:read("a")
    handle:close()
-   -- luasec: ignore 710  a file this run wrote to a fresh os.tmpname(), loaded as text in an empty environment
+   -- lua-doctor: ignore 710  a file this run wrote to a fresh os.tmpname(), loaded as text in an empty environment
    local chunk = load(text, "=" .. path, "t", {})
    if not chunk then return nil end
    local ok, value = pcall(chunk)
    return ok and value or nil
 end
 
--- The interpreter running us: `$LUASEC_LUA` from bin/luasec, else the
+-- The interpreter running us: `$LUA_DOCTOR_LUA` from bin/lua-doctor, else the
 -- lowest-indexed entry of `arg`, which is where the standalone interpreter puts
 -- its own path (a LuaRocks or npm launcher does not export the variable).
 local function interpreter()
-   local lua = os.getenv("LUASEC_LUA")
+   local lua = os.getenv("LUA_DOCTOR_LUA")
    if lua and lua ~= "" then return lua end
    if type(arg) ~= "table" then return nil end
    local lowest = 0
@@ -116,7 +116,7 @@ function jobs.run(paths, opts, workers, analyze, notify)
       -- `lua -e` passes no arguments to its chunk, so the two paths are in the code.
       local boot = ("package.path=%q;require('luasec.engine.jobs').child(%q,%q)")
          :format(package.path, job.input, job.output)
-      -- luasec: ignore 709  the interpreter running luasec, with every fragment shell_quote()d
+      -- lua-doctor: ignore 709  the interpreter running lua-doctor, with every fragment shell_quote()d
       job.pipe = io.popen(shell_quote(lua) .. " -e " .. shell_quote(boot) .. " 2>/dev/null")
       return job
    end
@@ -151,7 +151,7 @@ end
 --- The child's side: analyze the slice in `input`, write the findings to `output`.
 function jobs.child(input, output)
    local job = read_value(input)
-   -- luasec: ignore 703  the options the parent serialized, loaded as text in an empty environment
+   -- lua-doctor: ignore 703  the options the parent serialized, loaded as text in an empty environment
    local opts = load(job.opts, "=opts", "t", {})()
    local api = require "luasec.api"
    -- The registries (--std, --rules) are installed by validate_options, which

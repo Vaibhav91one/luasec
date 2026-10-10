@@ -176,7 +176,7 @@ return load(_CHUNK)()
 
       assert_equal(verdict.verdict, "error", verdict.exit_reason)
       -- The message is the payload's own, so the report has to say whose it is
-      -- and point it at the file rather than let it read as a luasec message.
+      -- and point it at the file rather than let it read as a lua-doctor message.
       assert_equal(verdict.reason_source, "payload")
       assert_match(verdict.exit_reason, "candidates/thing%.lua")
    end)

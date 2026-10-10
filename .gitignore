@@ -8,6 +8,6 @@ vendor/luacheck/
 corpus/
 # local
 *.sarif
-.luasecrc
+.lua-doctorrc
 # release tarballs built by scripts/release-tarball.sh
 /dist

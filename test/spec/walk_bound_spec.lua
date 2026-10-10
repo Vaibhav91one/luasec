@@ -1,7 +1,7 @@
 -- The bound on how much one scan root may resolve to, and the de-duplication
 -- that keeps one directory from being walked twice.
 --
--- -L is in walk.lua because a file behind a symlink that luasec never read is
+-- -L is in walk.lua because a file behind a symlink that lua-doctor never read is
 -- the one failure this tool cannot have, and the price of -L is that a link to a
 -- directory makes the walk descend into it again, once per link that names it,
 -- and a link to / has no end to it. Neither half of the growth is answered by
@@ -52,7 +52,7 @@ local TAINTED = "local function ping(host)\n   os.execute(\"ping -c1 \" .. http.
 local function cli(env, args)
    local cmd = "env"
    if env then cmd = cmd .. " " .. env end
-   cmd = cmd .. " ./bin/luasec"
+   cmd = cmd .. " ./bin/lua-doctor"
    for _, arg in ipairs(args) do cmd = cmd .. " " .. string.format("%q", arg) end
    cmd = cmd .. " 2>&1; printf '\\n__EXIT__%d' $?"
    local pipe = assert(io.popen(cmd))
@@ -66,7 +66,7 @@ describe("a symlink inside the scanned tree", function()
    it("is followed to a file, and the file behind it is analyzed", function()
       -- find's -type f matches a symlink rather than its target, so a symlinked
       -- file and a symlinked directory were both skipped: a file reachable
-      -- inside the scanned tree that luasec never read, reported as a clean
+      -- inside the scanned tree that lua-doctor never read, reported as a clean
       -- tree with exit 0. One entry in a firmware image is enough to hide a
       -- file that way, and this is the case that must not regress.
       local dir = scratch_dir("walkbound_link_file")
@@ -167,7 +167,7 @@ describe("a tree that resolves past the limit", function()
       local dir = scratch_dir("walkbound_bound")
       for i = 1, 5 do write(("%s/f%d.lua"):format(dir, i), "local x = 1\n") end
 
-      local out, code = cli("LUASEC_MAX_WALK_PATHS=2", { dir })
+      local out, code = cli("LUA_DOCTOR_MAX_WALK_PATHS=2", { dir })
       drop(dir)
 
       assert_match(out, "901", out)
@@ -182,7 +182,7 @@ describe("a tree that resolves past the limit", function()
       local dir = scratch_dir("walkbound_bound_ok")
       for i = 1, 3 do write(("%s/f%d.lua"):format(dir, i), "local x = 1\n") end
 
-      local out, code = cli("LUASEC_MAX_WALK_PATHS=100", { dir })
+      local out, code = cli("LUA_DOCTOR_MAX_WALK_PATHS=100", { dir })
       drop(dir)
 
       assert_no_match(out, "901",
@@ -202,7 +202,7 @@ describe("a tree that resolves past the limit", function()
          write(("%s/f%d.lua"):format(roots[i], i), "local x = 1\n")
       end
 
-      local out, code = cli("LUASEC_MAX_WALK_PATHS=2", { roots[1], roots[2], roots[3] })
+      local out, code = cli("LUA_DOCTOR_MAX_WALK_PATHS=2", { roots[1], roots[2], roots[3] })
       drop(base)
 
       assert_no_match(out, "901", out)
@@ -218,7 +218,7 @@ describe("a tree that resolves past the limit", function()
       write(dir .. "/f.lua", "local x = 1\n")
 
       for _, value in ipairs({"0", "-1", "abc", "3.5", ""}) do
-         local out, code = cli("LUASEC_MAX_WALK_PATHS=" .. value, { dir })
+         local out, code = cli("LUA_DOCTOR_MAX_WALK_PATHS=" .. value, { dir })
          assert_no_match(out, "901", "limit " .. value .. ":\n" .. out)
          assert_equal(code, 0, "limit " .. value .. ":\n" .. out)
       end
@@ -245,7 +245,7 @@ describe("a tree that resolves past the limit", function()
       link("../outside/b.lua", base .. "/tree/link_b")
       link("real", base .. "/tree/link_dir")
 
-      local out, code = cli("LUASEC_MAX_WALK_PATHS=2", { base .. "/tree" })
+      local out, code = cli("LUA_DOCTOR_MAX_WALK_PATHS=2", { base .. "/tree" })
       drop(base)
 
       assert_no_match(out, "stack traceback",

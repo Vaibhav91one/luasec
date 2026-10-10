@@ -1,6 +1,6 @@
 # REVIEW.md
 
-How `luasec` was built, what the review process actually found, and what is still
+How `lua-doctor` was built, what the review process actually found, and what is still
 open or uncertain. Written for someone deciding whether to trust it, and for
 whoever picks it up next.
 
@@ -49,7 +49,7 @@ traceback, zero output, and every other file's findings discarded:
 
 - `args[#index - 2]` where `#` binds tighter than `-` — the length of a number,
   on any method call whose receiver resolved to a function through a local.
-- An operator's `-- luasec:` pattern handed to `string.match` with no guard. A
+- An operator's `-- lua-doctor:` pattern handed to `string.match` with no guard. A
   one-character typo killed the scan — the same class of attack the lexical
   fallback exists to defeat.
 - `cover_and_expose` testing an undefined global, always nil.
@@ -77,7 +77,7 @@ exit, for input that was never read:
   the options table raised out of the public API.
 - A `push`/`pop` region that was parsed and then never read, so a scoped
   suppression ran to end of file.
-- A `-- luasec: only` whose pattern was a typo, which suppressed every finding
+- A `-- lua-doctor: only` whose pattern was a typo, which suppressed every finding
   in the file *and* the `012` that reports the typo.
 
 **Precision.** Hardcoded-credential detection fired on 17 things that were not
@@ -192,7 +192,7 @@ this project four times, and nothing in the current gate would catch the fifth.
   walk. Past those the answer is "not a cursor" and a credential can be missed.
 - `MAX_WALK_PATHS = 50,000` per scan root. Beyond that the run reports a coverage
   gap. Correct behaviour, but a firmware image larger than 50,000 files needs
-  `LUASEC_MAX_WALK_PATHS` set.
+  `LUA_DOCTOR_MAX_WALK_PATHS` set.
 - `max_nodes` defaults to 20,000 and a file over it degrades to a forward pass
   and reports `904`. Deliberate, and reported.
 

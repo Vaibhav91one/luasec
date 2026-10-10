@@ -316,7 +316,7 @@ local function resident_watchdog(limits, token)
    }
 end
 
--- The one place luasec spawns a process, and the reason it has to: a payload
+-- The one place lua-doctor spawns a process, and the reason it has to: a payload
 -- cannot be run in-process, so the sandbox lives in a child. The payload text
 -- rides inside a long-bracket literal in the program, so on this command line
 -- it is inert data and never shell syntax. The watchdog kills the child at the
@@ -384,15 +384,15 @@ local function capture(interpreter, program, limits, token)
    end
 
    local command = "(\n" .. table.concat(lines, "\n") .. "\n) 2>/dev/null"
-   -- luasec: ignore 702  the command is built from quoted, sandboxed fragments, not from request data
-   -- luasec: ignore 712  the same command: a partly quoted flow whose "file read" sources are
-   -- luasec's own child.lua and the random nonce it reads from /dev/urandom
-   -- luasec: ignore 709  same, and for the same reason. #281 made this visible:
-   -- the two things that reach `command` are `child_source()` reading luasec's
-   -- own child.lua, and `opts.lua or os.getenv("LUASEC_LUA") or os.getenv(
-   -- "LUA_BIN")` -- the interpreter path, which the operator running luasec
+   -- lua-doctor: ignore 702  the command is built from quoted, sandboxed fragments, not from request data
+   -- lua-doctor: ignore 712  the same command: a partly quoted flow whose "file read" sources are
+   -- lua-doctor's own child.lua and the random nonce it reads from /dev/urandom
+   -- lua-doctor: ignore 709  same, and for the same reason. #281 made this visible:
+   -- the two things that reach `command` are `child_source()` reading lua-doctor's
+   -- own child.lua, and `opts.lua or os.getenv("LUA_DOCTOR_LUA") or os.getenv(
+   -- "LUA_BIN")` -- the interpreter path, which the operator running lua-doctor
    -- chooses. Neither is request data, and both are single-quoted by `quote`.
-   -- Reported rather than fixed here: a 709 through a fragment luasec itself
+   -- Reported rather than fixed here: a 709 through a fragment lua-doctor itself
    -- quotes looks like a sanitizer the rule does not credit, which is its own
    -- question and not this commit's to answer.
    local pipe = io.popen(command, "r")
@@ -452,13 +452,13 @@ function driver.run(source, opts)
    -- which is what every reported line number is counted in, so a verdict without
    -- it points at nothing an operator can go and look at.
    local source_name = (type(opts.name) == "string" and opts.name ~= "")
-      and opts.name or "luasec-payload"
+      and opts.name or "lua-doctor-payload"
 
    -- `lua -e` treats an option argument that starts with "-" as another option
    -- and reports "needs argument", and child.lua opens with a comment, so the
    -- program gets a leading newline to keep its first argument parseable.
    local token = nonce()
-   local program = "\n-- luasec validator child\n" .. child_source()
+   local program = "\n-- lua-doctor validator child\n" .. child_source()
       .. "\n__LUASEC_NONCE = " .. string.format("%q", token)
       .. "\n__LUASEC_PAYLOAD = " .. long_string(source)
       .. "\n__LUASEC_LIMITS = "
@@ -471,10 +471,10 @@ function driver.run(source, opts)
 
    -- The interpreter is the one the analyzer is running under, not whatever
    -- `lua` happens to be on PATH: a verdict describes the Lua that produced it,
-   -- and bin/luasec exports this so the two are the same build. The child checks
+   -- and bin/lua-doctor exports this so the two are the same build. The child checks
    -- the dialect for itself and refuses the payload under one it does not
    -- support, and the version it ran under comes back in the verdict.
-   local interpreter = opts.lua or os.getenv("LUASEC_LUA") or os.getenv("LUA_BIN") or "lua"
+   local interpreter = opts.lua or os.getenv("LUA_DOCTOR_LUA") or os.getenv("LUA_BIN") or "lua"
 
    local started = os.clock()
    local output = capture(interpreter, program, limits, token)

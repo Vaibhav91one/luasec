@@ -136,16 +136,16 @@ function args.parse(argv)
 end
 
 local USAGE = [[
-luasec - RCE checker and security analyzer for Lua in embedded firmware
+lua-doctor - RCE checker and security analyzer for Lua in embedded firmware
 
-usage: luasec [options] <file|directory>...
-       luasec mcp
-       luasec rules [list | explain <code>]
-       luasec why <file>:<line> [options]
-       luasec fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
-      luasec install [--dir <project>] [--force] [--hook] [claude] [cursor] [agents]
-      luasec install [--dir <project>] [--force] [claude] [cursor] [agents]
-       luasec ci install [--dir <project>] [--force]
+usage: lua-doctor [options] <file|directory>...
+       lua-doctor mcp
+       lua-doctor rules [list | explain <code>]
+       lua-doctor why <file>:<line> [options]
+       lua-doctor fix [--agent claude|codex|cursor] [--safe] [--print] <path>...
+      lua-doctor install [--dir <project>] [--force] [--hook] [claude] [cursor] [agents]
+      lua-doctor install [--dir <project>] [--force] [claude] [cursor] [agents]
+       lua-doctor ci install [--dir <project>] [--force]
 
 input:
   <path>                     Lua file, or directory to scan recursively
@@ -184,9 +184,9 @@ selection:
   --baseline <file.json>    report only what is new since that --json envelope
   --fail-on <severity>       exit 1 at or above this severity (info, low, medium, high,
                              critical; default low)
-  --config <file>            read settings from this file (default: luasec.config.lua
+  --config <file>            read settings from this file (default: lua-doctor.config.lua
                              in the current directory, if present)
-  --no-config                ignore luasec.config.lua
+  --no-config                ignore lua-doctor.config.lua
   --scope <full|changed>     changed: only files changed since --base (default: main); full is the default
   --base <ref>               with --scope changed: the ref to compare with
   --include-untracked        with --scope changed: also scan new, untracked files
@@ -220,11 +220,11 @@ other:
   --version                  print version and exit
   mcp                        serve the scan tool over MCP (stdio)
   rules list | explain <code>  the rule catalogue, and one code's doc page
-  rules set|enable|disable <code>  tune what this project reports (edits luasec.config.lua)
+  rules set|enable|disable <code>  tune what this project reports (edits lua-doctor.config.lua)
   why <file>:<line>          explain the findings on one line and how to fix them
   fix                        hand the findings to an AI agent (approvals skipped unless --safe)
   install                    write agent guidance: Claude skill, Cursor rule, AGENTS.md
-  ci install                 write a GitHub workflow that runs the luasec action
+  ci install                 write a GitHub workflow that runs the lua-doctor action
 
 with --baseline: 0 nothing new, 3 at least one new finding at or above --fail-on.
 A finding already in the baseline is not reported, and one that was in the

@@ -1,6 +1,6 @@
 -- The library must render a report exactly the way the command line does, so a
 -- caller that drives `api.analyze` and `api.format` itself produces bytes a human
--- could not tell from `bin/luasec --format <name>`. The CLI's `emit` appends one
+-- could not tell from `bin/lua-doctor --format <name>`. The CLI's `emit` appends one
 -- trailing newline to whatever `render` produces; the library call returns the
 -- rendered report and does not add that newline, so it is stripped here.
 local harness = require "harness"

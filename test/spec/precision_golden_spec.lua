@@ -174,7 +174,7 @@ describe("the frozen precision measurement", function()
          GOLDEN .. " and " .. DOC .. " together")
 
       -- The headline carries the ANALYZED count, not the collected one: 146
-      -- findings were divided by the files luasec looked at. The document says
+      -- findings were divided by the files lua-doctor looked at. The document says
       -- so in words, and precision_spec checks the other half of the pair.
       assert_equal(files, frozen.scanned_files,
          "the headline claims " .. files .. " files and the frozen measurement "

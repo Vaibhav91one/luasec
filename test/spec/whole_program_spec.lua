@@ -659,8 +659,8 @@ describe("whole-program mode through the public API", function()
    -- Writes into a directory named for the test, so one spec's files cannot be
    -- resolved by another's.
    local function write(dir, name, source)
-      os.execute("mkdir -p /tmp/luasec-wp/" .. dir)
-      local path = "/tmp/luasec-wp/" .. dir .. "/" .. name
+      os.execute("mkdir -p /tmp/lua-doctor-wp/" .. dir)
+      local path = "/tmp/lua-doctor-wp/" .. dir .. "/" .. name
       local handle = assert(io.open(path, "wb"))
       handle:write(source)
       handle:close()
@@ -684,7 +684,7 @@ return go
 ]])
       -- Both files: the whole-program pass may only resolve a require to a
       -- module it was given.
-      local report = api.analyze({handler, "/tmp/luasec-wp/handler/util.lua"},
+      local report = api.analyze({handler, "/tmp/lua-doctor-wp/handler/util.lua"},
          {std = "luci", whole_program = true})
       assert_true(#report > 0, "the scan must have produced something to judge")
       local found = {}
@@ -710,7 +710,7 @@ local function go(host)
 end
 return go
 ]])
-      local report = api.analyze({handler, "/tmp/luasec-wp/solo/util.lua"}, {std = "luci"})
+      local report = api.analyze({handler, "/tmp/lua-doctor-wp/solo/util.lua"}, {std = "luci"})
       for _, finding in ipairs(report) do
          assert_true(finding.code ~= "709",
             "without --whole-program the two files are separate")

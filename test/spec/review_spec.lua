@@ -7,7 +7,7 @@ local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
 local function q(text) return string.format("%q", text) end
 
--- Run luasec with `keys` on stdin (a pipe, so the menu only runs because of
+-- Run lua-doctor with `keys` on stdin (a pipe, so the menu only runs because of
 -- --interactive), from `cwd`, and return combined output and the exit code.
 local function drive(keys, args, cwd)
    local root = io.popen("pwd"):read("*l")
@@ -16,7 +16,7 @@ local function drive(keys, args, cwd)
    handle:write(keys)
    handle:close()
    local command = ("cd %s && %s %s < %s 2>&1; printf '\\n__EXIT__%%d' $?"):format(
-      q(cwd or root), q(root .. "/bin/luasec"), args, q(script))
+      q(cwd or root), q(root .. "/bin/lua-doctor"), args, q(script))
    local pipe = assert(io.popen(command))
    local out = pipe:read("*a")
    pipe:close()

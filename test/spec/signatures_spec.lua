@@ -295,7 +295,7 @@ end)
 
 describe("the signature pack", function()
    local PACK_PATH = "src/luasec/registry/stds/signatures.lua"
-   local YARA_PATH = "yara/luasec_signatures.yar"
+   local YARA_PATH = "yara/lua_doctor_signatures.yar"
 
    -- The pack as the analyzer loads it. A data file is loaded by running it,
    -- which is the same thing the analyzer does with `require`, and the same
@@ -355,7 +355,7 @@ describe("the signature pack", function()
 
    it("loads through the public rules seam an operator uses", function()
       local ok = api.validate_options({rules = {PACK_PATH}})
-      assert_true(ok, "luasec must accept the pack file as a data file it can load")
+      assert_true(ok, "lua-doctor must accept the pack file as a data file it can load")
    end)
 
    it("carries a version, and one id, description and pattern per signature", function()
@@ -417,7 +417,7 @@ describe("the signature pack", function()
       table.sort(pack_alternatives)
       assert_equal(table.concat(yara_alternatives, ","), table.concat(pack_alternatives, ","),
          "the yara ruleset and the Lua pack must match the same text; " ..
-         "yara/luasec_signatures.yar has drifted from " .. PACK_PATH)
+         "yara/lua_doctor_signatures.yar has drifted from " .. PACK_PATH)
       assert_equal(count_keys(yara_ids), count_keys(pack_ids),
          "the yara ruleset and the Lua pack must hold the same number of signatures")
       for id in pairs(pack_ids) do

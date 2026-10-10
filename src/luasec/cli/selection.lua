@@ -1,7 +1,7 @@
 -- Which findings a run reports: the config file's settings merged into the
 -- options, a severity override, the --only/--ignore/--enable patterns and the
 -- severity and confidence floors, then the config's allow list. In one place so
--- the scan, `luasec why` and `luasec fix` report the same findings for the
+-- the scan, `lua-doctor why` and `lua-doctor fix` report the same findings for the
 -- same flags.
 local degraded = require "luasec.rules.degraded"
 local categories = require "luasec.rules.categories"
@@ -104,7 +104,7 @@ end
 
 selection.filter = apply_rules
 
---- Load the config (--config, else ./luasec.config.lua unless --no-config)
+--- Load the config (--config, else ./lua-doctor.config.lua unless --no-config)
 -- and merge it into `opts`. Returns the settings table ({} when there is no
 -- config), or nil plus a message.
 function selection.settings(opts)
@@ -118,7 +118,8 @@ function selection.settings(opts)
          if probe then
             probe:close()
             path = config_file.DEFAULT_NAME
-            io.stderr:write("luasec: using luasec.config.lua from the current directory (--no-config to skip)\n")
+            io.stderr:write("lua-doctor: using lua-doctor.config.lua from the current directory ",
+               "(--no-config to skip)\n")
          end
       end
       if path then

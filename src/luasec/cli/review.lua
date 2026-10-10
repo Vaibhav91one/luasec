@@ -110,7 +110,7 @@ function review.detail(finding, root)
       end
    end
    lines[#lines + 1] = ""
-   lines[#lines + 1] = "  more: luasec rules explain " .. finding.code
+   lines[#lines + 1] = "  more: lua-doctor rules explain " .. finding.code
    lines[#lines + 1] = "  ref: docs/rules/" .. finding.code .. ".md"
    return lines
 end
@@ -193,7 +193,7 @@ function review.run(list, context)
    local model = review.model(list)
    if #model.cursors == 0 then return end
    local tty = term.is_tty(0)
-   -- luasec: ignore 708  the stty command is a constant mode switch, never user input
+   -- lua-doctor: ignore 708  the stty command is a constant mode switch, never user input
    if tty then term.raw() end
    local function loop()
       local selected, full = 1, false
@@ -236,9 +236,9 @@ function review.run(list, context)
    end
    -- An error inside the loop must never leave the terminal in single-key mode.
    local ok, failure = pcall(loop)
-   -- luasec: ignore 708  the stty command is a constant mode switch, never user input
+   -- lua-doctor: ignore 708  the stty command is a constant mode switch, never user input
    if tty then term.cooked() end
-   if not ok then context.err:write("luasec: the browser stopped: " .. tostring(failure) .. "\n") end
+   if not ok then context.err:write("lua-doctor: the browser stopped: " .. tostring(failure) .. "\n") end
 end
 
 return review

@@ -45,13 +45,13 @@ local VERDICT_EXIT = {benign = EXIT_CLEAN, rce = EXIT_FINDINGS,
 -- into the JSON rather than left to documentation, because the JSON is what a
 -- machine acts on.
 local UNTRUSTED_NOTE = "payload_* fields, and the arg of a sink, are text the validated snippet "
-   .. "chose; they are reported as data, not as luasec findings"
+   .. "chose; they are reported as data, not as lua-doctor findings"
 
 -- info is below every severity a rule emits, so --fail-on info fails on any finding.
 local SEVERITY_RANK = {info = 0, low = 1, medium = 2, high = 3, critical = 4}
 
 local function fail(message)
-   io.stderr:write("luasec: " .. message .. "\n")
+   io.stderr:write("lua-doctor: " .. message .. "\n")
    return EXIT_ERROR
 end
 
@@ -145,7 +145,7 @@ local function validate(opts)
    if read_error then return fail(read_error) end
 
    local verdict = api.validate_payload(source, {
-      lua = os.getenv("LUASEC_LUA"),
+      lua = os.getenv("LUA_DOCTOR_LUA"),
       timeout_ms = tonumber(opts.validate_timeout),
       name = name,
    })
@@ -154,7 +154,7 @@ local function validate(opts)
    if opts.format == "json" then
       -- The note travels with the data: a machine reader has to be able to see,
       -- without reading this source, which of these fields are the payload's
-      -- words rather than luasec's.
+      -- words rather than lua-doctor's.
       local validation = {note = UNTRUSTED_NOTE}
       for key, value in pairs(verdict) do validation[key] = value end
       output = json.encode({version = version.luasec, validation = validation})
@@ -190,7 +190,7 @@ local SUBCOMMANDS = {
 }
 
 local function subcommand_root()
-   return rawget(_G, "LUASEC_ROOT")
+   return rawget(_G, "LUA_DOCTOR_ROOT")
       or (arg and arg[0] or ""):match("^(.*)/src/luasec/main%.lua$") or "."
 end
 
@@ -198,7 +198,7 @@ local function run(argv)
    local subcommand = SUBCOMMANDS[argv[1]]
    if subcommand then
       local root = subcommand_root()
-      -- luasec: ignore 705  the module name comes from the SUBCOMMANDS table above, not from input
+      -- lua-doctor: ignore 705  the module name comes from the SUBCOMMANDS table above, not from input
       return require(subcommand).run({table.unpack(argv, 2)}, root)
    end
    local opts, parse_error = args_parser.parse(argv)
@@ -210,7 +210,7 @@ local function run(argv)
    end
 
    if opts.version then
-      io.stdout:write(string.format("luasec %s (luacheck %s, rules %s)\n",
+      io.stdout:write(string.format("lua-doctor %s (luacheck %s, rules %s)\n",
          version.luasec, version.luacheck, version.rules_pack))
       return EXIT_CLEAN
    end
@@ -220,7 +220,7 @@ local function run(argv)
    end
 
    -- A scoped scan is about the current repository, so it needs no path: a
-   -- pre-commit hook is just `luasec --staged`.
+   -- pre-commit hook is just `lua-doctor --staged`.
    if #opts.paths == 0 and (opts.staged or opts.scope == "changed") then
       opts.paths = {"."}
    end
@@ -290,7 +290,7 @@ local function run(argv)
       local selected, scope_error = scope.files(opts)
       if not selected then return fail(scope_error) end
       if #selected == 0 then
-         if not opts.staged then io.stderr:write("luasec: no changed Lua files\n") end
+         if not opts.staged then io.stderr:write("lua-doctor: no changed Lua files\n") end
          return EXIT_CLEAN
       end
       files = selected
@@ -390,11 +390,11 @@ local function run(argv)
    -- operator looking at the wrong file. `--only 70(` is the first: Lua reads it
    -- as a pattern, it matches nothing, and a file with a high-severity RCE came
    -- back clean. It cannot be made an error, because `--only 709` on a file with
-   -- no 709 is legitimate, so it is said out loud instead. Silence from luasec
+   -- no 709 is legitimate, so it is said out loud instead. Silence from lua-doctor
    -- means "looked at it and found nothing", and a warning says which of those
    -- two this was.
    if opts.only and #list == 0 then
-      io.stderr:write("luasec: --only selected nothing: "
+      io.stderr:write("lua-doctor: --only selected nothing: "
          .. table.concat(opts.only, ", ")
          .. " (no finding matched; is the pattern what you meant?)\n")
    end

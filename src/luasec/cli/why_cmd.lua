@@ -1,4 +1,4 @@
--- `luasec why <file>:<line>`: the findings on one line, how the data got there,
+-- `lua-doctor why <file>:<line>`: the findings on one line, how the data got there,
 -- and how to fix it. It analyses the one file with the scan options given after
 -- the target, so a finding that needs --std or --whole-program can be asked about.
 local api = require "luasec.api"
@@ -25,7 +25,7 @@ end
 
 -- A few lines of the file around `line`, the offending one marked with > and a
 -- caret under its column, like a diff hunk. Tabs become one space so the caret
--- stays under the column luasec reports. nil when the file cannot be read.
+-- stays under the column lua-doctor reports. nil when the file cannot be read.
 local function code_frame(file, line, column)
    local handle = io.open(file, "rb")
    if not handle then return nil end
@@ -70,7 +70,7 @@ function why.lines(finding, root)
          lines[#lines + 1] = text == "" and "" or ("    " .. text)
       end
    end
-   lines[#lines + 1] = "  more: luasec rules explain " .. finding.code
+   lines[#lines + 1] = "  more: lua-doctor rules explain " .. finding.code
    return lines
 end
 
@@ -88,32 +88,32 @@ function why.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    local file, line = (argv[1] or ""):match("^(.+):(%d+)$")
    if not file then
-      err:write("luasec: why needs <file>:<line>\n")
+      err:write("lua-doctor: why needs <file>:<line>\n")
       return 2
    end
    local opts, parse_error = args.parse({table.unpack(argv, 2)})
    if not opts then
-      err:write("luasec: " .. parse_error .. "\n")
+      err:write("lua-doctor: " .. parse_error .. "\n")
       return 2
    end
    if #opts.paths > 0 then
-      err:write("luasec: why takes one <file>:<line>, not more paths\n")
+      err:write("lua-doctor: why takes one <file>:<line>, not more paths\n")
       return 2
    end
    local probe, open_error = io.open(file, "rb")
    if not probe then
-      err:write(("luasec: cannot read %s: %s\n"):format(file, tostring(open_error)))
+      err:write(("lua-doctor: cannot read %s: %s\n"):format(file, tostring(open_error)))
       return 2
    end
    probe:close()
    local settings, settings_error = selection.settings(opts)
    if not settings then
-      err:write("luasec: " .. settings_error .. "\n")
+      err:write("lua-doctor: " .. settings_error .. "\n")
       return 2
    end
    local ok, options_error = api.validate_options(opts)
    if not ok then
-      err:write("luasec: " .. options_error .. "\n")
+      err:write("lua-doctor: " .. options_error .. "\n")
       return 2
    end
 

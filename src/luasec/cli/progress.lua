@@ -51,7 +51,7 @@ end
 function Progress:say(text)
    if not self.enabled then return end
    self:clear()
-   io.stderr:write(self.paint.dim("luasec:"), " ", text, "\n")
+   io.stderr:write(self.paint.dim("lua-doctor:"), " ", text, "\n")
 end
 
 --- What the run is doing between counters, e.g. finding files or building
@@ -93,7 +93,7 @@ function Progress:file(done, total, path)
       local step = math.floor(percent / 10)
       if done ~= total and step == self.last_step then return end
       self.last_step = step
-      io.stderr:write(self.paint.dim("luasec:"),
+      io.stderr:write(self.paint.dim("lua-doctor:"),
          (" analyzing %d/%d files (%d%%)\n"):format(done, total, percent))
    end
 end
@@ -107,7 +107,7 @@ function Progress:finish(count)
          (" Scanned %d file%s in %ds\n")
          :format(count, count == 1 and "" or "s", os.time() - self.started))
    else
-      io.stderr:write(self.paint.dim("luasec:"),
+      io.stderr:write(self.paint.dim("lua-doctor:"),
          (" Scanned %d file%s in %ds\n")
          :format(count, count == 1 and "" or "s", os.time() - self.started))
    end

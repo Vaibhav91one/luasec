@@ -249,7 +249,7 @@ describe("verifying the corpus before measuring it", function()
       local recipe = text:sub(start, text:find("\n%.PHONY: ci%-verify", start) or (#text + 1))
 
       local verify_at = recipe:find("%-%-verify")
-      local analyze_at = recipe:find("bin/luasec")
+      local analyze_at = recipe:find("bin/lua%-doctor")
       assert_true(verify_at ~= nil,
          "the precision recipe never calls " .. SCRIPT ..
          " --verify, so a corpus that lost a checkout is still measured and still counted")

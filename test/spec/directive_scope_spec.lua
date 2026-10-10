@@ -1,4 +1,4 @@
--- The scope of an in-source `-- luasec:` suppression: which findings it silences
+-- The scope of an in-source `-- lua-doctor:` suppression: which findings it silences
 -- and, just as important, which findings it must leave alone.
 --
 -- Every case here is a defect that was live in this codebase. The common theme is
@@ -83,10 +83,10 @@ describe("a suppression between a push and a pop", function()
       -- that has to come back.
       local report = api.check_source(table.concat({
          "os.execute(cmd)",           -- 1
-         "-- luasec: push",           -- 2
-         "-- luasec: ignore 701",     -- 3
+         "-- lua-doctor: push",           -- 2
+         "-- lua-doctor: ignore 701",     -- 3
          "os.execute(cmd)",           -- 4  silenced
-         "-- luasec: pop",            -- 5
+         "-- lua-doctor: pop",            -- 5
          "os.execute(cmd)",           -- 6  still reported
       }, "\n"))
 
@@ -101,11 +101,11 @@ end)
 describe("a suppression with no push or pop in the file", function()
    it("is file-wide: every finding after it, to the end of the file", function()
       -- The scoping work must not turn the ordinary form into a region. A plain
-      -- `-- luasec: ignore 701` is how every existing suppression in a firmware
+      -- `-- lua-doctor: ignore 701` is how every existing suppression in a firmware
       -- tree is written, and it has always meant "from here on".
       local body = filler(40)
       local report = api.check_source(table.concat({
-         "-- luasec: ignore 701",     -- 1
+         "-- lua-doctor: ignore 701",     -- 1
          "os.execute(cmd)",           -- 2
          table.unpack(body),
          "os.execute(cmd)",           -- 44
@@ -118,7 +118,7 @@ end)
 
 describe("a suppression that opens its own region", function()
    it("holds until the pop, and stops at it", function()
-      -- `-- luasec: ignore 701 [push]` is the one-line form of a region: the
+      -- `-- lua-doctor: ignore 701 [push]` is the one-line form of a region: the
       -- suppression carries its own push, so it is scoped from its own line to
       -- the next pop. Line 2 is the finding it must silence and line 4 the one
       -- after the pop that must survive.
@@ -133,9 +133,9 @@ describe("a suppression that opens its own region", function()
       -- telling them so. `open_at` has to count a self-pushing suppression as a
       -- push, not only the markers.
       local report = api.check_source(table.concat({
-         "-- luasec: ignore 701 [push]",  -- 1
+         "-- lua-doctor: ignore 701 [push]",  -- 1
          "os.execute(cmd)",               -- 2  silenced
-         "-- luasec: pop",                -- 3
+         "-- lua-doctor: pop",                -- 3
          "os.execute(cmd)",               -- 4  still reported
       }, "\n"))
 
@@ -149,14 +149,14 @@ describe("a suppression that opens its own region", function()
       -- or name was literally "push". A directive that names no code has to say
       -- so - and it can only say so if `[push]` is not one of the patterns it
       -- read, because a pattern that is not a pattern is reported as unreadable.
-      local report = api.check_source("-- luasec: ignore [push]\nos.execute(cmd)\n")
+      local report = api.check_source("-- lua-doctor: ignore [push]\nos.execute(cmd)\n")
 
       assert_true(has(report, "012"),
          "a directive that names no code is reported: " .. codes(report))
       assert_no_match(message_of(report, "012"), "unreadable",
          "[push] was read as a code pattern Lua cannot read")
       assert_equal(message_of(report, "012"),
-         "luasec directive 'ignore' needs at least one code pattern",
+         "lua-doctor directive 'ignore' needs at least one code pattern",
          "the diagnostic names the missing pattern, not a bad one")
    end)
 end)
@@ -169,8 +169,8 @@ describe("a pop with no push above it", function()
       -- not applying at all. The two sinks below are the whole assertion - a
       -- suppression the operator wrote to silence them has to silence them.
       local report = api.check_source(table.concat({
-         "-- luasec: pop",          -- 1
-         "-- luasec: ignore 701",   -- 2
+         "-- lua-doctor: pop",          -- 1
+         "-- lua-doctor: ignore 701",   -- 2
          "os.execute(cmd)",         -- 3
          "os.execute(cmd)",         -- 4
       }, "\n"))
@@ -200,7 +200,7 @@ describe("a code pattern Lua cannot read", function()
                      "701:70[0-9"}
 
       for _, form in ipairs(forms) do
-         local source = "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n"
+         local source = "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n"
          local ok, report = pcall(api.check_source, source)
 
          assert_true(ok, "a broken suppression must not abort the scan: "
@@ -213,12 +213,12 @@ describe("a code pattern Lua cannot read", function()
 end)
 
 describe("a directive whose pattern names no code", function()
-   it("reports -- luasec: ignore : and silences nothing", function()
+   it("reports -- lua-doctor: ignore : and silences nothing", function()
       -- `ignore :` has an empty code half and an empty name half, so both halves
       -- were skipped and it matched every finding in the file: a suppression
       -- that silenced everything, silently. The sibling case, a bare
-      -- `-- luasec: ignore`, was already reported; this form was not.
-      local report = api.check_source("-- luasec: ignore :\nos.execute(cmd)\n")
+      -- `-- lua-doctor: ignore`, was already reported; this form was not.
+      local report = api.check_source("-- lua-doctor: ignore :\nos.execute(cmd)\n")
 
       assert_true(has(report, "012"),
          "a directive that names no code is reported: " .. codes(report))
@@ -242,8 +242,8 @@ describe("a malformed directive in one file of a tree", function()
       -- reaches the unfinished capture. Both have to stay in file A.
       local dir = scratch_dir("directive_crossfile")
       local a = write_file(dir, "a.lua", table.concat({
-         "-- luasec: ignore [708",   -- 1  unreadable while the directive is read
-         "-- luasec: ignore 70(",    -- 2  unreadable only when it is used
+         "-- lua-doctor: ignore [708",   -- 1  unreadable while the directive is read
+         "-- lua-doctor: ignore 70(",    -- 2  unreadable only when it is used
          "os.execute(cmd)",          -- 3
       }, "\n"))
       local b = write_file(dir, "b.lua", "os.execute(cmd)\n")
@@ -270,8 +270,8 @@ describe("a malformed directive in one file of a tree", function()
       -- Same process, a second run: nothing a run learned may reach the next one.
       local dir2 = scratch_dir("directive_crossfile_again")
       local a2 = write_file(dir2, "a.lua", table.concat({
-         "-- luasec: ignore [708",
-         "-- luasec: ignore 70(",
+         "-- lua-doctor: ignore [708",
+         "-- lua-doctor: ignore 70(",
          "os.execute(cmd)",
       }, "\n"))
       local b2 = write_file(dir2, "b.lua", "os.execute(cmd)\n")
@@ -290,7 +290,7 @@ describe("a suppression that is a valid pattern", function()
       -- are still consulted: the code half, and the name half after it.
       for _, form in ipairs({"701", "70[0-9]", "701:os.execute"}) do
          local report = api.check_source(
-            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n")
+            "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n")
          assert_equal(#report, 0,
             "a valid suppression still suppresses: " .. form .. " left "
             .. codes(report))
@@ -299,7 +299,7 @@ describe("a suppression that is a valid pattern", function()
       -- A name pattern that names a different sink is not a match, and a
       -- suppression that quietly widened itself to everything of that code would
       -- be indistinguishable from one that worked.
-      local report = api.check_source("-- luasec: ignore 701:nosuch\nos.execute(cmd)\n")
+      local report = api.check_source("-- lua-doctor: ignore 701:nosuch\nos.execute(cmd)\n")
       assert_equal(codes(report), "701",
          "a name pattern that does not match silences nothing")
    end)
@@ -319,7 +319,7 @@ describe("a code pattern Lua will not read", function()
 
       for _, form in ipairs(forms) do
          local report = api.check_source(
-            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n")
+            "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n")
 
          assert_true(has(report, "701"),
             "a pattern that cannot be read hides nothing: " .. form
@@ -347,7 +347,7 @@ describe("a `only` directive whose pattern cannot be read", function()
       -- still reported, the 012 is never filtered by any in-source directive,
       -- and the run fails.
       local report = api.check_source([[
--- luasec: only [709
+-- lua-doctor: only [709
 local uci = require("uci")
 local t = {}
 t.uci = uci.cursor()
@@ -361,7 +361,7 @@ t.uci:set("system", "root_password", "R00tPassw0rd-2024")
 
    it("still selects when the pattern is one it can read", function()
       local report = api.check_source([[
--- luasec: only 747
+-- lua-doctor: only 747
 local uci = require("uci")
 local t = {}
 t.uci = uci.cursor()
@@ -390,7 +390,7 @@ describe("an unreadable only-pattern learned from one code reaching another", fu
       -- the 723 survive the broken selection, and the 012 that names the
       -- problem survives alongside them.
       local report = api.check_source(table.concat({
-         "-- luasec: only 70(",                    -- 1
+         "-- lua-doctor: only 70(",                    -- 1
          "local function status(host)",             -- 2
          '   os.execute("ping -c1 " .. http.formvalue(host))', -- 3  709
          "end",                                     -- 4

@@ -11,7 +11,7 @@
 -- grows a new way of emitting a duplicate is caught there, rather than by
 -- whoever reads the next corpus report and notices a line printed twice.
 --
--- Everything goes through a public seam - `luasec.api` and `bin/luasec` - so the
+-- Everything goes through a public seam - `luasec.api` and `bin/lua-doctor` - so the
 -- specs say what a consumer reads and nothing about how a report is put
 -- together. The json is parsed by the small reader below for the same reason
 -- report_spec.lua has one: a spec should read the bytes back, not match them as
@@ -34,7 +34,7 @@ local MEASUREMENT_STD = "+openwrt+luci+luajit"
 
 -- ---------------------------------------------------------------- json
 
--- Just enough of a reader for a luasec report: objects, arrays, strings, numbers,
+-- Just enough of a reader for a lua-doctor report: objects, arrays, strings, numbers,
 -- booleans and null. It exists to read the bytes the tool printed back, so that
 -- the assertions below are about the report a consumer gets.
 local function decode_json(text)

@@ -31,7 +31,7 @@ local function tree()
 end
 
 local function stdout_of(args)
-   local cmd = "./bin/luasec"
+   local cmd = "./bin/lua-doctor"
    for _, a in ipairs(args) do cmd = cmd .. " " .. string.format("%q", a) end
    local pipe = assert(io.popen(cmd .. " 2>/dev/null"))
    local out = pipe:read("*a")

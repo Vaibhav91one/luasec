@@ -1,4 +1,4 @@
--- The project config file, luasec.config.lua: a Lua table kept beside the code.
+-- The project config file, lua-doctor.config.lua: a Lua table kept beside the code.
 -- It is loaded as text in an empty environment, so it can hold data and nothing
 -- else. Every key and value is checked: a config typo that is ignored is a gate
 -- that is quietly off, so anything this module does not know stops the run.
@@ -6,7 +6,7 @@ local codes = require "luasec.rules.codes"
 
 local config = {}
 
-config.DEFAULT_NAME = "luasec.config.lua"
+config.DEFAULT_NAME = "lua-doctor.config.lua"
 
 local KEYS = {"allow", "disable", "fail_on", "severity", "std"}
 local ALLOW_KEYS = {code = true, file = true, reason = true}
@@ -44,7 +44,7 @@ function config.check(value, path)
             return bad(("severity keys are quoted codes, e.g. ['709'], not %s"):format(tostring(code)))
          end
          if not codes.exists(tostring(code)) then
-            return bad(("severity: '%s' is not a luasec code"):format(tostring(code)))
+            return bad(("severity: '%s' is not a lua-doctor code"):format(tostring(code)))
          end
          if not SEVERITIES[severity] then
             return bad(("severity['%s'] must be one of %s"):format(tostring(code), SEVERITY_LIST))
@@ -61,7 +61,7 @@ function config.check(value, path)
             end
          end
          if type(entry.code) ~= "string" or not codes.exists(entry.code) then
-            return bad(("allow[%d]: '%s' is not a luasec code"):format(index, tostring(entry.code)))
+            return bad(("allow[%d]: '%s' is not a lua-doctor code"):format(index, tostring(entry.code)))
          end
          if entry.file ~= nil and type(entry.file) ~= "string" then
             return bad(("allow[%d].file must be a string"):format(index))
@@ -204,10 +204,10 @@ function config.apply_allow(findings, allow)
    for index, entry in ipairs(allow) do
       local where = entry.file or "any file"
       if counts[index] then
-         io.stderr:write(("luasec: allowed %d finding(s) of %s in %s: %s\n")
+         io.stderr:write(("lua-doctor: allowed %d finding(s) of %s in %s: %s\n")
             :format(counts[index], entry.code, where, entry.reason))
       else
-         io.stderr:write(("luasec: config allow for %s in %s matched nothing\n")
+         io.stderr:write(("lua-doctor: config allow for %s in %s matched nothing\n")
             :format(entry.code, where))
       end
    end

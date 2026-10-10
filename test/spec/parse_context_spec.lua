@@ -102,7 +102,7 @@ describe("a dialect advisory is not an absence of coverage", function()
    it("does not fail a run that was read in full", function()
       -- 903 reports an API the configured standard does not have - a bitwise
       -- operator under `--std luajit`, say. It is a statement about the profile,
-      -- not about what luasec managed to read, so it must not fail a run the
+      -- not about what lua-doctor managed to read, so it must not fail a run the
       -- way 901 and 904 do. Treating it as degraded made every tree that uses
       -- `<<` a permanently red gate, with no escape hatch: --ignore 903 removed
       -- the lines but the run still exited 1.

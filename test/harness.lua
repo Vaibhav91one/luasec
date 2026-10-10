@@ -182,7 +182,7 @@ harness.cli = nil
 -- and deleted each other's files.
 function harness.scratch_dir(tag)
    local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/$", "")
-   local pipe = assert(io.popen(("mktemp -d %q"):format(base .. "/luasec_" .. tag .. ".XXXXXX")))
+   local pipe = assert(io.popen(("mktemp -d %q"):format(base .. "/lua_doctor_" .. tag .. ".XXXXXX")))
    local dir = pipe:read("*l")
    pipe:close()
    assert(dir and dir ~= "", "mktemp -d failed for " .. tag)
@@ -192,7 +192,7 @@ end
 -- Run the CLI as a subprocess; returns combined output and the exit code.
 function harness.cli(args, opts)
    opts = opts or {}
-   local cmd = (opts.env and (opts.env .. " ") or "") .. "./bin/luasec"
+   local cmd = (opts.env and (opts.env .. " ") or "") .. "./bin/lua-doctor"
    for _, a in ipairs(args) do
       cmd = cmd .. " " .. string.format("%q", a)
    end

@@ -1,13 +1,13 @@
 # Security policy
 
-## Reporting a vulnerability in luasec
+## Reporting a vulnerability in lua-doctor
 
 Open a private security advisory on the repository, or email the maintainer.
 Please include a Lua sample that triggers the issue.
 
-## Threat model for luasec itself
+## Threat model for lua-doctor itself
 
-`luasec` reads untrusted, frequently malicious input: firmware Lua, precompiled
+`lua-doctor` reads untrusted, frequently malicious input: firmware Lua, precompiled
 bytecode, files with names chosen by an attacker, and - with `--validate` - Lua
 that is about to be executed. The tool is expected to survive that input without
 hanging, exhausting memory, or executing anything it analyzes. Specifically:
@@ -16,7 +16,7 @@ hanging, exhausting memory, or executing anything it analyzes. Specifically:
 - Fixture generation is exempt, as authoring rather than analysis:
   `scripts/make-bytecode-fixtures.lua` shells out to `luac` (operands `%q` escaped)
   to write committed test bytes. It is not on the analysis path, and nothing
-  `luasec` runs reaches it.
+  `lua-doctor` runs reaches it.
 - The payload validator (`--validate`) never executes the payload in the analyzer's
   own process either. It runs in a child interpreter, so a bug in the validator
   costs one child process and not the analysis.
@@ -49,7 +49,7 @@ hanging, exhausting memory, or executing anything it analyzes. Specifically:
   The validator writes no temporary files; the payload rides to the child inside
   the child's own command line.
 - Pattern matching is bounded: in-source suppression patterns are rejected before Lua compiles them if they exceed 64 bytes or contain more than three repetition quantifiers (`-`, `*`, `+`, `?`), keeping backtracking cost on the 127-byte probe bounded to ~127^3 rather than ~127^k for arbitrary k. Rules are checked against bounded input.
-- A `luasec.config.lua` in the working directory is trusted to select and allow findings: it is parsed, never executed, but its `allow` entries still apply. When scanning a tree you do not trust, run from outside it or pass `--no-config`.
+- A `lua-doctor.config.lua` in the working directory is trusted to select and allow findings: it is parsed, never executed, but its `allow` entries still apply. When scanning a tree you do not trust, run from outside it or pass `--no-config`.
 
 ## What the memory bound actually is, measured
 
@@ -185,7 +185,7 @@ payload at the default setting:
 
 | Route | min | median | p90 | max |
 | --- | --- | --- | --- | --- |
-| `./bin/luasec --validate` | 109.45MB | 123.94MB | 131.78MB | 137.59MB |
+| `./bin/lua-doctor --validate` | 109.45MB | 123.94MB | 131.78MB | 137.59MB |
 | `validate_payload`, clock at 30s | 105.83MB | 115.38MB | 130.30MB | 134.69MB |
 
 and one 10-run batch taken while the machine was busy produced a single 178.69MB

@@ -199,7 +199,7 @@ register {code = "805", severity = "low", cwe = "CWE-0",
 
 -- ---------------------------------------------------------------- 0xx suppression
 
--- A `-- luasec:` directive the analyzer could not read: an action it does not
+-- A `-- lua-doctor:` directive the analyzer could not read: an action it does not
 -- know, or a code pattern Lua cannot read as a pattern. It is in the 0xx range
 -- with the other suppression problems, and it is a coverage gap rather than a
 -- note: findings may have been kept or dropped other than the operator asked,
@@ -210,7 +210,7 @@ register {code = "805", severity = "low", cwe = "CWE-0",
 -- and it sat on 021, which is luacheck's: a finding that means one thing in the
 -- JSON and another in luacheck's own output. It is 012 now.
 register {code = "012", severity = "low", cwe = "CWE-0",
-   message = "a luasec suppression directive could not be read ({name})"}
+   message = "a lua-doctor suppression directive could not be read ({name})"}
 
 -- ---------------------------------------------------------------- 9xx meta
 

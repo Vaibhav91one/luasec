@@ -680,7 +680,7 @@ detectors[#detectors + 1] = detect_destructive
 --
 -- A loop that makes a string or a table bigger with no ceiling the source
 -- states. A numeric for whose limit is a literal is the one shape that cannot
--- outgrow the device, and a measured run over luasec's own source showed that
+-- outgrow the device, and a measured run over lua-doctor's own source showed that
 -- "not a literal" is nowhere near enough: `for k, v in pairs(t) do
 -- out[#out+1] = v end` is the most common line in the language, and a count
 -- nobody wrote down is not the same as a count nobody can see.

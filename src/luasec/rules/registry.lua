@@ -11,7 +11,7 @@ local module_names = {"payloads", "firmware", "secrets", "rawscan"}
 function M.detectors()
    local detectors = {}
    for _, name in ipairs(module_names) do
-      -- luasec: ignore 705  the rule name comes from a compiled-in list, not from input
+      -- lua-doctor: ignore 705  the rule name comes from a compiled-in list, not from input
       local module = require("luasec.rules." .. name)
       for _, detector in ipairs(module.detectors()) do
          detectors[#detectors + 1] = detector

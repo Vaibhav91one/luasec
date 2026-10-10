@@ -1,4 +1,4 @@
-# Contributing to luasec
+# Contributing to lua-doctor
 
 - [How to start](#how-to-start)
 - [Submit a PR](#submit-a-pr)
@@ -16,7 +16,7 @@ implementation.
 make lua vendor   # build the Lua interpreter and fetch pinned luacheck
 make test         # run all specs
 make adversarial  # run the adversarial regression suite
-make selfscan     # scan src/ with luasec itself
+make selfscan     # scan src/ with lua-doctor itself
 make corpus       # clone the firmware corpora (network, gitignored)
 make precision    # re-take the corpus measurement, after make corpus
 ```

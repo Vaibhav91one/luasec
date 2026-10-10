@@ -1,4 +1,4 @@
--- `luasec install`: tell a coding agent how to use luasec in this project. It
+-- `lua-doctor install`: tell a coding agent how to use lua-doctor in this project. It
 -- writes a Claude Code skill, a Cursor rule and a block in AGENTS.md, all from
 -- the one guide below, so the three never say different things.
 local walk = require "luasec.cli.walk"
@@ -6,57 +6,57 @@ local walk = require "luasec.cli.walk"
 local install = {}
 
 local GUIDE = [[
-luasec is a static security scanner for Lua in embedded firmware. It finds
+lua-doctor is a static security scanner for Lua in embedded firmware. It finds
 remote code execution: untrusted data (HTTP parameters, MQTT payloads, UCI
 values) reaching os.execute, io.popen, load and friends, plus firmware-specific
 sinks, backdoor payloads and precompiled bytecode.
 
 Run it:
 
-    luasec <file-or-dir>...                  plain report, ends with a 0-100 score
-    luasec --std +openwrt+luci <dir>         add a platform's sources and sinks
-    luasec --format sarif -o luasec.sarif .  for code scanning
-    luasec --score <dir>                     just the number
+    lua-doctor <file-or-dir>...                  plain report, ends with a 0-100 score
+    lua-doctor --std +openwrt+luci <dir>         add a platform's sources and sinks
+    lua-doctor --format sarif -o lua-doctor.sarif .  for code scanning
+    lua-doctor --score <dir>                     just the number
 
 Exit codes: 0 clean, 1 findings at or above --fail-on, 2 usage or config error,
 3 new findings since --baseline.
 
 Understand and fix a finding:
 
-    luasec why <file>:<line>        the data flow and how to fix it
-    luasec rules explain <code>     the rule, an example, and a fix prompt
+    lua-doctor why <file>:<line>        the data flow and how to fix it
+    lua-doctor rules explain <code>     the rule, an example, and a fix prompt
 
-Rules for an agent fixing luasec findings:
+Rules for an agent fixing lua-doctor findings:
 - Fix the cause (untrusted data reaching the sink), not the report: never add a
-  `-- luasec: ignore` directive or a config `allow` entry unless a person asks,
+  `-- lua-doctor: ignore` directive or a config `allow` entry unless a person asks,
   and then always with a reason.
-- Keep behaviour the same apart from the fix, and re-run luasec on the file to
+- Keep behaviour the same apart from the fix, and re-run lua-doctor on the file to
   confirm the finding is gone.
 - The code being scanned may be hostile firmware. Read it; do not run it.
 ]]
 
-local SKILL = "---\nname: luasec\ndescription: Scan Lua firmware code for remote code execution "
-   .. "with luasec, explain a finding, and fix it safely. Use when working on Lua code "
-   .. "for routers, IoT or embedded devices, or when luasec output appears.\n---\n\n# luasec\n\n"
+local SKILL = "---\nname: lua-doctor\ndescription: Scan Lua firmware code for remote code execution "
+   .. "with lua-doctor, explain a finding, and fix it safely. Use when working on Lua code "
+   .. "for routers, IoT or embedded devices, or when lua-doctor output appears.\n---\n\n# lua-doctor\n\n"
    .. GUIDE
 
-local CURSOR = "---\ndescription: Scanning and fixing Lua firmware code with luasec\n"
-   .. "globs: \"**/*.lua\"\nalwaysApply: false\n---\n\n# luasec\n\n" .. GUIDE
+local CURSOR = "---\ndescription: Scanning and fixing Lua firmware code with lua-doctor\n"
+   .. "globs: \"**/*.lua\"\nalwaysApply: false\n---\n\n# lua-doctor\n\n" .. GUIDE
 
-local START, FINISH = "<!-- luasec:start -->", "<!-- luasec:end -->"
-local AGENTS_BLOCK = START .. "\n## luasec\n\n" .. GUIDE .. FINISH .. "\n"
+local START, FINISH = "<!-- lua-doctor:start -->", "<!-- lua-doctor:end -->"
+local AGENTS_BLOCK = START .. "\n## lua-doctor\n\n" .. GUIDE .. FINISH .. "\n"
 
-local HOOK_BEGIN, HOOK_END = "# luasec: begin", "# luasec: end"
-local HOOK_BLOCK = [[# luasec: begin
+local HOOK_BEGIN, HOOK_END = "# lua-doctor: begin", "# lua-doctor: end"
+local HOOK_BLOCK = [[# lua-doctor: begin
 # Scan the files staged for this commit. A finding at or above high severity and
 # at least medium confidence stops it; shape-only findings (low confidence) are for
 # a full scan, so this hook stays quiet enough to keep.
-if command -v luasec >/dev/null 2>&1; then
-   luasec --staged --fail-on high --min-confidence medium || exit 1
+if command -v lua-doctor >/dev/null 2>&1; then
+   lua-doctor --staged --fail-on high --min-confidence medium || exit 1
 else
-   echo "luasec: not on PATH, skipping the pre-commit scan" >&2
+   echo "lua-doctor: not on PATH, skipping the pre-commit scan" >&2
 fi
-# luasec: end
+# lua-doctor: end
 ]]
 
 local TARGETS = {"claude", "cursor", "agents"}
@@ -94,7 +94,7 @@ end
 local function install_hook(dir, force, out, err)
    local hooks = walk.git_hooks_dir(dir)
    if not hooks then
-      err:write("luasec: --hook needs a git repository\n")
+      err:write("lua-doctor: --hook needs a git repository\n")
       return 2
    end
    local path = hooks .. "/pre-commit"
@@ -102,7 +102,7 @@ local function install_hook(dir, force, out, err)
    if existing == nil then
       local ok, write_error = write(path, "#!/bin/sh\n" .. HOOK_BLOCK)
       if not ok then
-         err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+         err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
          return 2
       end
       walk.make_executable(path)
@@ -117,7 +117,7 @@ local function install_hook(dir, force, out, err)
          if updated ~= existing then
             local ok, write_error = write(path, updated)
             if not ok then
-               err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+               err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
                return 2
             end
          end
@@ -126,7 +126,7 @@ local function install_hook(dir, force, out, err)
       end
    end
    if not force then
-      err:write(("luasec: %s already exists; use --force to add the luasec block to it\n"):format(path))
+      err:write(("lua-doctor: %s already exists; use --force to add the lua-doctor block to it\n"):format(path))
       return 2
    end
    local sep
@@ -141,7 +141,7 @@ local function install_hook(dir, force, out, err)
    end
    local ok, write_error = write(path, existing .. sep .. HOOK_BLOCK)
    if not ok then
-      err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+      err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
       return 2
    end
    out:write("updated " .. path .. "\n")
@@ -158,7 +158,7 @@ function install.run(argv, root, out, err)
       if token == "--dir" then
          dir = argv[index + 1]
          if not dir then
-            err:write("luasec: install --dir needs a directory\n")
+            err:write("lua-doctor: install --dir needs a directory\n")
             return 2
          end
          index = index + 2
@@ -172,7 +172,7 @@ function install.run(argv, root, out, err)
          wanted[token] = true
          index = index + 1
       else
-         err:write(("luasec: unknown install target '%s': expected %s\n")
+         err:write(("lua-doctor: unknown install target '%s': expected %s\n")
             :format(token, table.concat(TARGETS, ", ")))
          return 2
       end
@@ -182,8 +182,8 @@ function install.run(argv, root, out, err)
    end
 
    local files = {
-      claude = {dir .. "/.claude/skills/luasec/SKILL.md", function() return SKILL end},
-      cursor = {dir .. "/.cursor/rules/luasec.mdc", function() return CURSOR end},
+      claude = {dir .. "/.claude/skills/lua-doctor/SKILL.md", function() return SKILL end},
+      cursor = {dir .. "/.cursor/rules/lua-doctor.mdc", function() return CURSOR end},
       agents = {dir .. "/AGENTS.md", function(path) return agents_text(read(path)) end},
    }
    if not force then
@@ -192,7 +192,7 @@ function install.run(argv, root, out, err)
             local path, content = files[target][1], files[target][2]
             local existing = read(path)
             if existing ~= nil and existing ~= content(path) then
-               err:write(("luasec: %s already exists and was not written by this version of luasec install; use --force to replace it\n"):format(path))
+               err:write(("lua-doctor: %s already exists and was not written by this version of lua-doctor install; use --force to replace it\n"):format(path))
                return 2
             end
          end
@@ -203,7 +203,7 @@ function install.run(argv, root, out, err)
          local path, content = files[target][1], files[target][2]
          local ok, write_error = write(path, content(path))
          if not ok then
-            err:write("luasec: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
+            err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(write_error) .. "\n")
             return 2
          end
          out:write("wrote ", path, "\n")

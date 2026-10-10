@@ -4,7 +4,7 @@ local assert_equal, assert_match, assert_true = harness.assert_equal, harness.as
 
 local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
-describe("luasec why", function()
+describe("lua-doctor why", function()
    it("explains a finding: the flow from source to sink and how to fix it", function()
       local out, code = harness.cli({"why", TAINTED .. ":3"})
       assert_equal(code, 0, out)
@@ -12,7 +12,7 @@ describe("luasec why", function()
       assert_match(out, "\n  source  http%.formvalue  " .. TAINTED:gsub("%p", "%%%0") .. ":3\n", out)
       assert_match(out, "\n  sink    os%.execute  ", out)
       assert_match(out, "\n  how to fix:\n    Do not build a shell command from request data", out)
-      assert_match(out, "\n  more: luasec rules explain 709", out)
+      assert_match(out, "\n  more: lua%-doctor rules explain 709", out)
    end)
 
    it("says so when nothing is reported on that line", function()

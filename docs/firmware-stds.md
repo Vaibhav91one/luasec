@@ -81,7 +81,7 @@ write we cannot see, and neither can we call the file safe.
 
 727 is the rule that was most expensive to get right, and the measurement is
 worth recording. The first version asked a single question - is the loop limit a
-literal constant - and it reported **65 findings on luasec's own source**, every
+literal constant - and it reported **65 findings on lua-doctor's own source**, every
 one of them a false positive:
 
 ```

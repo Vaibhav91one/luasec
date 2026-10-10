@@ -9,7 +9,7 @@ local DIR = "test/fixtures/firmware"
 -- thing this spec must not do.
 local function run(args)
    local scratch = harness.scratch_dir("progress")
-   local cmd = "./bin/luasec"
+   local cmd = "./bin/lua-doctor"
    for _, a in ipairs(args) do cmd = cmd .. " " .. string.format("%q", a) end
    os.execute(("%s >%q 2>%q </dev/null"):format(cmd, scratch .. "/out", scratch .. "/err"))
    local function read(name)
@@ -31,10 +31,10 @@ describe("progress", function()
 
    it("shows the phases and a counter as plain lines with --progress", function()
       local out, err = run({"--progress", DIR})
-      assert_match(err, "luasec: listing files under test/fixtures/firmware\n", err)
-      assert_match(err, "luasec: found %d+ files to analyze\n", err)
-      assert_match(err, "luasec: analyzing %d+/%d+ files %(100%%%)\n", err)
-       assert_match(err, "luasec: Scanned %d+ files in %d+s\n$", err)
+      assert_match(err, "lua%-doctor: listing files under test/fixtures/firmware\n", err)
+      assert_match(err, "lua%-doctor: found %d+ files to analyze\n", err)
+      assert_match(err, "lua%-doctor: analyzing %d+/%d+ files %(100%%%)\n", err)
+       assert_match(err, "lua%-doctor: Scanned %d+ files in %d+s\n$", err)
       assert_true(not out:find("analyzing", 1, true), "stdout carries no progress")
    end)
 
@@ -46,13 +46,13 @@ describe("progress", function()
 
    it("names the walk and report phases around the counter", function()
       local _, err = run({"--progress", DIR})
-      local finding = err:find("luasec: finding Lua files", 1, true)
-      local first = err:find("luasec: analyzing", 1, true)
-      local building = err:find("luasec: building the report", 1, true)
+      local finding = err:find("lua-doctor: finding Lua files", 1, true)
+      local first = err:find("lua-doctor: analyzing", 1, true)
+      local building = err:find("lua-doctor: building the report", 1, true)
       local last = nil
       local from = 1
       while true do
-         local at = err:find("luasec: analyzing", from, true)
+         local at = err:find("lua-doctor: analyzing", from, true)
          if not at then break end
          last = at
          from = at + 1
@@ -80,7 +80,7 @@ describe("progress", function()
 
    it("says when it is resolving calls across files", function()
       local _, err = run({"--progress", "--whole-program", DIR})
-      assert_match(err, "luasec: resolving calls across files\n", err)
+      assert_match(err, "lua%-doctor: resolving calls across files\n", err)
    end)
    it("draws a phase and a file counter on a live terminal without error", function()
       local progress = require "luasec.cli.progress"

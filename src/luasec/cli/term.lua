@@ -41,12 +41,12 @@ end
 --- Single-key mode switches off the signal keys too (-isig), so Ctrl-C arrives
 -- as a byte the reader sees as "quit" and can restore the terminal, instead
 -- of a signal that kills the process with echo still off.
--- luasec: ignore 708  the stty command is a constant mode switch, never user input
+-- lua-doctor: ignore 708  the stty command is a constant mode switch, never user input
 function term.raw()
    os.execute("stty -icanon -echo -isig min 1")
 end
 
--- luasec: ignore 708  the stty command is a constant mode switch, never user input
+-- lua-doctor: ignore 708  the stty command is a constant mode switch, never user input
 function term.cooked()
    os.execute("stty icanon echo isig")
 end
@@ -134,7 +134,7 @@ end
 -- enough); cached nowhere so a resize is seen on the next draw.
 function term.width()
    local stty_text = ""
-   local handle = io.popen("stty size 2>/dev/null </dev/tty") -- luasec: ignore 702  constant command, no user input
+   local handle = io.popen("stty size 2>/dev/null </dev/tty") -- lua-doctor: ignore 702  constant command, no user input
    if handle then
       stty_text = handle:read("*a") or ""
       handle:close()

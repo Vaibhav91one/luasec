@@ -1,18 +1,18 @@
 rockspec_format = "3.0"
-package = "luasec-scanner"
+package = "lua-doctor"
 version = "0.6.0-1"
 source = {
-   url = "https://github.com/Vaibhav91one/luasec/releases/download/v0.6.0/luasec-0.6.0.tar.gz",
-   dir = "luasec-0.6.0",
+   url = "https://github.com/doctor-labs/lua-doctor/releases/download/v0.6.0/lua-doctor-0.6.0.tar.gz",
+   dir = "lua-doctor-0.6.0",
 }
 description = {
    summary = "Static security scanner for Lua in embedded firmware: finds remote code execution.",
    detailed = [[
-luasec finds untrusted data reaching command execution, dynamic code loading and
+lua-doctor finds untrusted data reaching command execution, dynamic code loading and
 firmware-specific sinks in Lua code from routers and IoT devices, and reports it
 as plain text, JSON, SARIF or HTML with a 0-100 health score.
 ]],
-   homepage = "https://github.com/Vaibhav91one/luasec",
+   homepage = "https://github.com/doctor-labs/lua-doctor",
    license = "MIT",
    labels = {"security", "static-analysis", "firmware", "sarif"},
 }
@@ -150,7 +150,7 @@ build = {
       ["luacheck.version"] = "vendor/luacheck/version.lua",
    },
    install = {
-      bin = {luasec = "bin/luasec.lua"},
+      bin = {["lua-doctor"] = "bin/lua-doctor.lua"},
    },
    copy_directories = {"docs"},
 }

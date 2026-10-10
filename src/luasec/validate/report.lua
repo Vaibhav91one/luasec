@@ -3,7 +3,7 @@
 -- Deliberately not a finding report: a verdict is an outcome, not a list of
 -- codes, so there is no severity, no CWE and no exit threshold to apply.
 --
--- Every line here is luasec's own except the ones marked `payload|`, and the
+-- Every line here is lua-doctor's own except the ones marked `payload|`, and the
 -- marking is not decoration. A payload chooses the text of everything it prints,
 -- of the value it returns, of the argument it passes to a sink and of the error
 -- message it raises, so all of it lands in a report an operator is about to
@@ -25,7 +25,7 @@ local function payload_block(label, value)
 end
 
 function validate_report.render(verdict, name)
-   local lines = {"luasec: validation of " .. (name or verdict.source or "<source>")}
+   local lines = {"lua-doctor: validation of " .. (name or verdict.source or "<source>")}
 
    lines[#lines + 1] = "  verdict:   " .. tostring(verdict.verdict)
    -- An exit reason that is the payload's own error message is its text, not
@@ -68,7 +68,7 @@ function validate_report.render(verdict, name)
    -- standard error and the payload is given no member of `io` that reaches it.
    if verdict.payload_output and verdict.payload_output ~= "" then
       for _, line in ipairs(payload_block(
-         "payload output (text the snippet produced; not a luasec finding):",
+         "payload output (text the snippet produced; not a lua-doctor finding):",
          verdict.payload_output)) do
          lines[#lines + 1] = line
       end

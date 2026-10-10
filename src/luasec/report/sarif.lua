@@ -151,9 +151,9 @@ function sarif.render(report, opts)
       version = "2.1.0",
       runs = {{
          tool = {driver = {
-            name = "luasec",
+            name = "lua-doctor",
             version = version.luasec,
-            informationUri = "https://github.com/Vaibhav91one/luasec",
+            informationUri = "https://github.com/doctor-labs/lua-doctor",
             rules = sarif.rules_table(),
          }},
          results = results,

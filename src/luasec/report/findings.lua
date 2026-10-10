@@ -347,7 +347,7 @@ function findings.document(list, ctx)
    local summary = score.summarize(list)
    return {
       schema = "doctor/1",
-      tool = "luasec",
+      tool = "lua-doctor",
       version = require("luasec.version").luasec,
       exit_code = ctx.exit_code or (#out > 0 and 1 or 0),
       score = score.envelope(summary),

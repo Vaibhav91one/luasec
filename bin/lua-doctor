@@ -1,5 +1,5 @@
 #!/bin/sh
-# luasec entry point. Prefers the locally built Lua, falls back to whatever
+# lua-doctor entry point. Prefers the locally built Lua, falls back to whatever
 # `lua` is on PATH (must be 5.3+).
 set -e
 here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -10,7 +10,7 @@ else
 fi
 # The payload validator runs the payload in a child interpreter, and it has to be
 # the same one running us or a verdict would describe a different Lua.
-LUASEC_LUA="$lua"
-export LUASEC_LUA
+LUA_DOCTOR_LUA="$lua"
+export LUA_DOCTOR_LUA
 exec "$lua" -e "package.path='$here/src/?.lua;$here/src/?/init.lua;$here/vendor/?.lua;$here/vendor/?/init.lua;'..package.path" \
   "$here/src/luasec/main.lua" "$@"

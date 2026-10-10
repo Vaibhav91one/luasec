@@ -1,11 +1,11 @@
-# luasec - agent conventions
+# lua-doctor - agent conventions
 
 Read before touching anything. Single source of truth for how work is done here.
 Do not deviate without updating this file in the same PR.
 
 ## What this tool is
 
-`luasec` is a static RCE / security analyzer for Lua source found in embedded firmware.
+`lua-doctor` is a static RCE / security analyzer for Lua source found in embedded firmware.
 It reuses `luacheck` (vendored, MIT) as a library: its lexer/parser give a real
 Lua 5.1-5.4 + LuaJIT AST, and its `linearize` + `resolve_locals` stages give a
 linearized CFG plus flow-sensitive reaching-definitions. We add what luacheck has no
@@ -29,7 +29,7 @@ We never modify `vendor/`. It is pinned (see `vendor/PINNED`) and checked by
 | Seam | Interface |
 | --- | --- |
 | library | `require("luasec.api")` -> `check_source(src, opts)`, `analyze(paths, opts)`, `format(report, name, opts)`, `score(report)`, `rules_load(paths)`, `validate_payload(src, opts)` |
-| CLI | `bin/luasec <args>` as a subprocess (flags, exit codes, stdout contracts) |
+| CLI | `bin/lua-doctor <args>` as a subprocess (flags, exit codes, stdout contracts) |
 | allowed extra | `luasec.util.util` (string/entropy helpers), `luasec.util.const_eval` (constant folding), `luasec.bytecode.detect`, `luasec.bytecode.header`, `luasec.bytecode.protos` - public modules in their own right, each with a narrow interface |
 
 Forbidden in tests: `require("luacheck.*")`, the `stages.warnings` table shape,
@@ -111,7 +111,7 @@ Do not trust the byte reading on the strength of that argument alone, because
     for line in (p.stdout + p.stderr).strip().splitlines()[:8]: print("   ", line)
     PY
 
-    python3 /tmp/peak.py ./bin/luasec --validate <payload>
+    python3 /tmp/peak.py ./bin/lua-doctor --validate <payload>
 
 Calibrate any new harness on something with a known footprint before trusting it
 - a payload whose size you chose yourself is the only honest control.
@@ -135,7 +135,7 @@ reproducible.
 
 | Range | Meaning |
 | --- | --- |
-| 012 | unreadable `-- luasec:` suppression directive |
+| 012 | unreadable `-- lua-doctor:` suppression directive |
 | 701-712 | command execution / dynamic code sinks |
 | 721-731 | firmware-specific (flash, uci chain, sandbox escape, DoS, store hop, HTTP header and subrequest writes) |
 | 741-750 | payload / backdoor patterns |
@@ -154,10 +154,10 @@ baseline. `903` is deliberately not in it: it reports an API the configured Lua
 standard does not have, a statement about the profile rather than a gap in what
 was read.
 
-The 0xx-6xx range is luacheck's vocabulary and a luasec code must not collide with
+The 0xx-6xx range is luacheck's vocabulary and a lua-doctor code must not collide with
 one it uses. The reserved set is enumerated in
 `test/spec/rules_catalogue_spec.lua` and a spec fails the build on a collision.
-`012` is the one luasec code in that range: luasec sat on 021, which is
+`012` is the one lua-doctor code in that range: lua-doctor sat on 021, which is
 luacheck's, so a finding meant one thing in this tool's output and another in
 luacheck's.
 
@@ -204,5 +204,5 @@ nothing will tell you it is stale.
 
 An independent agent reviews every PR: spec compliance first, then code quality, then
 `make tdd-proof`, metamorphic invariants, corpus oracle, precision budget, and a
-security review of luasec itself. Its verdict blocks merge. Fix what it legitimately
+security review of lua-doctor itself. Its verdict blocks merge. Fix what it legitimately
 raises; argue in the PR when it is wrong.

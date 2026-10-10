@@ -1,4 +1,4 @@
-// The luasec signature pack, as yara rules.
+// The lua-doctor signature pack, as yara rules.
 //
 // GENERATED CONTENT, CHECKED BY test/spec/signatures_spec.lua: every signature
 // id in this file must also be in src/luasec/registry/stds/signatures.lua, and
@@ -11,7 +11,7 @@
 // text: a plain substring, case sensitive, with the alternatives of the pack's
 // pattern separated by |. See docs/signatures.md.
 
-rule luasec_sig_mirai_default_credentials
+rule lua_doctor_sig_mirai_default_credentials
 {
    meta:
       id = "mirai-default-credentials"
@@ -34,7 +34,7 @@ rule luasec_sig_mirai_default_credentials
       any of them
 }
 
-rule luasec_sig_mirai_user_agent
+rule lua_doctor_sig_mirai_user_agent
 {
    meta:
       id = "mirai-user-agent"
@@ -49,7 +49,7 @@ rule luasec_sig_mirai_user_agent
       any of them
 }
 
-rule luasec_sig_mirai_loader_paths
+rule lua_doctor_sig_mirai_loader_paths
 {
    meta:
       id = "mirai-loader-paths"
@@ -66,7 +66,7 @@ rule luasec_sig_mirai_loader_paths
       any of them
 }
 
-rule luasec_sig_shellshock_cgi_environment
+rule lua_doctor_sig_shellshock_cgi_environment
 {
    meta:
       id = "shellshock-cgi-environment"
@@ -84,7 +84,7 @@ rule luasec_sig_shellshock_cgi_environment
       any of them
 }
 
-rule luasec_sig_cve_2017_17215_huawei_hg532
+rule lua_doctor_sig_cve_2017_17215_huawei_hg532
 {
    meta:
       id = "cve-2017-17215-huawei-hg532"
@@ -100,7 +100,7 @@ rule luasec_sig_cve_2017_17215_huawei_hg532
       any of them
 }
 
-rule luasec_sig_cve_2018_10561_dlink_gpon
+rule lua_doctor_sig_cve_2018_10561_dlink_gpon
 {
    meta:
       id = "cve-2018-10561-dlink-gpon"
@@ -117,7 +117,7 @@ rule luasec_sig_cve_2018_10561_dlink_gpon
       any of them
 }
 
-rule luasec_sig_dvr_cgi_path_traversal
+rule lua_doctor_sig_dvr_cgi_path_traversal
 {
    meta:
       id = "dvr-cgi-path-traversal"
@@ -133,7 +133,7 @@ rule luasec_sig_dvr_cgi_path_traversal
       any of them
 }
 
-rule luasec_sig_miner_stratum_pool
+rule lua_doctor_sig_miner_stratum_pool
 {
    meta:
       id = "miner-stratum-pool"
@@ -150,7 +150,7 @@ rule luasec_sig_miner_stratum_pool
       any of them
 }
 
-rule luasec_sig_cobalt_strike_default_uri
+rule lua_doctor_sig_cobalt_strike_default_uri
 {
    meta:
       id = "cobalt-strike-default-uri"

@@ -23,7 +23,7 @@
 --                  document quotes and the number `make corpus` prints. It is
 --                  measured from the tree, so a corpus that has drifted under the
 --                  document is a failure rather than a sentence nobody re-reads.
---   scanned_files  the files luasec itself selected (luasec.cli.walk). NOT the
+--   scanned_files  the files lua-doctor itself selected (luasec.cli.walk). NOT the
 --                  same number, and the difference is not noise: the walk reads
 --                  cgi-bin handlers and the extensionless scripts beside them,
 --                  which are Lua and are not named *.lua, and it declines four
@@ -41,7 +41,7 @@
 -- Measured with the command the document quotes, which is also what make
 -- precision runs:
 --
---   bin/luasec --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
+--   bin/lua-doctor --std +openwrt+luci+luajit --format json -o /tmp/corpus.json corpus
 --
 -- To re-measure after changing a rule: run `make corpus && make precision`, then
 -- update this file and docs/precision.md in the same commit. The gate is built so

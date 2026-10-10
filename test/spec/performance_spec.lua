@@ -117,7 +117,7 @@ describe("suppression directives scale linearly with directive count", function(
 
       local function with_suppressions(n)
          local lines = {}
-         for _ = 1, n do lines[#lines + 1] = "-- luasec: ignore 701" end
+         for _ = 1, n do lines[#lines + 1] = "-- lua-doctor: ignore 701" end
          for _ = 1, FINDING_COUNT do lines[#lines + 1] = "os.execute(cmd)" end
          return table.concat(lines, "\n")
       end
@@ -135,7 +135,7 @@ describe("suppression directives scale linearly with directive count and finding
       local function interleaved(n)
          local lines = {}
          for i = 1, n do
-            lines[#lines + 1] = "-- luasec: ignore 701"
+            lines[#lines + 1] = "-- lua-doctor: ignore 701"
             lines[#lines + 1] = "os.execute(cmd)"
          end
          return table.concat(lines, "\n")

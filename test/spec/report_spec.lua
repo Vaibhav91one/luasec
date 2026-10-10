@@ -121,7 +121,7 @@ describe("json report", function()
 
       local version = require "luasec.version"
       assert_equal(doc.schema, "doctor/1", "the document names the contract")
-      assert_equal(doc.tool, "luasec")
+      assert_equal(doc.tool, "lua-doctor")
       assert_equal(doc.version, version.luasec, "the document needs the tool's own version")
       assert_equal(doc.exit_code, 1, "the envelope carries the exit code of the run")
       assert_match(doc.data.report_version, "^%d+%.%d+$", "the old report version moved under data")
@@ -341,7 +341,7 @@ return handler
    end)
 
    it("does not write primaryLocationLineHash: that key is GitHub's own hash of the line (#311)", function()
-      -- luasec wrote "709:os.execute:2" there; GitHub recomputes the key, warns "inconsistent
+      -- lua-doctor wrote "709:os.execute:2" there; GitHub recomputes the key, warns "inconsistent
       -- fingerprint" on every result of every upload, and ignores ours. doctorFinding/v1 is the
       -- identity a consumer keys on and stays.
       local path = os.tmpname()

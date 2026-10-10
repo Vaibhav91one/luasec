@@ -475,11 +475,11 @@ end
 --
 -- Everything named `payload_*`, plus `exit_reason` when `reason_source` is
 -- "payload" and the `arg` of a sink, is text the payload chose. A caller that
--- shows any of it to a person should mark it the way `luasec --validate` does.
+-- shows any of it to a person should mark it the way `lua-doctor --validate` does.
 --
 -- Options: `timeout_ms`, `max_instructions`, `max_memory_kb`, `max_load_depth`,
 -- `max_source_bytes`, `name` (the source name to trace the verdict to) and `lua`
--- (the interpreter to run the payload with; defaults to $LUASEC_LUA, then
+-- (the interpreter to run the payload with; defaults to $LUA_DOCTOR_LUA, then
 -- $LUA_BIN, then `lua` on PATH).
 function api.validate_payload(source, opts)
    return require("luasec.validate.driver").run(source, opts or {})

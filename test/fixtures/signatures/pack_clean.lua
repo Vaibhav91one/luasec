@@ -7,7 +7,7 @@
 local BLOB = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAA"
 
 local function report(queue)
-   return "Mozilla/5.0 (X11; Linux x86_64) luasec-telemetry/1.0"
+   return "Mozilla/5.0 (X11; Linux x86_64) lua-doctor-telemetry/1.0"
 end
 
 local function store(api_password)

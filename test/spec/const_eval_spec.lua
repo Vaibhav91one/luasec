@@ -53,7 +53,7 @@ end
       local api = require "luasec.api"
       -- A local bound to a table is deliberately not folded. Whether M.cmd still
       -- holds the literal depends on every write to M, including writes through
-      -- an index key, a metatable, or a function luasec cannot see from this one
+      -- an index key, a metatable, or a function lua-doctor cannot see from this one
       -- definition. Answering "yes" would need a write set for the table, so
       -- table state stays dynamic.
       local report = api.check_source([[
@@ -134,7 +134,7 @@ end
 
    it("still reports a command argument that is a global", function()
       local api = require "luasec.api"
-      -- Chasing an alias must not extend to names luasec never saw defined: a
+      -- Chasing an alias must not extend to names lua-doctor never saw defined: a
       -- global is whatever another file put there.
       local report = api.check_source([[
 os.execute(STTY_COOKED)

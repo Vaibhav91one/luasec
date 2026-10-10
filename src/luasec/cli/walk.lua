@@ -242,10 +242,10 @@ end
 -- Run a command with an untrusted path, without the path ever being part of the
 -- command text.
 --
--- luasec: ignore 702,708 [push]
+-- lua-doctor: ignore 702,708 [push]
 -- Accepted, and worth saying why. This does hand a command to a shell, which is
 -- what the 702 reports - the command is not a constant - and the exposure 708
--- names, and luasec found it by scanning itself. What makes it
+-- names, and lua-doctor found it by scanning itself. What makes it
 -- safe is the three lines below: the untrusted path never appears in the command
 -- text, and the only variable in it, $p, comes from a temporary file we wrote.
 -- The report of a suppression is itself a small safety net: this comment is
@@ -254,7 +254,7 @@ end
 -- would silence every later 702 in this file as well.
 --
 -- Lua's %q escapes only " and \, so a directory named '/tmp/$(cmd)' would
--- otherwise run a command substitution inside luasec itself, and SECURITY.md says
+-- otherwise run a command substitution inside lua-doctor itself, and SECURITY.md says
 -- filenames come from attackers. Command substitution output is not re-parsed as
 -- shell syntax, so handing the path over as a file and reading it with $(cat ...)
 -- is safe where interpolating it is not.
@@ -270,12 +270,12 @@ local function popen_with_path(command, path)
       'p="$(cat %s; printf x)" || exit 0; p="${p%%x}"; %s', string.format("%q", tmp), command)
    return io.popen(command_text, "r"), tmp
 end
--- luasec: pop
+-- lua-doctor: pop
 
 -- How much one scan root is allowed to resolve to, and the environment variable
 -- that moves the number.
 --
--- -L is in the walk because a file behind a symlink that luasec never read is
+-- -L is in the walk because a file behind a symlink that lua-doctor never read is
 -- the one failure this tool cannot have, and the price of -L is that a link to
 -- a directory is walked once for every link that names it, with every copy
 -- analyzed again. Measured on a 20,000-file tree with twenty links to one of its
@@ -296,10 +296,10 @@ end
 -- the rest of this file already follows: ground we did not cover is never
 -- reported as a clean tree.
 --
--- LUASEC_MAX_WALK_PATHS moves it, so a spec can prove the behaviour at a limit
+-- LUA_DOCTOR_MAX_WALK_PATHS moves it, so a spec can prove the behaviour at a limit
 -- no real tree reaches instead of creating 50,000 files to trip it.
 local DEFAULT_MAX_WALK_PATHS = 50000
-local MAX_WALK_PATHS_ENV = "LUASEC_MAX_WALK_PATHS"
+local MAX_WALK_PATHS_ENV = "LUA_DOCTOR_MAX_WALK_PATHS"
 
 local function walk_limit()
    local raw = os.getenv(MAX_WALK_PATHS_ENV)
@@ -417,7 +417,7 @@ local function reroot_batch(paths, anchor)
    handle:close()
    -- N is a number and `list` is a name os.tmpname chose; the script has no single quote.
    local command = ("N=%d xargs -0 sh -c '%s' _ < '%s' 2>/dev/null"):format(#anchor, REROOT_SCRIPT, list)
-   -- luasec: ignore 702  the script is constant and N is a number; link paths travel as NUL bytes, never spliced
+   -- lua-doctor: ignore 702  the script is constant and N is a number; link paths travel as NUL bytes, never spliced
    local pipe = io.popen(command, "r")
    if pipe then
       local records = read_nul_stream(pipe, #paths * 3 + 3)
@@ -435,7 +435,7 @@ end
 --   find -H "$p" \( -type f -exec printf ... \) -o \( -type d -exec ... test -r ... \)
 --        -o \( -type l -exec ... the link pass ... \)
 --
--- -H follows the scan root when the operator points luasec at a link, and
+-- -H follows the scan root when the operator points lua-doctor at a link, and
 -- nothing else. Every other link is resolved by expand_root below, which is what
 -- keeps a directory from being walked twice through two links that name it.
 --

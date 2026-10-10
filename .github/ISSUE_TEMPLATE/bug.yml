@@ -1,11 +1,11 @@
 name: Bug
-about: Something in luasec behaves wrongly
+about: Something in lua-doctor behaves wrongly
 body:
   - type: textarea
     id: what
     attributes:
       label: What happened
-      description: What did you expect, and what did luasec do instead?
+      description: What did you expect, and what did lua-doctor do instead?
     validations:
       required: true
   - type: textarea
@@ -19,6 +19,6 @@ body:
   - type: input
     id: version
     attributes:
-      label: luasec version
+      label: lua-doctor version
     validations:
       required: true

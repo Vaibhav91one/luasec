@@ -2,7 +2,7 @@
 -- must not depend on which function they happened to call:
 --
 --   api.validate_options  returns nil plus a message
---   the entry points      raise the {luasec_config_error = true} object
+--   the entry points      raise the {lua_doctor_config_error = true} object
 --
 -- A Lua traceback is neither of those. It is what `profiles.split` raised when
 -- `std` arrived as a table, and a library caller cannot tell a typo in its own
@@ -35,7 +35,7 @@ local function rejected_by_entry(fn, ...)
    assert_false(ok, "expected a configuration error, got a clean return")
    assert_equal(type(err), "table",
       "expected the config-error object, got a Lua traceback: " .. tostring(err))
-   assert_true(err.luasec_config_error, "the raised error must be marked as a config error")
+   assert_true(err.lua_doctor_config_error, "the raised error must be marked as a config error")
    assert_equal(type(err.message), "string", "the raised error must carry a message")
    return err.message
 end

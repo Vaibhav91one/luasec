@@ -1,17 +1,17 @@
--- `luasec ci install`: write a GitHub workflow that runs the luasec action on
+-- `lua-doctor ci install`: write a GitHub workflow that runs the lua-doctor action on
 -- every push and pull request and uploads the result to code scanning. It
--- pins the action to this luasec's own version, so the gate in CI is the tool
+-- pins the action to this lua-doctor's own version, so the gate in CI is the tool
 -- the operator ran locally.
 local version = require "luasec.version"
 local walk = require "luasec.cli.walk"
 
 local ci = {}
 
-local PATH = "/.github/workflows/luasec.yml"
+local PATH = "/.github/workflows/lua-doctor.yml"
 
 local function workflow()
    return ([[
-name: luasec
+name: lua-doctor
 on:
   push:
     branches: [main]
@@ -22,11 +22,11 @@ permissions:
   security-events: write
 
 jobs:
-  luasec:
+  lua-doctor:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Vaibhav91one/luasec@v%s
+      - uses: doctor-labs/lua-doctor@v%s
         with:
           path: .
           fail-on: high
@@ -37,7 +37,7 @@ end
 function ci.run(argv, root, out, err)
    out, err = out or io.stdout, err or io.stderr
    if argv[1] ~= "install" then
-      err:write(("luasec: unknown ci command '%s': expected install\n"):format(tostring(argv[1])))
+      err:write(("lua-doctor: unknown ci command '%s': expected install\n"):format(tostring(argv[1])))
       return 2
    end
    local dir, force, index = ".", false, 2
@@ -48,7 +48,7 @@ function ci.run(argv, root, out, err)
       elseif token == "--force" then
          force, index = true, index + 1
       else
-         err:write(("luasec: unknown ci install option '%s': expected --dir <project> or --force\n")
+         err:write(("lua-doctor: unknown ci install option '%s': expected --dir <project> or --force\n")
             :format(token))
          return 2
       end
@@ -58,17 +58,17 @@ function ci.run(argv, root, out, err)
    if existing then
       existing:close()
       if not force then
-         err:write("luasec: " .. path .. " already exists; use --force to replace it\n")
+         err:write("lua-doctor: " .. path .. " already exists; use --force to replace it\n")
          return 2
       end
    end
    if not walk.mkdir_p(dir .. "/.github/workflows") then
-      err:write("luasec: cannot create " .. dir .. "/.github/workflows\n")
+      err:write("lua-doctor: cannot create " .. dir .. "/.github/workflows\n")
       return 2
    end
    local handle, open_error = io.open(path, "wb")
    if not handle then
-      err:write("luasec: cannot write " .. path .. ": " .. tostring(open_error) .. "\n")
+      err:write("lua-doctor: cannot write " .. path .. ": " .. tostring(open_error) .. "\n")
       return 2
    end
    handle:write(workflow())

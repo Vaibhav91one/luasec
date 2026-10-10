@@ -60,7 +60,7 @@ function menu.recommended(list)
    return "s"
 end
 
--- luasec: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
+-- lua-doctor: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
 local function read_line(context, tty, prompt)
    context.out:write(prompt)
    flush(context.out)
@@ -69,7 +69,7 @@ local function read_line(context, tty, prompt)
    if tty then os.execute(STTY_RAW) end
    return line
 end
--- luasec: pop
+-- lua-doctor: pop
 
 local function trim(text)
    return text:match("^%s*(.-)%s*$")
@@ -119,18 +119,18 @@ local function do_save(list, context, tty)
       context.out:write(("unknown format '%s': expected json, sarif or html\n"):format(fmt))
       return
    end
-   local file = read_line(context, tty, ("File (luasec-report.%s): "):format(fmt))
+   local file = read_line(context, tty, ("File (lua-doctor-report.%s): "):format(fmt))
    if file == nil then return end
    file = trim(file)
-   if file == "" then file = "luasec-report." .. fmt end
+   if file == "" then file = "lua-doctor-report." .. fmt end
    local text, render_error = render.render(list, fmt)
    if not text then
-      context.out:write("luasec: " .. tostring(render_error) .. "\n")
+      context.out:write("lua-doctor: " .. tostring(render_error) .. "\n")
       return
    end
    local handle, open_error = io.open(file, "wb")
    if not handle then
-      context.out:write("luasec: cannot write " .. file .. ": " .. tostring(open_error) .. "\n")
+      context.out:write("lua-doctor: cannot write " .. file .. ": " .. tostring(open_error) .. "\n")
       return
    end
    handle:write(text, "\n")
@@ -139,19 +139,19 @@ local function do_save(list, context, tty)
 end
 
 local function do_baseline(list, context, tty)
-   local file = read_line(context, tty, "File (luasec-baseline.json): ")
+   local file = read_line(context, tty, "File (lua-doctor-baseline.json): ")
    if file == nil then return end
    file = trim(file)
-   if file == "" then file = "luasec-baseline.json" end
+   if file == "" then file = "lua-doctor-baseline.json" end
    local text = render.render(list, "json")
    local handle, open_error = io.open(file, "wb")
    if not handle then
-      context.out:write("luasec: cannot write " .. file .. ": " .. tostring(open_error) .. "\n")
+      context.out:write("lua-doctor: cannot write " .. file .. ": " .. tostring(open_error) .. "\n")
       return
    end
    handle:write(text, "\n")
    handle:close()
-   context.out:write("wrote " .. file .. "; use luasec --baseline " .. file .. " next time\n")
+   context.out:write("wrote " .. file .. "; use lua-doctor --baseline " .. file .. " next time\n")
 end
 
 local function do_ci(list, context)
@@ -177,7 +177,7 @@ local ACTIONS = {
    i = do_install,
 }
 
--- luasec: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
+-- lua-doctor: ignore 701,708 [push]  the stty commands are constant mode switches, never user input
 function menu.run(list, context)
    context.out = context.out or io.stdout
    context.err = context.err or io.stderr
@@ -204,8 +204,8 @@ function menu.run(list, context)
    -- An error inside an action must never leave the terminal in single-key mode.
    local ok, failure = pcall(loop)
    if tty then os.execute(STTY_COOKED) end
-   if not ok then context.err:write("luasec: the menu stopped: " .. tostring(failure) .. "\n") end
+   if not ok then context.err:write("lua-doctor: the menu stopped: " .. tostring(failure) .. "\n") end
 end
--- luasec: pop
+-- lua-doctor: pop
 
 return menu

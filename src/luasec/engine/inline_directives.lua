@@ -1,4 +1,4 @@
--- In-source directives: `-- luasec: ignore 709`, the way a developer silences a
+-- In-source directives: `-- lua-doctor: ignore 709`, the way a developer silences a
 -- finding they have accepted.
 --
 -- A directive applies from its own line to the end of the enclosing file, and a
@@ -9,7 +9,7 @@ local directives = {}
 
 local KNOWN = {ignore = true, enable = true, only = true, push = true, pop = true}
 
---- Parse every `luasec:` directive in a file.
+--- Parse every `lua-doctor:` directive in a file.
 -- Returns a list of {line, action, patterns, push} and a list of problems
 -- {line, message}.
 -- Can Lua read this as a pattern at all? `string.match` raises on a malformed
@@ -112,7 +112,8 @@ function directives.parse(chstate)
       local line = comment.line or 1
       -- `contents` is the comment text without the leading dashes.
       local body = comment.contents and
-         comment.contents:match("^%s*luasec:%s*(.-)%s*$")
+         (comment.contents:match("^%s*lua%-doctor:%s*(.-)%s*$")
+            or comment.contents:match("^%s*luasec:%s*(.-)%s*$")) -- the pre-rename spelling, still honoured
 
       if body and body ~= "" then
          local action, rest = body:match("^(%a+)%s*(.*)$")
@@ -120,7 +121,7 @@ function directives.parse(chstate)
 
          if not action or not KNOWN[action] then
             problems[#problems + 1] = {line = line,
-               message = ("unknown luasec directive '%s'"):format(action or body)}
+               message = ("unknown lua-doctor directive '%s'"):format(action or body)}
          elseif action == "push" or action == "pop" then
             -- Markers, not suppressions: they only open and close a region.
             found[#found + 1] = {line = line, action = action, patterns = {},
@@ -137,7 +138,7 @@ function directives.parse(chstate)
             end
             if #patterns == 0 or rest:match("^%s*:%s*$") then
                problems[#problems + 1] = {line = line,
-                  message = ("luasec directive '%s' needs at least one code pattern"):format(action)}
+                  message = ("lua-doctor directive '%s' needs at least one code pattern"):format(action)}
             else
                -- Every pattern is checked while the directive is read, so a
                -- suppression the operator cannot express is reported here rather
@@ -159,7 +160,7 @@ function directives.parse(chstate)
                end
                if unreadable then
                   problems[#problems + 1] = {line = line,
-                     message = ("luasec directive '%s' has an unreadable code pattern '%s'")
+                     message = ("lua-doctor directive '%s' has an unreadable code pattern '%s'")
                         :format(action, unreadable)}
                end
                found[#found + 1] = {line = line, action = action, patterns = patterns,
@@ -230,7 +231,7 @@ function directives.allows(directives_before, finding, is_suppressed)
    for index, directive in ipairs(directives_before) do
       if directive.action == "ignore" then
          -- A suppression written outside every region is file-wide, which is
-         -- what a plain `-- luasec: ignore` has always meant. One written inside
+         -- what a plain `-- lua-doctor: ignore` has always meant. One written inside
          -- a region lives and dies with it.
          --
          -- `[push]` means this suppression opens a region of its own, and it is
@@ -533,13 +534,13 @@ function directives.code_and_name_match(pattern, finding, directive_line, direct
    end
 
    -- The pattern is the operator's own text, and a file we did not write is not
-   -- a pattern we validated. `-- luasec: ignore [708` is a typo, and handing it
+   -- a pattern we validated. `-- lua-doctor: ignore [708` is a typo, and handing it
    -- to string.match raised "malformed pattern", which killed the whole scan and
    -- discarded every other file's findings. So the match is guarded, a pattern we
    -- cannot read matches nothing, and the pattern is recorded for 012.
    -- An empty code half names no code and so matches every finding, which is
-   -- not what a suppression means. `-- luasec: ignore :` is read as 012 rather
-   -- than as a blanket suppression, and a plain `-- luasec: ignore` already is.
+   -- not what a suppression means. `-- lua-doctor: ignore :` is read as 012 rather
+   -- than as a blanket suppression, and a plain `-- lua-doctor: ignore` already is.
    if code_pattern == "" then return false end
 
    if not matches_safely(finding.code, code_pattern, directive_line, directive) then

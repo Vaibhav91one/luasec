@@ -8,8 +8,8 @@ local scope = {}
 -- Every command here is a literal git invocation. The only variable parts are refs
 -- and paths, and each goes through quote() so the shell reads it as one word.
 local function run(command)
-   -- luasec: ignore 702  literal git commands; refs are quote()d and a ref that starts with "-" is refused
-   -- luasec: ignore 709  a ref read back from an earlier git call (the "file read" source)
+   -- lua-doctor: ignore 702  literal git commands; refs are quote()d and a ref that starts with "-" is refused
+   -- lua-doctor: ignore 709  a ref read back from an earlier git call (the "file read" source)
    -- is quote()d again before it is used in the next one
    local pipe = io.popen(command .. " 2>/dev/null")
    if not pipe then return nil end
@@ -91,7 +91,7 @@ function scope.files(opts)
          if rel then rel = rel:sub(#prefix + 1) end
       end
       if rel and under(rel, opts.paths) and walk.looks_like_lua(top .. "/" .. name) then
-         -- Reported the way a full scan reports it, relative to where luasec was run.
+         -- Reported the way a full scan reports it, relative to where lua-doctor was run.
          files[#files + 1] = rel
       end
    end

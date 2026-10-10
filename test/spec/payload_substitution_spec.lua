@@ -34,7 +34,7 @@ end
 
 -- 741 reads a function's body and calls a `gsub` with a function replacement a
 -- decoder. Every decoder is written that way and so is every text rewrite:
--- `luasec`'s own #256 already ruled that a function which only rewrites the
+-- `lua-doctor`'s own #256 already ruled that a function which only rewrites the
 -- string it is holding is not a decode (`luadoc`'s `translate`, silenced
 -- because it substitutes with a string). A substitution function only closes
 -- that gap when the replacement itself is what makes the bytes.
