@@ -11,7 +11,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal = harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function exec_findings(source)
    local out = {}
@@ -62,7 +62,7 @@ describe("luaposix command execution (#297)", function()
    end)
 
    it("no longer declares the nonexistent posix.exec.* namespace", function()
-      local handle = assert(io.open("src/luasec/registry/stds/openwrt.lua", "r"))
+      local handle = assert(io.open("src/luadoctor/registry/stds/openwrt.lua", "r"))
       local text = handle:read("*a")
       handle:close()
       assert_equal(text:find('pattern = "posix.exec.*"', 1, true), nil,

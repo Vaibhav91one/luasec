@@ -18,7 +18,7 @@ propagation, five firmware platform profiles, whole-program analysis across
 `require` edges, bytecode triage, a sandboxed payload validator, and four
 output formats.
 
-- ~14,700 lines of implementation under `src/luasec/`
+- ~14,700 lines of implementation under `src/luadoctor/`
 - 576 specs plus an 8-case adversarial suite
 - 52 commits on `main`
 - Built on luacheck as a library, vendored and pinned by commit
@@ -30,7 +30,7 @@ document does not cover: how it got here, and what is uncertain.
 ## 2. The build process
 
 One behavior at a time, red-green-refactor, through the public seams
-(`luasec.api` or the CLI as a subprocess). One issue, one branch, one PR, with
+(`luadoctor.api` or the CLI as a subprocess). One issue, one branch, one PR, with
 disjoint file ownership between agents and the orchestrator merging. An
 independent verifier reviewed every batch and its verdict blocked the merge.
 

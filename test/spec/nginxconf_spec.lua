@@ -4,9 +4,9 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
-local nginxconf = require "luasec.cli.nginxconf"
-local walk = require "luasec.cli.walk"
+local api = require "luadoctor.api"
+local nginxconf = require "luadoctor.cli.nginxconf"
+local walk = require "luadoctor.cli.walk"
 
 local function write(path, text)
    local handle = assert(io.open(path, "w"))

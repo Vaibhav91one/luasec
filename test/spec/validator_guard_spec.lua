@@ -5,7 +5,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function at(report, code)
    for _, f in ipairs(report) do if f.code == code then return f end end

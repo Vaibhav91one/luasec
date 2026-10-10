@@ -1,6 +1,6 @@
 describe("numeric constants", function()
    it("folds arithmetic over literals", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- If folding were broken here, this would look like a dynamic command and
       -- be reported; a fixed command is not a finding.
       local report = api.check_source([[
@@ -12,7 +12,7 @@ end
    end)
 
    it("reports a command that mixes a literal with a computed number", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source([[
 local function go(n)
    os.execute("count " .. (n + 2) .. " items")
@@ -24,7 +24,7 @@ end)
 
 describe("local constants", function()
    it("reports nothing when a command argument is a local bound once to a literal", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source([[
 local STTY_COOKED = "stty -echo"
 os.execute(STTY_COOKED)
@@ -34,7 +34,7 @@ os.execute(STTY_COOKED)
    end)
 
    it("still reports a command argument whose local is reassigned before the call", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- The literal is only where it starts. Stopping the chase at the first
       -- definition would trade a false positive for a false negative, and a
       -- 701 that stays silent when the value is unknown is worse than one that
@@ -50,7 +50,7 @@ end
    end)
 
    it("still reports a command argument read out of a table field", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- A local bound to a table is deliberately not folded. Whether M.cmd still
       -- holds the literal depends on every write to M, including writes through
       -- an index key, a metatable, or a function lua-doctor cannot see from this one
@@ -65,7 +65,7 @@ os.execute(M.cmd)
    end)
 
    it("still reports a command argument read from a table built in one constructor", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- Same decision, other spelling: folding this would mean modelling the
       -- constructor's keys and then proving nothing else wrote to the table.
       local report = api.check_source([[
@@ -76,7 +76,7 @@ os.execute(M.cmd)
    end)
 
    it("still reports a command argument whose local is assigned only after the declaration", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- One assignment, but not one the use site is guaranteed to have seen. A
       -- fold that took it would have to answer "did this line run", which is a
       -- control-flow question, not a constant question.
@@ -89,7 +89,7 @@ os.execute(X)
    end)
 
    it("terminates and still reports when a local is defined in terms of itself", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- `local X = X` resolves the initialiser to the very variable being
       -- resolved, so a fold that does not notice it is following itself never
       -- returns. What matters is that it comes back with a finding.
@@ -101,7 +101,7 @@ os.execute(X)
    end)
 
    it("terminates and still reports when two locals are defined in terms of each other", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source([[
 local X = Y
 local Y = X
@@ -111,7 +111,7 @@ os.execute(X)
    end)
 
    it("folds a local whose literal is reached through another local", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source([[
 local FIRST = "stty -echo"
 local SECOND = FIRST
@@ -121,7 +121,7 @@ os.execute(SECOND)
    end)
 
    it("folds a constant captured by a function as an upvalue", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source([[
 local STTY_COOKED = "stty -echo"
 local function go()
@@ -133,7 +133,7 @@ end
    end)
 
    it("still reports a command argument that is a global", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- Chasing an alias must not extend to names lua-doctor never saw defined: a
       -- global is whatever another file put there.
       local report = api.check_source([[

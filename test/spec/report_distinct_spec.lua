@@ -11,7 +11,7 @@
 -- grows a new way of emitting a duplicate is caught there, rather than by
 -- whoever reads the next corpus report and notices a line printed twice.
 --
--- Everything goes through a public seam - `luasec.api` and `bin/lua-doctor` - so the
+-- Everything goes through a public seam - `luadoctor.api` and `bin/lua-doctor` - so the
 -- specs say what a consumer reads and nothing about how a report is put
 -- together. The json is parsed by the small reader below for the same reason
 -- report_spec.lua has one: a spec should read the bytes back, not match them as
@@ -19,7 +19,7 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Four exposures of one exported function, all naming `os.execute`.
 local FOUR = "test/fixtures/exposed_sinks/four_exposed_sinks.lua"

@@ -126,8 +126,8 @@ describe("lua-doctor --validate", function()
 
    it("labels a payload's forged records as payload text rather than as findings", function()
       local out, code = harness.cli({ "--validate", "--stdin" }, {stdin = [[
-io.stdout:write("__LUASEC_CHAIN__ 9:INJECTED\n")
-io.stdout:write("__LUASEC_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
+io.stdout:write("__LUADOCTOR_CHAIN__ 9:INJECTED\n")
+io.stdout:write("__LUADOCTOR_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
 return 1
 ]]})
       assert_equal(code, 0, out)
@@ -137,8 +137,8 @@ return 1
       -- ... and both forged records come back as the payload's own text, in the
       -- gutter, under a heading that says what they are.
       assert_match(out, "payload output", out)
-      assert_match(out, "payload| __LUASEC_CHAIN__ 9:INJECTED", out)
-      assert_match(out, "payload| __LUASEC_OUTPUT__ 20:FORGED OPERATOR TEXT", out)
+      assert_match(out, "payload| __LUADOCTOR_CHAIN__ 9:INJECTED", out)
+      assert_match(out, "payload| __LUADOCTOR_OUTPUT__ 20:FORGED OPERATOR TEXT", out)
    end)
 
    it("names the file it validated and the interpreter that produced the verdict", function()

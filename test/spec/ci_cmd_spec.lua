@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_match = harness.assert_equal, harness.assert_match
 
-local version = require "luasec.version"
+local version = require "luadoctor.version"
 
 local function read(path)
    local handle = io.open(path, "rb")
@@ -19,7 +19,7 @@ describe("lua-doctor ci install", function()
       local workflow = read(dir .. "/.github/workflows/lua-doctor.yml")
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_equal(code, 0, out)
-      assert_match(workflow, "uses: doctor%-labs/lua%-doctor@v" .. version.luasec:gsub("%p", "%%%0"), workflow)
+      assert_match(workflow, "uses: doctor%-labs/lua%-doctor@v" .. version.luadoctor:gsub("%p", "%%%0"), workflow)
       assert_match(workflow, "security%-events: write", workflow)
       assert_match(out, "wrote .*/%.github/workflows/lua%-doctor%.yml", out)
    end)

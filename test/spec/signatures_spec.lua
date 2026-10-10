@@ -2,14 +2,14 @@
 -- (persistence) and 750 (signature pack).
 --
 -- These four codes were added in one change, so their specs live in one file.
--- Every test uses a public seam only: `luasec.api.analyze` on a fixture, or
--- `luasec.api.check_source` on a source string built by the test.
+-- Every test uses a public seam only: `luadoctor.api.analyze` on a fixture, or
+-- `luadoctor.api.check_source` on a source string built by the test.
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local assert_nil = harness.assert_nil
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Every finding carrying one code, in report order.
 local function with_code(report, code)
@@ -294,7 +294,7 @@ describe("persistence installed by the script", function()
 end)
 
 describe("the signature pack", function()
-   local PACK_PATH = "src/luasec/registry/stds/signatures.lua"
+   local PACK_PATH = "src/luadoctor/registry/stds/signatures.lua"
    local YARA_PATH = "yara/lua_doctor_signatures.yar"
 
    -- The pack as the analyzer loads it. A data file is loaded by running it,

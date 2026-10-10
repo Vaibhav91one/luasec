@@ -3,7 +3,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_match, assert_true =
    harness.assert_equal, harness.assert_match, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 describe("lua-doctor rules", function()
    it("lists every registered code with its category, severity and cwe", function()

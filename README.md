@@ -492,7 +492,7 @@ and nothing was found. Specifically:
   reported as `901` against the path that could not be read, and the run fails.
 
 This is enforced, not aspirational: one list of codes means "we did not read
-this" ([`src/luasec/rules/degraded.lua`](src/luasec/rules/degraded.lua)) and the
+this" ([`src/luadoctor/rules/degraded.lua`](src/luadoctor/rules/degraded.lua)) and the
 exit code, the severity threshold and the baseline all read it.
 
 ## Suppressions
@@ -595,9 +595,9 @@ No luarocks, no C dependencies beyond a locally compiled Lua. `vendor/luacheck`
 is pinned by commit and the vendor check fails on any drift.
 
 Runs on Linux and macOS. Not Windows: the walk in
-[`src/luasec/cli/walk.lua`](src/luasec/cli/walk.lua) shells out to `find -H` and
+[`src/luadoctor/cli/walk.lua`](src/luadoctor/cli/walk.lua) shells out to `find -H` and
 `sh -c` through `io.popen`, and
-[`src/luasec/validate/driver.lua`](src/luasec/validate/driver.lua) launches the
+[`src/luadoctor/validate/driver.lua`](src/luadoctor/validate/driver.lua) launches the
 sandbox child with `io.popen` over `/bin/sh` plus `kill`, `ps` and `ulimit`.
 Windows `io.popen` is `cmd.exe`, which has none of those tools, so neither the
 directory walk nor the validator runs there.

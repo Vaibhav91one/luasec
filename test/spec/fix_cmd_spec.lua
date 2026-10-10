@@ -94,7 +94,7 @@ describe("lua-doctor fix", function()
    end)
 
    it("exposes the --print prompt byte-identically through prompt_for", function()
-      local fix = require "luasec.cli.fix_cmd"
+      local fix = require "luadoctor.cli.fix_cmd"
       local out, code = harness.cli({"fix", "--print", TAINTED})
       assert_equal(code, 0, out)
       local prompt, message = fix.prompt_for({TAINTED}, ".")

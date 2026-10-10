@@ -185,7 +185,7 @@ it to `corpus/openresty-authored/` and `--verify` diffs it against the fixture, 
 not followed by a re-measure fails there and names the entry. lua-doctor itself now reads Lua out of an
 nginx.conf: the bodies of every `*_by_lua_block { ... }` (`content_by_lua_block`,
 `access_by_lua_block`, ...) are scanned with the `openresty` profile added to whatever `--std` says,
-and a finding lands on the `nginx.conf` line and column (`src/luasec/cli/nginxconf.lua`). Not read:
+and a finding lands on the `nginx.conf` line and column (`src/luadoctor/cli/nginxconf.lua`). Not read:
 the old string form `content_by_lua '...'`, and `*_by_lua_file` (the file it names is ordinary Lua
 and is scanned as itself). `test/spec/openresty_authored_spec.lua` compares what lua-doctor reports for
 each handler with that intent.

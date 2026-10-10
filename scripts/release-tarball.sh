@@ -4,8 +4,8 @@
 # install from this one file. Run `make vendor` first.
 set -eu
 cd "$(dirname "$0")/.."
-version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
-[ -n "$version" ] || { echo "release-tarball: no version in src/luasec/version.lua" >&2; exit 1; }
+version=$(sed -n 's/^ *luadoctor = "\(.*\)",$/\1/p' src/luadoctor/version.lua)
+[ -n "$version" ] || { echo "release-tarball: no version in src/luadoctor/version.lua" >&2; exit 1; }
 [ -f vendor/luacheck/.stamp ] || { echo "release-tarball: run make vendor first" >&2; exit 1; }
 name="lua-doctor-$version"
 stage=$(mktemp -d)

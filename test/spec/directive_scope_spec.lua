@@ -10,7 +10,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_no_match = harness.assert_equal, harness.assert_true, harness.assert_no_match
 local scratch_dir = harness.scratch_dir
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The distinct codes a report carries, sorted and joined. A set, not a multiset:
 -- what a scoping test asks is which codes are present at all, and the number of

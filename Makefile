@@ -262,7 +262,7 @@ selfscan: lua vendor
 # that list fails the run, so this is a ratchet and not a rubber stamp. The two
 # halves are checked independently as well - test/spec/module_globals_spec.lua
 # asserts the same thing without reading a lint's configuration, and the lint
-# reads code the spec does not load (src/luasec/validate/child.lua is a
+# reads code the spec does not load (src/luadoctor/validate/child.lua is a
 # concatenated sandbox script, not a module).
 SELF_LINT_BASELINE ?= test/self-lint-baseline.txt
 SELF_LINT_DIR      ?= src

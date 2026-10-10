@@ -2,12 +2,12 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 describe("rule modules", function()
    it("loads every module the registry names", function()
       local ok, err = pcall(function()
-         return require("luasec.rules.registry").detectors()
+         return require("luadoctor.rules.registry").detectors()
       end)
       assert_true(ok, "the rule registry must load: " .. tostring(err))
    end)

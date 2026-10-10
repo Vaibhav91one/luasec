@@ -343,7 +343,7 @@ describe("looks_like_lua", function()
    it("accepts a configuration file that opens with a Lua comment", function()
       -- The shape above with nothing in it that reaches a sink, so the CLI would
       -- say nothing at all and the walk would be invisible. Asserted at the seam.
-      local walk = require "luasec.cli.walk"
+      local walk = require "luadoctor.cli.walk"
       local dir = scratch_dir("walktypes_luacov")
       local path = dir .. "/.luacov"
       write(path, "-- luacov configuration\nreturn { statsfile = \"luacov.stats.out\" }\n")
@@ -358,7 +358,7 @@ describe("looks_like_lua", function()
       -- than inferred from a corpus: today the answer is true for any file whose
       -- first 512 bytes happen to contain `lua`, which is what made
       -- corpus/*/.git/packed-refs a function of upstream branch names.
-      local walk = require "luasec.cli.walk"
+      local walk = require "luadoctor.cli.walk"
       local dir = scratch_dir("walktypes_binary")
       local path = dir .. "/pack-9f2a.idx"
       write(path, binary_that_opens_like_lua())
@@ -375,7 +375,7 @@ describe("looks_like_lua", function()
       -- a branch name. This one is not binary, so the byte check cannot catch it
       -- and the first-line rule has to: a git ref listing opens with a `#`
       -- comment, and `#` is not how Lua opens.
-      local walk = require "luasec.cli.walk"
+      local walk = require "luadoctor.cli.walk"
       local dir = scratch_dir("walktypes_packed_refs")
       local path = dir .. "/packed-refs"
       write(path, PACKED_REFS)
@@ -391,7 +391,7 @@ describe("looks_like_lua", function()
       -- The other direction, and the one that matters most: a file named *.lua
       -- is Lua whatever it contains, including a shebang for another language
       -- and a NUL byte in a comment. Tightening the sniff must not reach this.
-      local walk = require "luasec.cli.walk"
+      local walk = require "luadoctor.cli.walk"
       local dir = scratch_dir("walktypes_real_lua")
       local path = dir .. "/probe.lua"
       write(path, "#!/bin/sh\n-- a file that is named .lua is Lua\nlocal x = 1\nreturn x\n")

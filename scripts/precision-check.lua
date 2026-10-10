@@ -92,7 +92,7 @@ if not golden then usage(golden_error) end
 local report_text, report_read_error = read_file(opts.report)
 if not report_text then usage(report_read_error) end
 
-local findings_module = require "luasec.report.findings"
+local findings_module = require "luadoctor.report.findings"
 local document, document_error = findings_module.read_document(report_text)
 if not document then usage(opts.report .. ": " .. tostring(document_error)) end
 
@@ -127,7 +127,7 @@ local function collected_lua_files(root)
    return tonumber((answer or ""):match("%d+"))
 end
 
-local walk = require "luasec.cli.walk"
+local walk = require "luadoctor.cli.walk"
 local files, walk_error = walk.collect({opts.corpus})
 if not files then usage("could not walk " .. opts.corpus .. ": " .. tostring(walk_error)) end
 

@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- How a sink is *reached* should not decide whether it is reported. A table of
 -- handlers is an ordinary shape in firmware, not an evasion, so an alias plus a

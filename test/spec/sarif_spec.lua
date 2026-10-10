@@ -19,7 +19,7 @@ describe("SARIF report", function()
 
    it("lists a rule for every code the catalogue defines", function()
       local out = harness.cli({ "--format", "sarif", "test/fixtures/clean/report.lua" })
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local _, reported = out:gsub('"id": "', "")
       assert_true(#api.rule_catalogue() > 20, "the catalogue should be populated")
       assert_equal(reported, #api.rule_catalogue(),

@@ -133,7 +133,7 @@ jobs:
         run: |
           file=$(scripts/release-tarball.sh)
           sha=$(shasum -a 256 "$file" | cut -d' ' -f1)
-          version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
+          version=$(sed -n 's/^ *luadoctor = "\(.*\)",$/\1/p' src/luadoctor/version.lua)
           brew tap-new --no-git local/lua-doctor
           tap="$(brew --repository)/Library/Taps/local/homebrew-lua-doctor"
           sed -e "s|https://github.com/doctor-labs/lua-doctor/releases/download/v@VERSION@/lua-doctor-@VERSION@.tar.gz|file://$PWD/$file|" \

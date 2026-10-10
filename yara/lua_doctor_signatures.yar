@@ -1,7 +1,7 @@
 // The lua-doctor signature pack, as yara rules.
 //
 // GENERATED CONTENT, CHECKED BY test/spec/signatures_spec.lua: every signature
-// id in this file must also be in src/luasec/registry/stds/signatures.lua, and
+// id in this file must also be in src/luadoctor/registry/stds/signatures.lua, and
 // the two must list the same alternatives. Add a signature to the Lua pack and
 // add its rule here, or the spec fails.
 //

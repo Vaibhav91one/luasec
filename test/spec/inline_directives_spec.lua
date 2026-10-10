@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function codes(report)
    local out = {}
@@ -115,7 +115,7 @@ end)
 
 describe("a directive the analyzer cannot read", function()
    it("reports it as unreadable rather than raising", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local handle = assert(io.open("test/fixtures/malformed_directive.lua", "r"))
       local report = api.check_source(handle:read("*a"), {std = "luajit"})
       handle:close()
@@ -137,7 +137,7 @@ end)
 
 describe("every malformed code pattern", function()
    it("completes the scan and never hides a finding", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- The property that matters, whichever way Lua reads the pattern: a
       -- suppression that cannot be read must not hide what it named. Handing
       -- the operator's text to string.match unguarded raised "malformed
@@ -159,7 +159,7 @@ describe("every malformed code pattern", function()
    end)
 
    it("reports the forms Lua rejects outright as 012", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local report = api.check_source("-- lua-doctor: ignore [708\nos.execute(cmd)\n",
          {std = "luajit"})
       local unreadable = false
@@ -170,7 +170,7 @@ describe("every malformed code pattern", function()
    end)
 
    it("still applies a pattern it can read", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       for _, form in ipairs({"701", "70[0-9]", "701:os.execute"}) do
          local report = api.check_source(
             "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})

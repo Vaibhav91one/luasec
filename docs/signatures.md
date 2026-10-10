@@ -4,9 +4,9 @@ Code 750 is "this file matches a known exploit or malware signature". What it
 matches is a **pack**: a versioned list of signatures, held as data, that ships
 with `lua-doctor` and is matched against every file it analyzes.
 
-    src/luasec/registry/stds/signatures.lua   the pack: the signatures
+    src/luadoctor/registry/stds/signatures.lua   the pack: the signatures
     yara/lua_doctor_signatures.yar                 the same signatures as yara rules
-    src/luasec/rules/payloads.lua             the detector that matches them
+    src/luadoctor/rules/payloads.lua             the detector that matches them
     test/spec/signatures_spec.lua              the drift check between the two
 
 Current pack version: **2026.09.1**

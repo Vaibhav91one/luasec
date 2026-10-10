@@ -1,6 +1,6 @@
 -- Whole-program mode: taint that crosses a file boundary.
 --
--- The seam under test is `luasec.engine.whole_program.analyze(states, opts)`,
+-- The seam under test is `luadoctor.engine.whole_program.analyze(states, opts)`,
 -- which takes the check states a per-file run has already built and returns the
 -- extra findings a whole-program run finds. It is the function `api.analyze`
 -- calls when `opts.whole_program` is set.
@@ -13,9 +13,9 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_nil = harness.assert_equal, harness.assert_true, harness.assert_nil
 
-local api = require "luasec.api"
-local parse_context = require "luasec.engine.parse_context"
-local whole_program = require "luasec.engine.whole_program"
+local api = require "luadoctor.api"
+local parse_context = require "luadoctor.engine.parse_context"
+local whole_program = require "luadoctor.engine.whole_program"
 
 local FIXTURES = "test/fixtures/whole_program"
 

@@ -6,8 +6,8 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local assert_match, assert_no_match = harness.assert_match, harness.assert_no_match
 
-local api = require "luasec.api"
-local findings = require "luasec.report.findings"
+local api = require "luadoctor.api"
+local findings = require "luadoctor.report.findings"
 
 local FIXTURE = "test/fixtures/tainted_exec/handler.lua"
 
@@ -108,7 +108,7 @@ describe("sanitization (doctor/1 section 8)", function()
    end)
 
    it("keeps them out of the validator report too", function()
-      local validate_report = require "luasec.validate.report"
+      local validate_report = require "luadoctor.validate.report"
       local out = validate_report.render({verdict = "rce", exit_reason = "x", reason_source = "payload",
          sinks_reached = {}, payload_result = HOSTILE, payload_output = HOSTILE}, "p.lua")
       assert_no_match(out, "\27")

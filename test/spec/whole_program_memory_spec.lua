@@ -74,7 +74,7 @@ end
 -- nowhere else: a process that has analyzed nothing has no history to be
 -- carrying, which is the whole point.
 local DRIVER = [[
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 local paths = {}
 for line in io.lines(arg[1]) do paths[#paths + 1] = line end
 

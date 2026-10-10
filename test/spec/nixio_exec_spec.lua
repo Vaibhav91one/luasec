@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_match = harness.assert_equal, harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- `nixio.exec` is overloaded. The registry used to declare a single command
 -- position -- the first -- which covers `nixio.exec(command)` and is wrong for

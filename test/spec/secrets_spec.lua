@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The codes a report carries, sorted and joined, for exact-match assertions.
 local function codes(report)
@@ -392,7 +392,7 @@ describe("747 in a file with a multiple assignment", function()
       -- side. Reading a field of it raised inside the rule, and the rule
       -- carries 741 through 749, so a two-line idiom cost the file every
       -- secrets finding in it. Four files in the corpus trip it.
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local handle = assert(io.open("test/fixtures/multiple_assignment.lua", "r"))
       local report = api.check_source(handle:read("*a"),
          {std = "+openwrt+luci+luajit"})

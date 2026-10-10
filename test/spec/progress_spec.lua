@@ -83,7 +83,7 @@ describe("progress", function()
       assert_match(err, "lua%-doctor: resolving calls across files\n", err)
    end)
    it("draws a phase and a file counter on a live terminal without error", function()
-      local progress = require "luasec.cli.progress"
+      local progress = require "luadoctor.cli.progress"
       local reporter = progress.new({progress = true})
       reporter.live = true
       local real = io.stderr

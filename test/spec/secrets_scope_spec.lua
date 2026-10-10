@@ -26,7 +26,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local scratch_dir = harness.scratch_dir
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Every 747 in a report, in report order.
 local function with_code(report, code)
@@ -84,7 +84,7 @@ local function cli_with_unreadable_pwd(dir, args)
               string.format("%q", "package.path='" .. root
                  .. "/src/?.lua;" .. root .. "/src/?/init.lua;"
                  .. root .. "/vendor/?.lua;" .. root .. "/vendor/?/init.lua;'..package.path"),
-              string.format("%q", root .. "/src/luasec/main.lua"),
+              string.format("%q", root .. "/src/luadoctor/main.lua"),
               table.concat(args, " "), string.format("%q", report))
    os.execute(command)
    return severity_in_json(report)
@@ -494,7 +494,7 @@ describe("the anonymous-FTP login identity", function()
       -- absent.
       --
       -- `admin@example.com` is NOT here for that reason. It carries `example`,
-      -- and `looks_like_secret` (`src/luasec/rules/secrets.lua`) runs its
+      -- and `looks_like_secret` (`src/luadoctor/rules/secrets.lua`) runs its
       -- `placeholders` table over the lowered value and returns false before
       -- `severity_for` is ever reached - so that literal produces no 747 at
       -- all, before this rule or after it, and asserting over it asserts

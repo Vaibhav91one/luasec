@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local version = require "luasec.version"
+local version = require "luadoctor.version"
 
 local function load_rockspec(path)
    local handle = assert(io.open(path, "rb"), path .. " is missing")
@@ -22,12 +22,12 @@ local function lua_files(dir)
 end
 
 describe("rockspec", function()
-   local path = "lua-doctor-" .. version.luasec .. "-1.rockspec"
+   local path = "lua-doctor-" .. version.luadoctor .. "-1.rockspec"
 
    it("exists for this version and names the rock lua-doctor", function()
       local spec = load_rockspec(path)
       assert_equal(spec.package, "lua-doctor", "the rock is named for the tool")
-      assert_equal(spec.version, version.luasec .. "-1", "version")
+      assert_equal(spec.version, version.luadoctor .. "-1", "version")
       assert_equal(spec.build.install.bin["lua-doctor"], "bin/lua-doctor.lua", "installs the lua-doctor command")
    end)
 

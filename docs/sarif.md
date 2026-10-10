@@ -2,7 +2,7 @@
 
 `lua-doctor` writes four formats. They are not four renderers over four shapes: every
 one of them is rendered from the same normalized finding list
-(`src/luasec/report/findings.lua`), so they cannot disagree about what a finding
+(`src/luadoctor/report/findings.lua`), so they cannot disagree about what a finding
 is or in what order it appears.
 
 | Flag | For | Notes |

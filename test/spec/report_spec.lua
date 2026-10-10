@@ -119,10 +119,10 @@ describe("json report", function()
       local doc, code = report({"--format", "json", "test/fixtures/tainted_exec/handler.lua"})
       assert_equal(code, 1, "a critical finding is present, so the run is not clean")
 
-      local version = require "luasec.version"
+      local version = require "luadoctor.version"
       assert_equal(doc.schema, "doctor/1", "the document names the contract")
       assert_equal(doc.tool, "lua-doctor")
-      assert_equal(doc.version, version.luasec, "the document needs the tool's own version")
+      assert_equal(doc.version, version.luadoctor, "the document needs the tool's own version")
       assert_equal(doc.exit_code, 1, "the envelope carries the exit code of the run")
       assert_match(doc.data.report_version, "^%d+%.%d+$", "the old report version moved under data")
       assert_true(type(doc.findings) == "table" and #doc.findings == 1,

@@ -13,4 +13,4 @@ fi
 LUA_DOCTOR_LUA="$lua"
 export LUA_DOCTOR_LUA
 exec "$lua" -e "package.path='$here/src/?.lua;$here/src/?/init.lua;$here/vendor/?.lua;$here/vendor/?/init.lua;'..package.path" \
-  "$here/src/luasec/main.lua" "$@"
+  "$here/src/luadoctor/main.lua" "$@"

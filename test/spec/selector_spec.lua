@@ -5,7 +5,7 @@ local assert_equal, assert_match, assert_nil, assert_true =
 
 -- Drive selector.pick with `keys` as the bytes io.read(1) returns.
 local function drive_pick(title, items, keys, opts)
-   local selector = require "luasec.cli.selector"
+   local selector = require "luadoctor.cli.selector"
    local saved_read = io.read
    local pos = 0
    io.read = function()

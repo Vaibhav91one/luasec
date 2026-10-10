@@ -96,7 +96,7 @@ describe("the interactive menu", function()
    end)
 
    it("recommends review for critical or high findings, saving otherwise", function()
-      local menu = require "luasec.cli.menu"
+      local menu = require "luadoctor.cli.menu"
       assert_equal(menu.recommended({
          {severity = "critical"}, {severity = "low"},
       }), "r", "critical recommends review")

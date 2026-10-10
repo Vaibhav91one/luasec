@@ -151,7 +151,7 @@ At the default 1ms gap on macOS that window is 2.93ms of `ps` plus 1ms of sleep,
 and at the 32GB/s concatenation throughput measured on this machine that is about
 125MB, so a 96MB threshold predicts a peak near 220MB. The measurement below is
 in that neighbourhood and the poll interval is what moves it. The same payload,
-through `luasec.api.validate_payload` with `rss_poll_ms` set, 10 runs each, worst
+through `luadoctor.api.validate_payload` with `rss_poll_ms` set, 10 runs each, worst
 of the ten:
 
 | `rss_poll_ms` | worst peak RSS | x the 64MB ceiling |

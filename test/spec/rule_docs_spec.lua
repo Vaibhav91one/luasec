@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_true = harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function read(path)
    local handle = io.open(path, "r")

@@ -3,7 +3,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true =
    harness.assert_equal, harness.assert_true
 
-local term = require "luasec.cli.term"
+local term = require "luadoctor.cli.term"
 
 local function dlen(text)
    if utf8 and utf8.len then
@@ -146,7 +146,7 @@ end)
 
 describe("selector rows fit a narrow terminal", function()
    it("never writes a selector row longer than the width minus 1", function()
-      local selector = require "luasec.cli.selector"
+      local selector = require "luadoctor.cli.selector"
       local saved_read = io.read
       local keys, pos = "\r", 0
       io.read = function()

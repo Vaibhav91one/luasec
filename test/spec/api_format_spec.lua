@@ -6,7 +6,7 @@
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_nil, assert_match = harness.assert_equal, harness.assert_nil, harness.assert_match
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- A fixture that yields at least one finding: a file whose only line runs
 -- untrusted data to a command-execution sink.

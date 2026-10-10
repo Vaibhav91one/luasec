@@ -879,7 +879,7 @@ shape as a `--std` profile. A profile declares five fields (all optional):
 | `propagators` | `{pattern, arg}` — functions that carry taint without being sinks |
 | `sanitizers` | `{shell, dyncode, path}` — lists of functions that scrub each sink class |
 
-The `--std` profile files live in `src/luasec/registry/stds/`. A custom rules
+The `--std` profile files live in `src/luadoctor/registry/stds/`. A custom rules
 file mirrors that structure. See [docs/firmware-stds.md](firmware-stds.md) for
 the semantics of each field.
 

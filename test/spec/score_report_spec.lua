@@ -2,13 +2,13 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal = harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
 local function decode(text)
    -- the report module ships its own reader for the documents it writes
-   local findings = require "luasec.report.findings"
+   local findings = require "luadoctor.report.findings"
    return findings.decode(text)
 end
 

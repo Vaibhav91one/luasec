@@ -40,7 +40,7 @@ end
 
 describe("handoff base64", function()
    it("encodes the RFC 4648 vectors exactly", function()
-      local handoff = require "luasec.cli.handoff"
+      local handoff = require "luadoctor.cli.handoff"
       assert_equal(handoff.osc52(""), "\27]52;c;\7", "empty")
       assert_equal(handoff.osc52("f"), "\27]52;c;Zg==\7", "f")
       assert_equal(handoff.osc52("fo"), "\27]52;c;Zm8=\7", "fo")
@@ -99,7 +99,7 @@ describe("the agent hand-off submenu", function()
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_equal(code, 1, "the exit code is the scan's: " .. out)
       assert_match(out, "copied with pbcopy", out)
-      local fix = require "luasec.cli.fix_cmd"
+      local fix = require "luadoctor.cli.fix_cmd"
       -- The menu hands its own argv down, so the re-run line keeps --interactive.
       local prompt = assert(fix.prompt_for({"--interactive", TAINTED}, "."))
       assert_equal(got, prompt, "the clipboard gets the prompt byte-identically")

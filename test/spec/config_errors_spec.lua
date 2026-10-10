@@ -14,7 +14,7 @@ local assert_equal, assert_true, assert_false, assert_nil =
    harness.assert_equal, harness.assert_true, harness.assert_false, harness.assert_nil
 local assert_match = harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The options table `api` is handed, refused the way a library caller refuses it:
 -- no raising, a message, and nothing installed. `validate_options` and
@@ -106,7 +106,7 @@ describe("configuration errors", function()
    it("still accepts a configuration that is entirely well formed", function()
       local ok, message = api.validate_options({
          std = "+openwrt+luci",
-         rules = {"src/luasec/registry/stds/openwrt.lua"},
+         rules = {"src/luadoctor/registry/stds/openwrt.lua"},
          only = {"709", "rce"},
          ignore = {"012"},
          sources = {"uci.get"},
@@ -248,7 +248,7 @@ describe("a source declared through the options table", function()
       -- a declaration, so `entry.pattern` was nil and this raised out of
       -- check_source. Nothing caught it because nothing in the suite declared a
       -- source this way, so the whole declaration path was untested.
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local ok, report = pcall(api.check_source, [[
 local function run(host)
    os.execute(vendor.get(host))

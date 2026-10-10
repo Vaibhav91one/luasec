@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Fixtures are read from disk and analyzed as source, so the handler a vendor
 -- would hand us is the handler the spec reasons about.

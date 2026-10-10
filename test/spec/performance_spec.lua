@@ -16,7 +16,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_true = harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The minimum of `runs` timed passes at `src, opts`, in seconds. os.clock()
 -- measures CPU time of this process, so it is not moved by other processes the
