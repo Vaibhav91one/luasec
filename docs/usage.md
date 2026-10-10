@@ -18,7 +18,7 @@ bin/lua-doctor --help
 ### npx
 
 ```sh
-npx lua-doctor <path>
+npx @doctor-labs/lua-doctor <path>
 ```
 
 It downloads the release tarball matching its own version once and caches the extracted tree under `$LUA_DOCTOR_CACHE` (else `$XDG_CACHE_HOME/lua-doctor`, else `~/.cache/lua-doctor`).

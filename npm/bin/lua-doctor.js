@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// npx lua-doctor: fetch the lua-doctor release that matches this package's version into
+// npx @doctor-labs/lua-doctor: fetch the lua-doctor release that matches this package's version into
 // a cache directory once, then run it. Nothing but Node built-ins, the system
 // tar, and (only when no Lua 5.3+ is on PATH) make and a C compiler.
 const { spawnSync } = require('child_process');
