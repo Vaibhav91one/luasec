@@ -2,9 +2,9 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_nil = harness.assert_equal, harness.assert_true, harness.assert_nil
 
--- luasec.bytecode.header is an allowed public seam (AGENTS.md): header facts are
+-- luadoctor.bytecode.header is an allowed public seam (AGENTS.md): header facts are
 -- useful on their own to a firmware scanner.
-local header = require "luasec.bytecode.header"
+local header = require "luadoctor.bytecode.header"
 
 local function read_fixture(name)
    local handle = assert(io.open("test/fixtures/bytecode/" .. name .. ".luac", "rb"))

@@ -121,7 +121,7 @@ describe("a dangling link into an ordinary directory under /tmp", function()
       -- The path is fixed rather than under TMPDIR so this holds whether the
       -- harness runs where TMPDIR points into /tmp (Linux CI) or elsewhere.
       local dir = tree("tmp_ordinary")
-      os.execute("ln -s /tmp/luasec-absent-dir/handler.lua " .. q(dir .. "/bin/linked.lua"))
+      os.execute("ln -s /tmp/lua-doctor-absent-dir/handler.lua " .. q(dir .. "/bin/linked.lua"))
       local out, code = harness.cli({dir})
       os.execute("rm -rf " .. q(dir))
       assert_match(out, "could not resolve symlink", out)
@@ -134,7 +134,7 @@ describe("a dangling link into an ordinary directory under /tmp", function()
       -- They are two named cases, not a shape, so an arbitrary /etc link into
       -- /tmp is an ordinary missing file until a real image says otherwise.
       local dir = tree("tmp_unknown_etc")
-      os.execute("ln -s /tmp/luasec-absent-dir/handler.lua " .. q(dir .. "/etc/handler.lua"))
+      os.execute("ln -s /tmp/lua-doctor-absent-dir/handler.lua " .. q(dir .. "/etc/handler.lua"))
       local out, code = harness.cli({dir})
       os.execute("rm -rf " .. q(dir))
       assert_match(out, "could not resolve symlink", out)

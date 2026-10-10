@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_true, assert_false, assert_equal = harness.assert_true, harness.assert_false, harness.assert_equal
 
-local util = require "luasec.util.util"
+local util = require "luadoctor.util.util"
 
 describe("wildcard API matching", function()
    it("matches an exact path", function()

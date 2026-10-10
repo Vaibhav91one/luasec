@@ -13,7 +13,7 @@ local function read(path)
 end
 
 local function run(args)
-   local pipe = assert(io.popen("./bin/luasec --no-progress " .. args .. " 2>/dev/null"))
+   local pipe = assert(io.popen("./bin/lua-doctor --no-progress " .. args .. " 2>/dev/null"))
    local out = pipe:read("*a")
    pipe:close()
    return (out:gsub("\n+$", ""))
@@ -37,7 +37,7 @@ describe("the CGILua walkthrough in docs/usage.md", function()
 
    it("pastes what --std cgilua --whole-program prints", function()
       assert_true(section ~= nil, "the section is missing")
-      local pasted = pasted_after(section, "bin/luasec --std cgilua --whole-program " .. fixture)
+      local pasted = pasted_after(section, "bin/lua-doctor --std cgilua --whole-program " .. fixture)
       assert_equal(pasted, run("--std cgilua --whole-program " .. fixture))
    end)
 

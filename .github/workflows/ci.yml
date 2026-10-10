@@ -30,7 +30,7 @@ jobs:
       - name: Vendored luacheck is unmodified
         run: make vendor-verify
 
-      # `make selfscan` at the end of this job runs luasec over src/, and luasec
+      # `make selfscan` at the end of this job runs lua-doctor over src/, and lua-doctor
       # has no rule for a global assignment, so a function that lost its `local`
       # compiled, worked and shipped as a global through a fully green build
       # (#277). This is the linter that can see it, on the luacheck already
@@ -77,12 +77,12 @@ jobs:
       - name: Export SARIF
         if: always()
         run: |
-          ./bin/luasec --format sarif -o luasec.sarif src/ || true
+          ./bin/lua-doctor --format sarif -o lua-doctor.sarif src/ || true
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: luasec.sarif
-          category: luasec
+          sarif_file: lua-doctor.sarif
+          category: lua-doctor
 
   action:
     # The action this repository publishes, run from this checkout on a clean
@@ -90,13 +90,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: luasec
+      - id: lua-doctor
         uses: ./
         with:
           path: test/fixtures/clean
           upload-sarif: "false"
       - name: The action reports a score
-        run: test "${{ steps.luasec.outputs.score }}" = "100"
+        run: test "${{ steps.lua-doctor.outputs.score }}" = "100"
 
   rock:
     # The rock is built from this checkout exactly as LuaRocks would build the
@@ -111,15 +111,15 @@ jobs:
       - name: Fetch the vendored luacheck
         run: make vendor
       - name: Build and install the rock
-        run: luarocks make --local luasec-scanner-*.rockspec
+        run: luarocks make --local lua-doctor-*.rockspec
       - name: The installed command works
         run: |
           cd "$RUNNER_TEMP"
           export PATH="$HOME/.luarocks/bin:$PATH"
-          luasec --version
-          luasec rules explain 709 | head -3
+          lua-doctor --version
+          lua-doctor rules explain 709 | head -3
           printf 'os.execute(io.read())\n' > t.lua
-          set +e; luasec t.lua; status=$?; set -e
+          set +e; lua-doctor t.lua; status=$?; set -e
           test "$status" = 1
 
   homebrew:
@@ -133,14 +133,14 @@ jobs:
         run: |
           file=$(scripts/release-tarball.sh)
           sha=$(shasum -a 256 "$file" | cut -d' ' -f1)
-          version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
-          brew tap-new --no-git local/luasec
-          tap="$(brew --repository)/Library/Taps/local/homebrew-luasec"
-          sed -e "s|https://github.com/Vaibhav91one/luasec/releases/download/v@VERSION@/luasec-@VERSION@.tar.gz|file://$PWD/$file|" \
-              -e "s/@SHA256@/$sha/" -e "s/@VERSION@/$version/g" packaging/homebrew/luasec.rb > "$tap/Formula/luasec.rb"
-          brew install --formula local/luasec/luasec
-          brew test local/luasec/luasec
-          luasec rules list | head -3
+          version=$(sed -n 's/^ *luadoctor = "\(.*\)",$/\1/p' src/luadoctor/version.lua)
+          brew tap-new --no-git local/lua-doctor
+          tap="$(brew --repository)/Library/Taps/local/homebrew-lua-doctor"
+          sed -e "s|https://github.com/doctor-labs/lua-doctor/releases/download/v@VERSION@/lua-doctor-@VERSION@.tar.gz|file://$PWD/$file|" \
+              -e "s/@SHA256@/$sha/" -e "s/@VERSION@/$version/g" packaging/homebrew/lua-doctor.rb > "$tap/Formula/lua-doctor.rb"
+          brew install --formula local/lua-doctor/lua-doctor
+          brew test local/lua-doctor/lua-doctor
+          lua-doctor rules list | head -3
       - name: Every source file compiles under the formula's Lua 5.5
         run: make lua55-check
 
@@ -153,5 +153,5 @@ jobs:
           node-version: 20
       - name: Fetch the vendored luacheck
         run: make vendor
-      - name: The launcher runs luasec from a release-shaped tarball
+      - name: The launcher runs lua-doctor from a release-shaped tarball
         run: node npm/test.js

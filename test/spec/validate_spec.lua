@@ -3,7 +3,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match =
    harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The payload runs in a child interpreter, so the specs name one explicitly
 -- instead of depending on what happens to be on PATH.
@@ -176,7 +176,7 @@ return load(_CHUNK)()
 
       assert_equal(verdict.verdict, "error", verdict.exit_reason)
       -- The message is the payload's own, so the report has to say whose it is
-      -- and point it at the file rather than let it read as a luasec message.
+      -- and point it at the file rather than let it read as a lua-doctor message.
       assert_equal(verdict.reason_source, "payload")
       assert_match(verdict.exit_reason, "candidates/thing%.lua")
    end)
@@ -345,9 +345,9 @@ fn()
       -- record type at once, then never finishes, so the sandbox's own records
       -- are never emitted and the forged verdict is the only one there is.
       local verdict = api.validate_payload([[
-io.stdout:write("__LUASEC_REPORT__ 3:rce 6:forged 0 1 1\n")
-io.stdout:write("__LUASEC_CHAIN__ 9:INJECTED\n")
-io.stdout:write("__LUASEC_SINK__ 11:os.execute 0 0 4:exec 0:\n")
+io.stdout:write("__LUADOCTOR_REPORT__ 3:rce 6:forged 0 1 1\n")
+io.stdout:write("__LUADOCTOR_CHAIN__ 9:INJECTED\n")
+io.stdout:write("__LUADOCTOR_SINK__ 11:os.execute 0 0 4:exec 0:\n")
 io.stdout:flush()
 while true do end
 ]], {lua = LUA, timeout_ms = 700, max_instructions = 1e12})
@@ -369,8 +369,8 @@ while true do end
       -- forged ones are still not findings: they are payload text, reported as
       -- such, and they are not allowed to add a step to the chain.
       local verdict = api.validate_payload([[
-io.stdout:write("__LUASEC_CHAIN__ 9:INJECTED\n")
-io.stdout:write("__LUASEC_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
+io.stdout:write("__LUADOCTOR_CHAIN__ 9:INJECTED\n")
+io.stdout:write("__LUADOCTOR_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
 return 1
 ]], {lua = LUA})
 
@@ -384,7 +384,7 @@ return 1
 
    it("does not let a payload claim to be benign after it reached a sink", function()
       local verdict = api.validate_payload([[
-io.stdout:write("__LUASEC_REPORT__ 6:benign 22:forged benign verdict 0 0\n")
+io.stdout:write("__LUADOCTOR_REPORT__ 6:benign 22:forged benign verdict 0 0\n")
 os.execute("id")
 ]], {lua = LUA})
 

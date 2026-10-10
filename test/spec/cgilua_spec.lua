@@ -2,8 +2,8 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
-local api = require "luasec.api"
-local profiles = require "luasec.registry.profiles"
+local api = require "luadoctor.api"
+local profiles = require "luadoctor.registry.profiles"
 
 local function codes(report)
    local out = {}

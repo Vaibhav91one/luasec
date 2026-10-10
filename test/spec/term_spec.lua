@@ -8,7 +8,7 @@ local DIR = "test/fixtures/firmware"
 -- Stdout and stderr apart, with an optional environment prefix.
 local function run(args, env)
    local scratch = harness.scratch_dir("term")
-   local cmd = (env or "") .. " ./bin/luasec"
+   local cmd = (env or "") .. " ./bin/lua-doctor"
    for _, a in ipairs(args) do cmd = cmd .. " " .. string.format("%q", a) end
    os.execute(("%s >%q 2>%q </dev/null"):format(cmd, scratch .. "/out", scratch .. "/err"))
    local function read(name)

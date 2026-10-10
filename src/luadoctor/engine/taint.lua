@@ -1,0 +1,1954 @@
+-- Taint engine.
+--
+-- Taint is attached to luacheck *values* (the objects `resolve_locals` links an
+-- access to its reaching assignment), so propagation is flow-sensitive for free:
+-- `local a = x; x = "safe"; use(a)` sees a's own definition, not the later one.
+--
+-- Sources introduce taint at a call site. Propagation moves it through
+-- concatenation, assignments, table fields, string/table library calls and
+-- the return value of a function the analyzer can identify in the same file:
+-- a local function, and a module field (M.id) in that same file. Under
+-- --whole-program a required module's function return is followed too. What is
+-- not followed: a method call (M:m), a function passed as a value, and
+-- anything past the depth cap. Sinks consume taint and produce findings.
+--
+-- Tables. A named field is tracked exactly (`t.cmd = x` taints `t.cmd` only). An
+-- element put in by a computed key, `t[#t+1] = x` or `table.insert` taints the
+-- variable holding the table (container_write), a table used as a whole carries
+-- every field written to it (whole_fields), and the names of a `for ... in` loop
+-- carry what the loop iterates. There is no per-slot model of an array. A
+-- function that builds and returns a table is re-evaluated under each call's own
+-- arguments (return_taint's bindings), so the summary is per call and not the
+-- merge of every caller. Bounds: whole_fields answers once per table per
+-- propagation round or rebinding (`stamp`), `visiting` cuts a cycle, and the
+-- 20-round MAX_ITERATIONS and the depth cap of 32 apply as to every expression.
+local platform_api = require "luadoctor.registry.platform_api"
+local codes = require "luadoctor.rules.codes"
+local const_eval = require "luadoctor.util.const_eval"
+local uci_cursor = require "luadoctor.util.uci_cursor"
+
+local taint = {}
+
+local MAX_ITERATIONS = 20
+
+-- Characters that change the meaning of a shell command when they reach it
+-- unquoted. Reported by 712 so an operator can see the class of the bug.
+local SHELL_METACHARS = "; | & $ ` ( ) < > newline"
+
+-- The metacharacters SHELL_METACHARS names, one token each, in its order. A sink
+-- entry's `filters[position]` string lists the ones its callee strips.
+local METACHAR_TOKENS = {";", "|", "&", "$", "`", "(", ")", "<", ">", "newline"}
+local CONFIDENCE_DOWN = {certain = "high", high = "medium", medium = "low", low = "low"}
+
+-- What a partial filter removes and what still passes, or nil when the filter
+-- covers every metacharacter (nothing survives, so the sink is a plain one).
+local function filter_split(filtered)
+   local removed, survivors = {}, {}
+   for _, token in ipairs(METACHAR_TOKENS) do
+      local stripped = (token == "newline") and filtered:find("\n", 1, true)
+         or (token ~= "newline" and filtered:find(token, 1, true))
+      if stripped then removed[#removed + 1] = token else survivors[#survivors + 1] = token end
+   end
+   if #survivors == 0 or #removed == 0 then return nil end
+   return removed, survivors
+end
+
+-- Forward declarations: these helpers refer to each other, so their definition
+-- order in this file is not significant.
+local emit, check_sink, build_trace, snippet_at, code_confidence, return_taint, taint_of_expr
+local check_assignment_sink
+
+-- ------------------------------------------------------------ taint sets
+-- A taint set is a set of descriptors keyed by id so union is cheap and
+-- idempotent. Descriptors carry a stable id, a description and a line.
+
+local function new_set()
+   return {}
+end
+
+local function set_add(set, descriptor)
+   if set[descriptor.id] then return false end
+   set[descriptor.id] = descriptor
+   return true
+end
+
+-- A shell quoting helper neutralizes the data for a shell sink, but not for
+-- loadstring. Rather than a second taint set, a sanitized descriptor keeps the
+-- same source but is marked as quoted, so the sink can tell the difference.
+local function quoted_descriptor(descriptor)
+   if descriptor.shell_quoted then return descriptor end
+   return {
+      id = descriptor.id .. "|quoted",
+      name = descriptor.name,
+      line = descriptor.line,
+      confidence = descriptor.confidence,
+      shell_quoted = true,
+      stored = descriptor.stored,
+      store_key = descriptor.store_key,
+      store = descriptor.store,
+      channel = descriptor.channel,
+      validated_by = descriptor.validated_by,
+   }
+end
+
+local function any_unquoted(descriptors)
+   for _, descriptor in ipairs(descriptors) do
+      if not descriptor.shell_quoted then return true end
+   end
+   return false
+end
+
+local function any_quoted(descriptors)
+   for _, descriptor in ipairs(descriptors) do
+      if descriptor.shell_quoted then return true end
+   end
+   return false
+end
+
+-- Does a function body look like shell quoting?
+--
+-- It has to actually quote: a literal that is a single-quoted shell word, or a
+-- gsub whose pattern is the doubled-quote escape. Merely containing an
+-- apostrophe is not enough -- `log_it(s)` writing "user's input" is not a
+-- quoting helper, and treating it as one would hide a real injection.
+local function looks_like_shell_quote(node, depth)
+   depth = depth or 0
+   if depth > 24 or type(node) ~= "table" then return false end
+   if node.tag == "String" then
+      local text = node[1]
+      if type(text) == "string" then
+         if #text >= 2 and text:sub(1, 1) == "'" and text:sub(-1) == "'" then
+            return true
+         end
+         if text:find("''", 1, true) or text:find("\\'") then
+            return true
+         end
+      end
+   elseif node.tag == "Call" or node.tag == "Invoke" then
+      local callee = node[1]
+      if callee and callee.tag == "Index" and callee[2] and callee[2][1] == "gsub" then
+         for index = 2, #node do
+            local argument = node[index]
+            if argument and argument.tag == "String" and type(argument[1]) == "string" then
+               if argument[1]:find("''", 1, true) or argument[1]:find("\\'") then
+                  return true
+               end
+            end
+         end
+      end
+   end
+   for index = 1, #node do
+      local child = node[index]
+      if type(child) == "table" then
+         if child.tag then
+            if looks_like_shell_quote(child, depth + 1) then return true end
+         else
+            for _, sub in ipairs(child) do
+               if type(sub) == "table" and sub.tag and looks_like_shell_quote(sub, depth + 1) then
+                  return true
+               end
+            end
+         end
+      end
+   end
+   return false
+end
+
+local function set_union_into(target, other)
+   local changed = false
+   for _, descriptor in pairs(other) do
+      if set_add(target, descriptor) then changed = true end
+   end
+   return changed
+end
+
+local function field_set(fields, key)
+   local set = fields[key]
+   if not set then
+      set = new_set()
+      fields[key] = set
+   end
+   return set
+end
+
+local function set_is_empty(set)
+   return next(set) == nil
+end
+
+-- The set without values read back from a store. A stored value is untrusted
+-- only if something in the scan wrote request data there, which no single file
+-- can know, so it counts at an execution sink (as a pending 729, paired after
+-- the scan) and nowhere else: every other reader of taint sees the live set.
+local function live_only(set)
+   local live
+   for id, descriptor in pairs(set) do
+      if descriptor.stored then
+         if not live then
+            live = {}
+            for other_id, other in pairs(set) do live[other_id] = other end
+         end
+         live[id] = nil
+      end
+   end
+   return live or set
+end
+
+-- The string a node folds to, or nil.
+local function literal_of(node)
+   if type(node) ~= "table" then return nil end
+   local value = const_eval.value(node)
+   return type(value) == "string" and value or nil
+end
+
+-- The distinct channels a set of source descriptors names, sorted. Empty when
+-- no source carried one (an undeclared channel is not guessed).
+local function channels_of(sources)
+   local seen, list = {}, {}
+   for _, descriptor in ipairs(sources) do
+      local channel = descriptor.channel
+      if channel and not seen[channel] then
+         seen[channel] = true
+         list[#list + 1] = channel
+      end
+   end
+   table.sort(list)
+   return list
+end
+
+local function set_list(set)
+   local out = {}
+   for _, descriptor in pairs(set) do out[#out + 1] = descriptor end
+   table.sort(out, function(a, b)
+      if a.line ~= b.line then return (a.line or 0) < (b.line or 0) end
+      return tostring(a.id) < tostring(b.id)
+   end)
+   return out
+end
+
+-- ------------------------------------------------------------ state
+
+local function new_state()
+   return {
+      value_taint = setmetatable({}, {__mode = "k"}),  -- luacheck value -> taint set
+      global_taint = {},                              -- dotted global path -> taint set
+      table_fields = setmetatable({}, {__mode = "k"}), -- Table node -> {key -> taint set}
+      -- Every value written to a Table node's fields, with the item it was
+      -- written at: [{node, item}], so the whole table can be evaluated again
+      -- under another call's argument bindings (whole_fields).
+      field_writes = setmetatable({}, {__mode = "k"}),
+      visiting = {},                                   -- Table nodes whole_fields is inside
+      whole_cache = setmetatable({}, {__mode = "k"}),  -- Table node -> {stamp, set}
+      stamp = 0,                                       -- moves when a cached whole table may be stale
+      -- The same table's fields as AST nodes rather than taint. Kept apart
+      -- because `table_fields` is keyed by field name, and a table with a
+      -- field called `nodes` is a table like any other.
+      field_nodes = setmetatable({}, {__mode = "k"}),   -- Table node -> {key -> AST node}
+      global_tables = {},                              -- global name -> Table node
+      findings = {},
+      reported = {},                                  -- dedupe: one finding per site
+      approx = false,                                 -- reduced-precision mode
+      param_taint = setmetatable({}, {__mode = "k"}),   -- formal parameter -> taint set
+      declared_sources = {},                            -- var name -> true
+      declared_confidence = "high",
+      var_taint = setmetatable({}, {__mode = "k"}),   -- approx mode: var -> taint set
+   }
+end
+
+-- ------------------------------------------------------------ path resolution
+
+-- Dotted path of a callee, e.g. "os.execute". Returns nil when the base is
+-- dynamic (a local holding a table, an index by a variable, ...).
+local function id_path(node)
+   if node.tag == "Id" then
+      return node[1]
+   elseif node.tag == "Index" then
+      local base = id_path(node[1])
+      if base and node[2] and node[2].tag == "String" then
+         return base .. "." .. node[2][1]
+      end
+   end
+end
+
+-- The Table node a base expression refers to, following locals and globals.
+local function resolve_table_node(base, item, state)
+   if not base then return nil end
+   if base.tag == "Table" then return base end
+
+   if base.tag == "Id" then
+      if base.var then
+         -- Reaching definitions first: this keeps table identity flow-sensitive.
+         if item and item.used_values then
+            for _, value in ipairs(item.used_values[base.var] or {}) do
+               if value.node and value.node.tag == "Table" then return value.node end
+            end
+         end
+
+         -- Fallback for the module pattern, `M.go = function() ... M ... end`.
+         -- luacheck deliberately leaves an upvalue access unresolved there, to
+         -- avoid reasoning about a self-referential table, so there is no
+         -- reaching definition to read. We resolve the table's identity from the
+         -- variable's definitions instead, and only when they all name the same
+         -- table: a variable that is reassigned to a different table is left
+         -- unresolved rather than resolved wrongly.
+         local single = nil
+         for _, value in ipairs(base.var.values or {}) do
+            if value.node and value.node.tag == "Table" then
+               if single and single ~= value.node then return nil end
+               single = value.node
+            end
+         end
+         if single then return single end
+      else
+         return state.global_tables[base[1]]
+      end
+   end
+
+   if base.tag == "Index" then
+      local outer = resolve_table_node(base[1], item, state)
+      local held = outer and state.field_nodes[outer]
+      if held and base[2] and base[2].tag == "String" then
+         return held[base[2][1]]
+      end
+   end
+
+   return nil
+end
+
+local function table_fields_of(base, item, state)
+   local table_node = resolve_table_node(base, item, state)
+   if not table_node then return nil end
+   local fields = state.table_fields[table_node]
+   if not fields then
+      fields = {}
+      state.table_fields[table_node] = fields
+   end
+   return fields
+end
+
+-- What a table carries when it is used as a whole -- returned, passed on, joined
+-- into a string -- rather than read at one literal field: everything written to
+-- any of its fields. A field read (`t.safe`) does not come through here, so it
+-- keeps its own field's taint; the whole table is the union (#317, #309).
+--
+-- The writes are re-evaluated here instead of read back from `table_fields`, so
+-- that a function which builds and returns a table is summarised under the
+-- argument bindings of the call being followed (return_taint) and not under the
+-- merge of every caller: `parse("fixed").path` stays clean next to a tainted
+-- `parse(x)`. `visiting` stops `t.me = t` from recursing into itself.
+local function whole_fields(base, item, state, depth)
+   local table_node = resolve_table_node(base, item, state)
+   local writes = table_node and state.field_writes[table_node]
+   if not writes then return new_set() end
+   -- Answered once per table per stamp. Without this, tables that each store the
+   -- previous one twice (`t2.a, t2.b = t1, t1`) are re-expanded along every path,
+   -- 2^n evaluations for n tables; `visiting` only stops a cycle, not a diamond.
+   -- The stamp moves whenever the answer can: each propagation round, and each
+   -- time return_taint rebinds the formals.
+   local cached = state.whole_cache[table_node]
+   if cached and cached.stamp == state.stamp then return cached.set end
+   if state.visiting[table_node] then return new_set() end
+   state.visiting[table_node] = true
+   local out = new_set()
+   for _, write in ipairs(writes) do
+      set_union_into(out, taint_of_expr(write.node, write.item, state, (depth or 0) + 1))
+   end
+   state.visiting[table_node] = nil
+   state.whole_cache[table_node] = {stamp = state.stamp, set = out}
+   return out
+end
+
+-- The AST node a table field was given, or nil when this scan cannot see the
+-- table or the field. Only a literal field name is read: a field reached
+-- through a computed key (`t[name]`) names nothing the analyzer can check, and
+-- picking one anyway is the guess this tool does not make.
+local function field_value_node(base, key, item, state)
+   local table_node = resolve_table_node(base, item, state)
+   if not table_node then return nil end
+
+   -- The constructor first: that is the value the field held when the table
+   -- was made, and reading it needs no analysis at all.
+   if table_node.tag == "Table" then
+      for _, pair_node in ipairs(table_node) do
+         if pair_node.tag == "Pair" and pair_node[1] and pair_node[1].tag == "String"
+               and pair_node[1][1] == key then
+            return pair_node[2]
+         end
+      end
+   end
+
+   -- Then the writes. `M.run = L` adds a field the constructor never had, and
+   -- the recorded write is the only account of it there is.
+   local held = state.field_nodes[table_node]
+   return held and held[key] or nil
+end
+
+-- The value nodes a local may hold at this item. Flow-sensitive reaching
+-- definitions first. When they say nothing -- the value was put in a table and
+-- read back at a later call, so the call item never records a definition of
+-- the name that is holding it -- fall back to the variable's own definitions,
+-- and only when there is exactly one. A local assigned more than once is left
+-- unresolved rather than resolved wrongly, which is the same rule the table
+-- resolver above applies to a table's identity.
+local function value_nodes(var, item)
+   local reaching = item and item.used_values and item.used_values[var]
+   if reaching and #reaching > 0 then return reaching end
+
+   local values = var.values
+   if not values or #values ~= 1 then return {} end
+   return values
+end
+
+-- Resolve a callee expression to a path, following locals to the functions they
+-- were assigned when we can, so `local run = os.execute; run(cmd)` still matches.
+local function callee_path(node, item, state, depth)
+   if depth > 8 then return nil end
+
+   if node.tag == "Invoke" then
+      local base = callee_path(node[1], item, state, depth + 1)
+      local method = node[2] and node[2][1]
+      if base and method then return base .. ":" .. method end
+      return method
+   end
+
+   if node.tag == "Paren" then
+      return callee_path(node[1], item, state, depth + 1)
+   end
+
+   -- `require("ffi").C` names the ffi module, not an anonymous value.
+   if node.tag == "Call" then
+      local required = callee_path(node[1], item, state, depth + 1)
+      if required == "require" then
+         local argument = node[2]
+         if argument and argument.tag == "String" then
+            return platform_api.module_name(argument[1]) or argument[1]
+         end
+      end
+      return nil
+   end
+
+   -- Resolve a field access through the base's own definition, so
+   -- `local C = ffi.C; C.system(x)` is recognised as `ffi.C.system(x)`.
+   if node.tag == "Index" and node[2] and node[2].tag == "String" then
+      local base = callee_path(node[1], item, state, depth + 1)
+      local dotted = base and (base .. "." .. node[2][1]) or nil
+
+      -- When the base is a table this scan can see, the value the field was
+      -- given is the function the call reaches: a table of handlers is an
+      -- ordinary shape, not an evasion. Tried before the dotted name because a
+      -- local that shadows a module name really does replace it -- `local os =
+      -- {execute = safe}` calls `safe`, so reading it as `os.execute` would be
+      -- the guess, not this.
+      local held = field_value_node(node[1], node[2][1], item, state)
+      if held then
+         local via_field = callee_path(held, item, state, depth + 1)
+         -- As below: a field whose value resolves back to the name we started
+         -- from is progress of no kind, and the dotted name is the better guess.
+         if via_field and via_field ~= dotted then
+            return via_field
+         end
+      end
+
+      return dotted
+   end
+
+   local direct = id_path(node)
+   if direct and not (node.tag == "Id" and node.var) then
+      return direct
+   end
+
+   if node.tag == "Id" and node.var and item then
+      local values = value_nodes(node.var, item)
+      local fallback
+      for _, value in ipairs(values or {}) do
+         local value_node = value.node
+         if value_node and value_node.tag == "Function" and value_node.name then
+            return value_node.name
+         elseif value_node and (value_node.tag == "Index" or value_node.tag == "Call") then
+            -- `local C = ffi.C` then `C.system(...)` is `ffi.C.system`, and
+            -- `local json = require("luci.jsonc")` then `json.parse(...)` is
+            -- `jsonc.parse`. The comparison guards the case where resolving
+            -- through the definition gives back the same name we started with.
+            local via_local = callee_path(value_node, item, state, depth + 1)
+            local own_name = value_node[1] and value_node[1].tag == "Id"
+               and value_node[1][1] or nil
+            if via_local and via_local ~= own_name then
+               return via_local
+            end
+            fallback = fallback or via_local
+         elseif value_node and value_node.tag == "Id" then
+            -- `local L = loadstring` then `L(code)` is `loadstring(code)`. The
+            -- right-hand side is a name rather than an expression, so following
+            -- it is not a guess, and a name only becomes a finding when the
+            -- registry says it is a sink. These are the sinks that had no route
+            -- to a caller at all before: `os.execute` is an Index and was
+            -- already chased above, a bare global was not.
+            local via_local = callee_path(value_node, item, state, depth + 1)
+            if via_local and via_local ~= node[1] then
+               return via_local
+            end
+            fallback = fallback or via_local
+         end
+      end
+      return fallback or node[1]
+   end
+
+   return direct
+end
+
+-- ------------------------------------------------------------ expressions
+
+
+-- Taint of a variable at a given item: union over the reaching definitions.
+-- When flow-sensitive dataflow was skipped, fall back to the last assignment
+-- seen in file order, which is what a single forward pass can know.
+local function taint_of_var(node, item, state)
+   local result = new_set()
+   local var = node.var
+
+   if state.approx and var then
+      set_union_into(result, state.var_taint[var] or new_set())
+      return result
+   end
+
+   -- A name the operator declared a source of untrusted data.
+   if var and state.declared_sources[var.name] then
+      set_add(result, {
+         id = "declared:" .. var.name,
+         name = "declared source " .. var.name,
+         line = var.node and var.node.line,
+         confidence = state.declared_confidence,
+      })
+   end
+
+   if var and state.arg_binding and state.arg_binding[var] then
+      -- Taint bound to this formal parameter for the call currently being
+      -- evaluated by taint_of_call. Takes precedence over param_taint, which
+      -- is the context-insensitive merge over all call sites.
+      set_union_into(result, state.arg_binding[var])
+   elseif var and state.param_taint[var] then
+      -- Taint bound to a formal parameter by the interprocedural pass. A
+      -- parameter has no reaching definition of its own, so this is the only
+      -- way an argument's taint reaches the body.
+      set_union_into(result, state.param_taint[var])
+   end
+
+   if var and item and item.used_values then
+      for _, value in ipairs(item.used_values[var] or {}) do
+         set_union_into(result, state.value_taint[value] or new_set())
+      end
+   elseif not var then
+      set_union_into(result, state.global_taint[node[1]] or new_set())
+      local global_source = platform_api.match_global_source(node[1])
+      if global_source then
+         set_add(result, {
+            id = global_source.id, name = global_source.name,
+            line = node.line, confidence = global_source.confidence,
+            channel = global_source.channel,
+         })
+      end
+   end
+
+   return result
+end
+
+-- A source declared as a dotted path is untrusted input however the script
+-- writes it. `ngx.req.get_uri_arg("q")` reaches match_source through the call
+-- path; `local ua = ngx.var.http_user_agent` is a read, and a read consults no
+-- matcher, so the same declaration meant two different things depending on
+-- punctuation. callee_path already resolves the whole chain -- `ngx` -> `ngx.var`
+-- -> `ngx.var.http_user_agent` -- so the value position needs nothing new from
+-- the resolver, only the lookup the call position had.
+--
+-- The guard is the matcher, not the node's shape. `foo.bar` is the same Index
+-- node as `ngx.var.http_user_agent`; what separates them is that no profile
+-- declares `foo.bar` as a source. Matching any Index instead would report every
+-- global field read in every file, so the path is resolved first and the
+-- declaration decides, exactly as it does in call position.
+local function source_of_value(node, item, state, depth)
+   if not (node[2] and node[2].tag == "String") then return nil end
+   local path = callee_path(node, item, state, (depth or 0) + 1)
+   if not path then return nil end
+   local source = platform_api.match_source(path)
+   if not source then return nil end
+   return {
+      id = source.id, name = source.name,
+      line = node.line, confidence = source.confidence,
+      channel = source.channel,
+   }
+end
+
+local function taint_of_index(node, item, state, depth)
+   local result = new_set()
+   -- A named variable is read bare here: `t.safe` must not pick up `t.cmd`
+   -- just because the whole of `t` would (taint_of_expr's Id branch).
+   if node[1].tag == "Id" then
+      set_union_into(result, taint_of_var(node[1], item, state))
+   else
+      set_union_into(result, taint_of_expr(node[1], item, state, depth + 1))
+   end
+   set_union_into(result, taint_of_expr(node[2], item, state, depth + 1))
+
+   local read = source_of_value(node, item, state, depth)
+   if read then set_add(result, read) end
+
+   -- Table field taint: t.cmd = x, then use t.cmd
+   local fields = table_fields_of(node[1], item, state)
+   local table_node = resolve_table_node(node[1], item, state)
+   if fields and node[2] and node[2].tag == "String" then
+      set_union_into(result, fields[node[2][1]] or new_set())
+   elseif fields then
+      -- `t[i]`, `t[#t]`, `t[k]`: no field name to narrow by, so any field.
+      set_union_into(result, whole_fields(node[1], item, state, depth))
+   end
+
+   -- A value read back from a whole row (store key `T.*`) and then indexed by a
+   -- literal column narrows to `T.C`: the taint that reaches a sink is the one
+   -- column the sink used, so a reader of one column no longer pairs with a
+   -- writer of another. An index by a variable leaves `T.*` as it was.
+   if node[2] and node[2].tag == "String" then
+      local key = node[2][1]
+      local column = key:find(".", 1, true) and key:match("[^.]+$") or key
+      local narrowings = {}
+      for id, descriptor in pairs(result) do
+         if descriptor.stored and descriptor.store_key and descriptor.store_key:sub(-2) == ".*" then
+            narrowings[#narrowings + 1] = {id = id, descriptor = descriptor}
+         end
+      end
+      for _, hit in ipairs(narrowings) do
+         local store = hit.descriptor.store or "db"
+         local narrowed = hit.descriptor.store_key:sub(1, -3) .. "." .. column
+         result[hit.id] = nil
+         local new_id = "store:" .. store .. ":" .. narrowed
+         result[new_id] = {
+            id = new_id, name = store .. " " .. narrowed,
+            line = hit.descriptor.line, confidence = "medium",
+            stored = true, store_key = narrowed, store = store,
+         }
+      end
+   end
+
+   return result
+end
+
+local function args_of(node)
+   local args = {}
+   if node.tag == "Call" then
+      for i = 2, #node do args[#args + 1] = node[i] end
+   elseif node.tag == "Invoke" then
+      for i = 3, #node do args[#args + 1] = node[i] end
+   end
+   return args
+end
+
+-- A trailing `...` in a call expands to fill every formal past it, so
+-- f(...) feeds all of f's parameters, not just the first.
+local function spread_dots(arg_nodes, arg_taints, fn)
+   local last = #arg_nodes
+   if last == 0 or arg_nodes[last].tag ~= "Dots" then return end
+   for i = last + 1, #(fn[1] or {}) do arg_taints[i] = arg_taints[last] end
+end
+
+-- The string library functions whose result is made of their first argument.
+local STRING_METHODS = {
+   byte = true, sub = true, gsub = true, gmatch = true, match = true,
+   lower = true, upper = true, rep = true, reverse = true,
+}
+
+-- A call expression: sources introduce taint, propagators pass it through.
+local function taint_of_call(node, item, state, depth)
+   local result = new_set()
+   local callee = node.tag == "Invoke" and node[1] or node[1]
+   local path = callee_path(callee, item, state, depth)
+   local args = args_of(node)
+
+   -- A method call on an object we cannot name still has a method name, and
+   -- `handle:read("*a")` is a file read whoever the handle is. Both spellings
+   -- reach us: a colon call as an Invoke node, and a field call on a value we
+   -- could not resolve as an Index callee. The base path of a method call is
+   -- usually just the variable holding the object, so it says nothing; the
+   -- method name is the part that carries meaning.
+   local method_name
+   if node.tag == "Invoke" then
+      method_name = node[2] and node[2][1]
+   elseif node[1] and node[1].tag == "Index" and node[1][2] and node[1][2].tag == "String" then
+      method_name = node[1][2][1]
+   end
+   -- Hoisted so the fallback (below the `if path then` block) can read it.
+   local sanitized
+
+   -- A dotted path a profile declares (`luci.http.formvalue`) names the source
+   -- exactly; the method name is the fallback for a receiver we cannot name.
+   if method_name and not (path and platform_api.match_source(path)) then
+      local by_method = platform_api.match_method_source(method_name)
+      if by_method then
+         set_add(result, {
+            id = by_method.id, name = by_method.name,
+            line = node.line, confidence = by_method.confidence,
+            channel = by_method.channel,
+         })
+         return result
+      end
+   end
+
+   if path then
+      -- A read from a declared store: the value is stored taint, keyed by the
+      -- table and column when the call names them as literals. A table that is
+      -- computed at run time matches no write and is not followed.
+      local read = platform_api.match_store_read(path)
+      if read then
+         local store_table = literal_of(args[read.table or 1])
+         if store_table then
+            local column = read.column and literal_of(args[read.column]) or nil
+            local key = store_table .. "." .. (column or "*")
+            local store = read.store or "db"
+            set_add(result, {
+               id = "store:" .. store .. ":" .. key,
+               name = store .. " " .. key,
+               line = node.line,
+               confidence = column and "medium" or "low",
+               stored = true,
+               store_key = key,
+               store = store,
+            })
+         end
+         return result
+      end
+
+      local source = platform_api.match_source(path)
+      if source then
+         set_add(result, {
+            id = source.id,
+            name = source.name,
+            line = node.line,
+            confidence = source.confidence,
+            channel = source.channel,
+         })
+         return result
+      end
+
+      local propagator = platform_api.match_propagator(path)
+      if propagator then
+         for _, index in ipairs(propagator.arg or {}) do
+            if args[index] then
+               local from = taint_of_expr(args[index], item, state, depth + 1)
+               if platform_api.is_sanitizer("shell", path) then
+                  -- A local quoting helper, recognised by its body.
+                  for _, descriptor in pairs(from) do
+                     set_add(result, quoted_descriptor(descriptor))
+                  end
+               else
+                  set_union_into(result, from)
+               end
+            end
+         end
+      end
+
+      -- A function defined in this file that quotes its argument neutralizes
+      -- taint for shell sinks.
+      sanitized = platform_api.is_sanitizer("shell", path)
+      if not sanitized and node[1] and node[1].tag == "Id" and node[1].var then
+         for _, value in ipairs((item.used_values or {})[node[1].var] or {}) do
+            if value.node and value.node.tag == "Function" and looks_like_shell_quote(value.node) then
+               sanitized = true
+               break
+            end
+         end
+      end
+      if sanitized and not propagator then
+         for index, arg in ipairs(args) do
+            for _, descriptor in pairs(taint_of_expr(arg, item, state, depth + 1)) do
+               set_add(result, quoted_descriptor(descriptor))
+            end
+         end
+      end
+   end
+
+   -- `str:sub(i, j)` is `string.sub(str, i, j)`: the `string.*` propagator names
+   -- the library spelling, and a colon call on a string says the same thing with
+   -- the receiver first. Only the string library's own names, so `obj:get()` on
+   -- a tainted object is not read as a string operation.
+   if node.tag == "Invoke" and method_name and STRING_METHODS[method_name] then
+      set_union_into(result, taint_of_expr(callee, item, state, depth + 1))
+   end
+
+   -- Anything else: the result can still carry taint from the callee itself
+   -- (e.g. `local f = tainted_module`), so include the callee's taint.
+   if node.tag ~= "Invoke" then
+      set_union_into(result, taint_of_expr(callee, item, state, depth + 1))
+   end
+
+   -- Follow a local function's return value: bind each formal parameter to the
+   -- taint of the matching argument at this call site, then propagate through
+   -- the function's return expressions as context-sensitive bindings. A guard
+   -- on state.returning[fn] prevents unbounded recursion on a function that
+   -- returns its own call.
+   -- ponytail: a module field (M.id) in the same file is followed too;
+   -- a cross-file return is not (that needs --whole-program's
+   -- resolve_external).
+   if not sanitized and node.tag == "Call"
+         and node[1] and node[1].tag == "Id" and node[1].var
+         and item and item.used_values then
+      local fn
+      for _, value in ipairs(item.used_values[node[1].var] or {}) do
+         if value.node and value.node.tag == "Function" then
+            fn = value.node
+            break
+         end
+      end
+      if fn and state.returns and state.returns[fn] and not state.returning[fn] then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         spread_dots(arg_nodes, arg_taints, fn)
+         set_union_into(result, return_taint(fn, arg_taints, state, depth))
+      end
+   elseif not sanitized and node.tag == "Call"
+         and node[1] and node[1].tag == "Index"
+         and node[1][1] and node[1][1].tag == "Id" and node[1][1].var
+         and node[1][2] and node[1][2].tag == "String"
+         and state and state.field_functions then
+      -- A module field (M.id) in this same file: resolve it to its function
+      -- value, if there is exactly one.
+      local fn = (state.field_functions[node[1][1].var] or {})[node[1][2][1]]
+      if fn then
+         local arg_nodes = args_of(node)
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         spread_dots(arg_nodes, arg_taints, fn)
+         if looks_like_shell_quote(fn) then
+            -- A quoting field helper neutralizes the shell sink: each argument's
+            -- taint is quoted rather than propagated raw, and the return is not
+            -- followed so the sink marks the call shell-quoted.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
+            end
+         elseif state.returns and state.returns[fn]
+               and not state.returning[fn] then
+            set_union_into(result, return_taint(fn, arg_taints, state, depth))
+         end
+      end
+   end
+
+   -- Cross-file return: a require edge nested in an expression (e.g.
+   -- os.execute(m.id(http.formvalue("h"))) where m.id lives in another file).
+   -- The only local resolution that applies is `node[1].var`, so a call through
+   -- a variable bound to a required module -- m.id(x) -- falls through both
+   -- branches above. When the whole-program pass has wired in a resolver, ask
+   -- it for the target function and follow its return the same way a local or
+   -- field function is followed, just in the target file's state.
+   if not sanitized and state.resolve_external
+         and (node.tag == "Call" or node.tag == "Invoke") and node[1] then
+      local fn, target_state, target_path = state.resolve_external(node, item)
+      if fn and target_state.returns and target_state.returns[fn]
+            and not target_state.returning[fn] then
+         local arg_nodes = args_of(node)
+         -- A method call's receiver is the callee's first formal (`self`).
+         if node.tag == "Invoke" then table.insert(arg_nodes, 1, node[1]) end
+         local arg_taints = {}
+         for i = 1, #arg_nodes do
+            arg_taints[i] = taint_of_expr(arg_nodes[i], item, state, depth + 1)
+         end
+         if looks_like_shell_quote(fn) then
+            -- A quoting helper in another file neutralises the shell sink:
+            -- each argument's taint is quoted rather than propagated raw.
+            for _, arg_taint in ipairs(arg_taints) do
+               for _, descriptor in pairs(arg_taint) do
+                  set_add(result, quoted_descriptor(descriptor))
+               end
+            end
+            if state.on_external_return then
+               state.on_external_return(new_set(), arg_taints, target_path)
+            end
+         else
+            local returned = return_taint(fn, arg_taints, target_state, depth + 1)
+            if state.on_external_return then
+               state.on_external_return(returned, arg_taints, target_path)
+            end
+            set_union_into(result, returned)
+         end
+      end
+   end
+
+   return result
+end
+
+taint_of_expr = function(node, item, state, depth)
+   depth = depth or 0
+   if depth > 32 or type(node) ~= "table" then
+      return new_set()
+   end
+
+   local tag = node.tag
+   if tag == "Id" then
+      local result = taint_of_var(node, item, state)
+      if node.var then set_union_into(result, whole_fields(node, item, state, depth)) end
+      return result
+   elseif tag == "Index" then
+      return taint_of_index(node, item, state, depth)
+   elseif tag == "Call" or tag == "Invoke" then
+      return taint_of_call(node, item, state, depth)
+   elseif tag == "Op" then
+      local result = new_set()
+      if node[2] then set_union_into(result, taint_of_expr(node[2], item, state, depth + 1)) end
+      if node[3] then set_union_into(result, taint_of_expr(node[3], item, state, depth + 1)) end
+      return result
+   elseif tag == "Paren" then
+      return taint_of_expr(node[1], item, state, depth + 1)
+   elseif tag == "Dots" then
+      -- A `...` read is a read of the vararg parameter. resolve_locals gave it
+      -- the same var object the signature carries, so an entry point that taints
+      -- its vararg reaches `{...}`, `select("#", ...)` and `...` alike.
+      return taint_of_var(node, item, state)
+   elseif tag == "Table" then
+      local result = new_set()
+      for _, pair_node in ipairs(node) do
+         if pair_node.tag == "Pair" then
+            set_union_into(result, taint_of_expr(pair_node[2], item, state, depth + 1))
+         else
+            set_union_into(result, taint_of_expr(pair_node, item, state, depth + 1))
+         end
+      end
+      return result
+   end
+
+   return new_set()
+end
+
+-- Evaluate a function's return taint given the taint of its call-site arguments.
+-- Binds each formal parameter to its argument's taint (context-sensitive), walks
+-- the function's recorded return expressions, memoises the result, and restores
+-- the caller's binding state. Returns a new taint set.
+return_taint = function(fn, arg_taints, state, depth)
+   local result = new_set()
+   if not (fn and state.returns and state.returns[fn]) or state.returning[fn] then
+      return result
+   end
+
+   local formals = {}
+   for _, arg in ipairs(fn[1] or {}) do
+      if arg.var then formals[#formals + 1] = arg.var end
+   end
+
+   -- Context-sensitive bindings: each formal -> its argument's taint.
+   local saved = {}
+   for i, var in ipairs(formals) do
+      saved[i] = state.arg_binding[var]
+      local arg_taint = arg_taints[i]
+      if not arg_taint then arg_taint = new_set() end
+      state.arg_binding[var] = arg_taint
+   end
+   state.returning[fn] = true
+   state.stamp = state.stamp + 1
+
+   -- Cache key: sorted descriptor ids of each bound argument, joined
+   -- by formals with ";", so the same argument taint rebinds at once.
+   local parts = {}
+   for i, var in ipairs(formals) do
+      local ids = {}
+      for _, d in pairs(arg_taints[i] or new_set()) do ids[#ids + 1] = d.id end
+      table.sort(ids)
+      parts[i] = table.concat(ids, ",")
+   end
+   local key = table.concat(parts, ";")
+
+   local cached = state.return_cache[fn] and state.return_cache[fn][key]
+   if cached then
+      set_union_into(result, cached)
+   else
+      local ret = new_set()
+      local ok, err = pcall(function()
+         for _, r in ipairs(state.returns[fn]) do
+            set_union_into(ret, taint_of_expr(r.node, r.item, state, depth + 1))
+         end
+      end)
+      if not ok then
+         state.returning[fn] = nil
+         for i, var in ipairs(formals) do
+            state.arg_binding[var] = saved[i]
+         end
+         state.stamp = state.stamp + 1
+         error(err)
+      end
+      -- Store a copy so later mutation of result cannot corrupt the cache.
+      local copy = new_set()
+      for _, d in pairs(ret) do copy[d.id] = d end
+      if not state.return_cache[fn] then state.return_cache[fn] = {} end
+      state.return_cache[fn][key] = copy
+      set_union_into(result, ret)
+   end
+
+   state.returning[fn] = nil
+   for i, var in ipairs(formals) do
+      state.arg_binding[var] = saved[i]
+   end
+   state.stamp = state.stamp + 1
+
+   return result
+end
+
+-- Record taint written into a table constructor or a field assignment.
+-- Record the taint a write puts somewhere: a table constructor's fields, or a
+-- single field assignment. `value_node` is what is being written, which is not
+-- the left-hand side itself: reading the field back through the left-hand side
+-- would just find the empty set we are creating.
+local function record_table_write(node, value_node, item, state, depth)
+   depth = depth or 0
+   if depth > 16 or type(node) ~= "table" then return end
+   local tag = node.tag
+
+   local function note_write(table_node, value, at)
+      local writes = state.field_writes[table_node]
+      if not writes then
+         writes = {seen = {}}
+         state.field_writes[table_node] = writes
+      end
+      if not writes.seen[value] then
+         writes.seen[value] = true
+         writes[#writes + 1] = {node = value, item = at}
+         -- A new write can change what a whole table already read this round
+         -- was found to hold, so the round is not the last one.
+         state.grew = true
+      end
+   end
+
+   local function hold(table_node, key, held)
+      -- `M.run = L` is a field write with no reaching definition, so the value
+      -- is recorded here: this is the only place a field assignment is seen,
+      -- and the callee resolver has to read it to know which function a later
+      -- `M.run(...)` reaches.
+      local nodes = state.field_nodes[table_node]
+      if not nodes then
+         nodes = {}
+         state.field_nodes[table_node] = nodes
+      end
+      nodes[key] = held
+   end
+
+   if tag == "Table" then
+      for _, pair_node in ipairs(node) do
+         if pair_node.tag == "Pair" and pair_node[1] and pair_node[1].tag == "String" then
+            local fields = state.table_fields[node]
+            if not fields then
+               fields = {}
+               state.table_fields[node] = fields
+            end
+            hold(node, pair_node[1][1], pair_node[2])
+            note_write(node, pair_node[2], item)
+            set_union_into(field_set(fields, pair_node[1][1]),
+               taint_of_expr(pair_node[2], item, state, depth + 1))
+         end
+      end
+   elseif tag == "Index" and node[2] and node[2].tag == "String" then
+      local fields = table_fields_of(node[1], item, state)
+      if fields and value_node then
+         local table_node = resolve_table_node(node[1], item, state)
+         if table_node then
+            hold(table_node, node[2][1], value_node)
+            note_write(table_node, value_node, item)
+         end
+         set_union_into(field_set(fields, node[2][1]),
+            taint_of_expr(value_node, item, state, depth + 1))
+      end
+   elseif tag == "Paren" then
+      record_table_write(node[1], value_node, item, state, depth + 1)
+   end
+end
+
+-- A tainted element put into a table makes the table tainted, at the level of
+-- the variable that holds it: `argv[#argv+1] = v`, `t[k] = v` and
+-- `table.insert(t, v)` add `v`'s taint to every definition of `t` that reaches
+-- the write, so a later read of `t` as a whole (a command line built from it, a
+-- `return t`, an argument to another function) carries it.
+--
+-- The trade-off is deliberate and one-sided. A table that has ever been given a
+-- tainted element is tainted whole, and an index by a variable or a counter
+-- reads that whole taint; there is no per-slot model of an array, so a constant
+-- `t[1]` read from a table whose `t[2]` was tainted is tainted too. Named
+-- fields are the exception and stay exact: `t.safe` is not tainted by
+-- `t.cmd = x` (see taint_of_index and whole_fields). A write through a
+-- sanitizer-quoted value stays quoted, because the descriptor goes in as-is.
+local function container_write(base, written, item, state)
+   if type(base) ~= "table" or base.tag ~= "Id" or type(written) ~= "table" then
+      return
+   end
+   local added = taint_of_expr(written, item, state, 1)
+   if set_is_empty(added) then return end
+   if base.var then
+      for _, value in ipairs(value_nodes(base.var, item)) do
+         local existing = state.value_taint[value]
+         if not existing then
+            existing = new_set()
+            state.value_taint[value] = existing
+         end
+         if set_union_into(existing, added) then state.grew = true end
+      end
+   else
+      local existing = state.global_taint[base[1]]
+      if not existing then
+         existing = new_set()
+         state.global_taint[base[1]] = existing
+      end
+      if set_union_into(existing, added) then state.grew = true end
+   end
+end
+
+-- Does `lhs = value` write an element the field-exact model cannot place? A
+-- computed key, or a field of a table this scan cannot see (a parameter, a
+-- call's result): both are container writes.
+local function note_element_write(lhs, written, item, state)
+   if lhs.tag ~= "Index" then return end
+   local named = lhs[2] and lhs[2].tag == "String"
+   if named and resolve_table_node(lhs[1], item, state) then return end
+   container_write(lhs[1], written, item, state)
+end
+
+-- ------------------------------------------------------------ sinks
+
+emit = function(state, spec, node, chstate, extra)
+   local code = codes.get(spec.code)
+   if not code then return end
+
+   -- The propagation loop revisits each item until nothing changes, so the same
+   -- call site is checked many times. One finding per site.
+   local column = node.offset - (chstate.line_offsets[node.line] or 0) + 1
+   local key = table.concat({spec.code, tostring(node.line), tostring(column),
+      tostring(spec.name or spec.pattern)}, "|")
+   if state.reported[key] then return end
+   state.reported[key] = true
+
+   local column = node.offset - (chstate.line_offsets[node.line] or 0) + 1
+   local end_column = column + (node.end_offset - node.offset)
+
+   local finding = {
+      code = spec.code,
+      line = node.line,
+      column = math.max(1, column),
+      end_column = math.max(1, end_column),
+      severity = spec.severity or code.severity,
+      confidence = extra and extra.confidence or code.confidence or "medium",
+      cwe = code.cwe,
+      name = spec.name or spec.pattern,
+      sink = spec.pattern,
+   }
+   for key, value in pairs(extra or {}) do
+      if key ~= "confidence" then finding[key] = value end
+   end
+
+   finding.message = codes.render(code, finding)
+
+   state.findings[#state.findings + 1] = finding
+   return finding
+end
+
+-- Ordered source -> sink description, used by SARIF codeFlows and the terminal
+-- report. The line numbers come from the taint descriptors, so this is a real
+-- path rather than a decoration.
+build_trace = function(node, sources)
+   local trace = {}
+   for _, source in ipairs(sources) do
+      trace[#trace + 1] = {kind = "source", name = source.display_id or source.id,
+         line = source.line}
+   end
+   trace[#trace + 1] = {kind = "sink", name = nil, line = node.line}
+   return trace
+end
+
+-- API shapes (FFI use, computed module names) are reported on their own: the
+-- fact that the call happens is the finding, whatever its argument holds.
+local function check_shape(node, item, state, chstate, opts)
+   if opts.report_sink_shapes == false then return end
+   local path = callee_path(node[1], item, state, 0)
+   if not path then return end
+   local shape = platform_api.match_shape(path)
+   if not shape then return end
+
+   -- 705 and 706 are about a name computed at runtime. A constant module name
+   -- is the normal case and is not a finding.
+   if shape.code == "705" or shape.code == "706" then
+      local arg = args_of(node)[1]
+      if arg and not const_eval.is_constant(arg) then
+         local arg_taint = live_only(taint_of_expr(arg, item, state, 0))
+         emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {
+            name = path,
+            confidence = set_is_empty(arg_taint) and "low" or "high",
+         })
+      end
+      return
+   end
+
+   emit(state, {code = shape.code, pattern = shape.pattern}, node, chstate, {name = path})
+end
+
+-- Check one call expression against the sink registry.
+--
+-- A sink has two identities: the code for "this argument is dynamic" and the
+-- code for "this argument is dynamic *and* carries untrusted data". Proven
+-- untrusted flow is the finding that matters, so it wins.
+-- The resolver const_eval asks "which definition reaches this use": exactly one, or nil. #229.
+--
+-- Soundness leans on luacheck: a variable that a closure also writes has TWO reaching definitions at
+-- the use (the closure's write is merged in), so `#reaching ~= 1` already refuses it. The specs in
+-- reaching_definitions_spec.lua that use an untracked source pin that behaviour.
+local function reaching_definition(item)
+   if not (item and item.used_values) then return nil end
+   return function(var)
+      local reaching = item.used_values[var]
+      if not reaching or #reaching ~= 1 or not reaching[1].node then return nil end
+      -- Only a variable declared WITH a value: that is the "held something, then was overwritten"
+      -- case. `local X` followed by an assignment keeps its documented conservative answer.
+      local declaration = var.values and var.values[1]
+      if not declaration or declaration.empty then return nil end
+      return reaching[1].node
+   end
+end
+
+-- A write through a UCI cursor handle (`c:set(...)`, `c:section(...)`) is a
+-- config sink like `uci.set`, but only a value carrying request data is
+-- reported: a cursor write with a constant or merely computed value is the
+-- normal case in firmware (#317). Reuses the handle tracking of rule 747.
+--
+-- The arguments that carry a value, by method: `set(config, section, option,
+-- value)` (or `set(config, section, type)`), `section(config, type, name,
+-- values)`, `tset(config, section, values)`. A section or config name is not a
+-- written value and is left alone.
+local CURSOR_VALUE_ARGS = {
+   set = {3, 4}, add_list = {4}, set_list = {4}, setlist = {4},
+   section = {4}, tset = {3}, add = {3},
+}
+
+local function cursor_sink(method)
+   return {pattern = "uci:" .. method, code = "722", kind = "config", cursor = true,
+           arg = CURSOR_VALUE_ARGS[method], taint_code = "722", taint_only = true}
+end
+
+local function check_sink(node, item, state, chstate, opts)
+   local callee = node[1]
+   local path, sink
+   if node.tag == "Invoke" and platform_api.match_sink("uci.set") then
+      uci_cursor.prepare(chstate.ast)
+      if uci_cursor.cursor_write(node) then
+         local method = node[2][1]
+         sink = cursor_sink(method)
+         path = sink.pattern
+      end
+   end
+   if not sink then
+      path = callee_path(callee, item, state, 0)
+      if not path then return end
+      sink = platform_api.match_sink(path)
+      if not sink then return end
+   end
+
+   local args = args_of(node)
+   local kind = sink.kind or "shell"
+
+   -- Writing attacker data into a configuration that a service later executes is
+   -- a different finding (722) with the path it can reach, so the firmware rule
+   -- module owns it.
+   if kind == "config" and not sink.cursor then
+      return
+   end
+
+   if sink.kind == "expose" then
+      if opts.report_sink_shapes ~= false then
+         emit(state, sink, node, chstate, {name = path})
+      end
+      return
+   end
+
+   local tainted_args, stored = {}, {}
+   for _, index in ipairs(sink.arg or {1}) do
+      local arg = args[index]
+      if arg then
+         local all_taint = taint_of_expr(arg, item, state, 0)
+         local arg_taint = live_only(all_taint)
+         if not set_is_empty(arg_taint) then
+            tainted_args[#tainted_args + 1] = {index = index, node = arg, taint = arg_taint}
+         elseif arg_taint ~= all_taint then
+            for _, descriptor in pairs(all_taint) do
+               if descriptor.stored then stored[#stored + 1] = {node = arg, descriptor = descriptor} end
+            end
+         end
+      end
+   end
+
+   for _, tainted_arg in ipairs(tainted_args) do
+      local sources = set_list(tainted_arg.taint)
+      for _, descriptor in ipairs(sources) do
+         descriptor.display_id = (descriptor.id:gsub("|quoted$", ""))
+      end
+      local source = sources[1]
+      local taint_spec = {
+         code = sink.taint_code or (kind == "dyncode" and "710" or "709"),
+         kind = kind,
+         pattern = sink.pattern,
+      }
+      -- A callee that strips some metacharacters from this argument still passes
+      -- the rest: reported, one confidence step lower, with both lists named.
+      local removed, survivors
+      local filtered = kind == "exec" and sink.filters and sink.filters[tainted_arg.index]
+      if type(filtered) == "string" then removed, survivors = filter_split(filtered) end
+      local confidence = source.confidence or code_confidence(taint_spec.code)
+      if removed then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local guard
+      for _, descriptor in ipairs(sources) do
+         if descriptor.validated_by then guard = descriptor.validated_by break end
+      end
+      if guard then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      -- Every tainted part went through a shell-quoting helper: still reported, because quoting
+      -- is easy to get wrong and the flow is real, but one confidence step lower than the same
+      -- flow unquoted. A partly quoted command is the 712 case and keeps full strength.
+      -- Only for an exec sink: quoting protects a shell command line and nothing else, so a
+      -- quoted value reaching loadstring (710) or a header is still the same real flow.
+      local wholly_quoted = kind == "exec" and not any_unquoted(sources)
+      if wholly_quoted then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+      local channels = channels_of(sources)
+      local finding = emit(state, taint_spec, node, chstate, {
+         name = path,
+         confidence = confidence,
+         source = source.display_id or source.id,
+         sources = sources,
+         trace = build_trace(tainted_arg.node, sources),
+         snippet = snippet_at(chstate, tainted_arg.node),
+         sanitizer = wholly_quoted and "shell-quoted" or nil,
+         channels = #channels > 0 and channels or nil,
+      })
+      if finding and #channels > 0 then
+         finding.message = finding.message .. (" [reachable from: %s]"):format(table.concat(channels, ", "))
+      end
+      if finding and removed then
+         finding.message = finding.message .. (" (a partial filter removes %s; %s still pass)")
+            :format(table.concat(removed, " "), table.concat(survivors, " "))
+      end
+      if finding and guard then
+         finding.guarded_by = guard
+         finding.message = finding.message .. (" (guarded by %s; verify it rejects shell metacharacters)"):format(guard)
+      end
+
+      -- 712 is the partially quoted case: some of the untrusted data was passed
+      -- through a quoting helper and some was not. That is where an operator
+      -- assumed the command was safe, so it gets its own finding naming the
+      -- characters that break out. A wholly unquoted command is already the
+      -- critical 709, and a wholly quoted one is 709 with the flow noted (one confidence step lower), so
+      -- neither needs a second finding.
+      if kind == "exec" and any_unquoted(sources) and any_quoted(sources) then
+         emit(state, {code = "712", pattern = sink.pattern, name = path}, node, chstate, {
+            name = path,
+            confidence = source.confidence or code_confidence("712"),
+            source = source.id,
+            sources = sources,
+            trace = build_trace(tainted_arg.node, sources),
+            metachars = SHELL_METACHARS,
+         })
+      end
+   end
+
+   if #tainted_args > 0 then return end
+
+   -- Only values read back from a store reach this command. Whether that is a
+   -- finding depends on whether anything in the scan writes request data to the
+   -- same place, so it is a pending 729 that the pairing after the scan either
+   -- keeps (and then drops the 701/702 below at this site) or removes. Until
+   -- then the site reports exactly what it reported before.
+   if kind == "exec" and #stored > 0 then
+      table.sort(stored, function(a, b) return a.descriptor.store_key < b.descriptor.store_key end)
+      local keys, seen, exact = {}, {}, true
+      for _, entry in ipairs(stored) do
+         local key = entry.descriptor.store_key
+         if not seen[key] then
+            seen[key] = true
+            keys[#keys + 1] = key
+            if key:sub(-2) == ".*" then exact = false end
+         end
+      end
+      local finding = emit(state, {code = "729", pattern = sink.pattern, name = path}, node, chstate, {
+         name = path,
+         store = table.concat(keys, ", "),
+         confidence = exact and "medium" or "low",
+         snippet = snippet_at(chstate, stored[1].node),
+      })
+      if finding then
+         finding.pending_store = true
+         finding.store_keys = keys
+      end
+   end
+
+   -- No known taint, but is the argument actually constant? If we cannot prove
+   -- it is, the call is still an execution sink fed by something unknown.
+   --
+   -- A sink may opt out with `taint_only`. For an API that takes a value on every
+   -- call -- writing a header, capturing a subrequest -- a merely non-constant
+   -- argument is the normal case rather than a finding, so only a proven taint
+   -- flow is reported. Left reporting it, every `set_header` from a local
+   -- variable would read as an untrusted write.
+   if sink.taint_only or opts.report_dynamic_sinks == false then return end
+
+   for _, index in ipairs(sink.arg or {1}) do
+      local arg = args[index]
+      if arg and not const_eval.is_constant(arg, reaching_definition(item)) then
+         emit(state, sink, node, chstate, {name = path, confidence = "low"})
+      end
+   end
+end
+
+-- Check one assignment against the sink registry, for a sink declared with
+-- `kind = "assign"`.
+--
+-- This is the target position, which check_sink cannot see: that one is handed a
+-- Call and reads a callee off it, and an assignment has no callee. So it is a
+-- separate walk rather than a branch inside check_sink -- bolting it on there
+-- would mean every existing call sink ran against target-shaped nodes, which is
+-- the change most likely to break a rule that works today.
+--
+-- For `target[k] = v` the target's BASE is matched, not the whole target: the
+-- base names the thing being written (`ngx.header`), while `k` is the key. Only
+-- the VALUE position is the sink, because that is the only part of the statement
+-- the program hands to the HTTP message; `arg` counts right-hand sides here,
+-- where it counts arguments on a call.
+check_assignment_sink = function(item, state, chstate, opts)
+   for index, lhs in ipairs(item.lhs or {}) do
+      if lhs.tag == "Index" and lhs[1] then
+         local path = callee_path(lhs[1], item, state, 0)
+         local sink = path and platform_api.match_assign_sink(path)
+         -- `arg` counts right-hand sides here where it counts arguments on a
+         -- call, so {1} is the value this target is written with. An entry that
+         -- names no position pairs each target with the right-hand side at the
+         -- same position, which is what a single assignment means anyway.
+         local position = (sink and sink.arg or {})[1] or index
+         local value = sink and (item.rhs or {})[position]
+         if value then
+            local value_taint = live_only(taint_of_expr(value, item, state, 0))
+            if not set_is_empty(value_taint) then
+               local sources = set_list(value_taint)
+               for _, descriptor in ipairs(sources) do
+                  descriptor.display_id = (descriptor.id:gsub("|quoted$", ""))
+               end
+               local source = sources[1]
+               -- The confidence is the source's own, exactly as check_sink
+               -- reports it for the same flow through the call form: an
+               -- assignment into a header is influenced on the same evidence a
+               -- call is, and lowering it here would be a guess about a shape
+               -- rather than about the data.
+               local guard
+               for _, descriptor in ipairs(sources) do
+                  if descriptor.validated_by then guard = descriptor.validated_by break end
+               end
+               local confidence = source.confidence
+                  or code_confidence(sink.taint_code or sink.code)
+               if guard then confidence = CONFIDENCE_DOWN[confidence] or confidence end
+               local channels = channels_of(sources)
+               -- The finding is located on the TARGET, so the column points at
+               -- the thing written to rather than at the bytes; the snippet is
+               -- the value, which is what the reader needs to see.
+               local finding = emit(state,
+                  {code = sink.taint_code or sink.code, pattern = sink.pattern},
+                  lhs, chstate, {
+                     name = path,
+                     confidence = confidence,
+                     source = source.display_id or source.id,
+                     sources = sources,
+                     trace = build_trace(value, sources),
+                     snippet = snippet_at(chstate, value),
+                     channels = #channels > 0 and channels or nil,
+                  })
+               if finding and #channels > 0 then
+                  finding.message = finding.message
+                     .. (" [reachable from: %s]"):format(table.concat(channels, ", "))
+               end
+               if finding and guard then
+                  finding.guarded_by = guard
+                  finding.message = finding.message
+                     .. (" (guarded by %s; verify it rejects the metacharacters)"):format(guard)
+               end
+            end
+         end
+      end
+   end
+end
+
+-- A call that writes request data to a declared store: recorded on the state as
+-- a fact the pairing after the scan matches against store reads. Not a finding
+-- by itself: a value at rest runs nothing.
+local function check_store_write(node, item, state)
+   local path = callee_path(node[1], item, state, 0)
+   local write = path and platform_api.match_store_write(path)
+   if not write then return end
+   local args = args_of(node)
+   local store_table = literal_of(args[write.table or 1])
+   if not store_table then return end
+   local value_node = args[write.value or write.row]
+   if not value_node then return end
+
+   state.store_writes = state.store_writes or {}
+   local function record(key, sources)
+      local fact_key = key .. "|" .. node.line
+      if not state.store_writes[fact_key] then
+         state.store_writes[fact_key] = {key = key, line = node.line,
+            source = sources[1].id, channel = sources[1].channel}
+      end
+   end
+
+   if write.row then
+      -- A row is a table: record each field that carries request data by its own
+      -- literal column, so a writer of one column does not pair with readers of
+      -- the rest of the row. A field key already of the form `T.C` keeps its
+      -- column; a bare key is taken under this write's table. A row with no
+      -- resolvable literal fields falls back to the whole row (`T.*`).
+      local fields = table_fields_of(args[write.row], item, state)
+      local any = false
+      for field_key, field_taint in pairs(fields or {}) do
+         local live = live_only(field_taint)
+         if not set_is_empty(live) then
+            local column = field_key:find(".", 1, true) and field_key:match("[^.]+$") or field_key
+            record(store_table .. "." .. column, set_list(live))
+            any = true
+         end
+      end
+      if not any then
+         local live = live_only(taint_of_expr(value_node, item, state, 0))
+         if not set_is_empty(live) then record(store_table .. ".*", set_list(live)) end
+      end
+      return
+   end
+
+   local live = live_only(taint_of_expr(value_node, item, state, 0))
+   if set_is_empty(live) then return end
+   local column = write.column and literal_of(args[write.column]) or nil
+   record(store_table .. "." .. (column or "*"), set_list(live))
+end
+
+-- A call to a declared validator marks the taint of the value it checks as
+-- validated: a guard like `if is_ipv4(x) then run(x) end` does not transform x,
+-- so the mark rides on x's source descriptors and a sink reached by a validated
+-- value is reported one confidence step lower and names the guard, not dropped
+-- (its strength is left for a person or an AI agent to confirm). The mark is
+-- monotone, so the fixpoint walk is unaffected.
+local function check_validator(node, item, state)
+   local path = callee_path(node[1], item, state, 0)
+   local validator = path and platform_api.match_validator(path)
+   if not validator then return end
+   for _, arg in ipairs(args_of(node)) do
+      for _, descriptor in pairs(taint_of_expr(arg, item, state, 0)) do
+         descriptor.validated_by = path
+      end
+   end
+end
+
+-- Walk an expression and run shape + sink checks on every Call/Invoke node it
+-- contains, including calls nested inside arguments. A Function body is its
+-- own chstate line with its own items and is not walked from here: descending
+-- into one would re-check the same calls from outside their scope.
+local function check_calls_in(expr, item, state, chstate, opts, depth)
+   depth = depth or 0
+   if depth > 64 or type(expr) ~= "table" then return end
+   if expr.tag == "Function" then return end
+   if expr.tag == "Call" or expr.tag == "Invoke" then
+      check_validator(expr, item, state)
+      check_shape(expr, item, state, chstate, opts)
+      check_sink(expr, item, state, chstate, opts)
+      check_store_write(expr, item, state)
+      if expr.tag == "Call" and #expr >= 3 then
+         local path = callee_path(expr[1], item, state, 0)
+         if path == "table.insert" then
+            container_write(expr[2], expr[#expr], item, state)
+         end
+      end
+   end
+   for _, child in ipairs(expr) do
+      if type(child) == "table" then
+         check_calls_in(child, item, state, chstate, opts, depth + 1)
+      end
+   end
+end
+
+code_confidence = function(code)
+   local spec = codes.get(code)
+   return spec and spec.confidence or "medium"
+end
+
+snippet_at = function(chstate, node)
+   local source = chstate.source
+   if not source then return nil end
+   local from = math.max(1, node.offset)
+   local to = math.min(#source, node.end_offset)
+   if to <= from then return nil end
+   return (source:sub(from, to):gsub("%s+", " "))
+end
+-- ------------------------------------------------------------ driver
+
+-- Propagate taint through the whole file to a fixed point. Taint only ever
+-- grows, so the iteration is monotone and the iteration cap makes termination
+-- obvious rather than accidental.
+local function propagate(chstate, state, opts)
+   for _ = 1, MAX_ITERATIONS do
+      local changed = false
+      -- Cached return taint is only valid for the current value_taint snapshot:
+      -- taint only grows, so a cached answer computed before growth may be stale.
+      state.return_cache = {}
+      state.grew = false
+      state.stamp = state.stamp + 1
+
+      for _, line in ipairs(chstate.lines) do
+         -- A generic `for` is a Noop on the loop, an Eval per iterated
+         -- expression, then a Local with the loop names and no right-hand side.
+         -- These two maps join the Local back to what it iterates.
+         local forin_of, eval_of = {}, {}
+         for _, item in ipairs(line.items) do
+            local tag = item.tag
+            if tag == "Noop" and type(item.node) == "table" and item.node.tag == "Forin" then
+               forin_of[item.node[1]] = item.node
+            elseif tag == "Eval" and type(item.node) == "table" then
+               eval_of[item.node] = item
+            end
+
+            if tag == "Local" or tag == "Set" or tag == "OpSet" then
+               -- The loop names of `for k, v in ipairs(t)` hold what `t` holds:
+               -- an element read out of a tainted container is tainted, which is
+               -- the read half of the container model (container_write).
+               local forin = not item.rhs and forin_of[item.lhs]
+               if forin then
+                  local loop_taint = new_set()
+                  for _, expr in ipairs(forin[2] or {}) do
+                     set_union_into(loop_taint, taint_of_expr(expr, eval_of[expr] or item, state, 0))
+                  end
+                  if not set_is_empty(loop_taint) then
+                     for _, value in pairs(item.set_variables or {}) do
+                        local existing = state.value_taint[value]
+                        if not existing then
+                           existing = new_set()
+                           state.value_taint[value] = existing
+                        end
+                        if set_union_into(existing, loop_taint) then changed = true end
+                     end
+                  end
+               end
+
+               -- Check every RHS expression for calls and invokes used as
+               -- values (e.g. `local f = loadstring(x)`), so sinks are
+               -- found wherever their result is consumed.
+               for _, rhs_node in ipairs(item.rhs or {}) do
+                  check_calls_in(rhs_node, item, state, chstate, opts)
+               end
+
+               -- An assignment to a declared target (`ngx.header[k] = v`). This is checked
+               -- here rather than in the call pass above, which cannot see it: an
+               -- assignment has no callee, which is the whole reason this exists.
+               check_assignment_sink(item, state, chstate, opts)
+
+               -- Field writes (`M.cmd = x`) never appear in set_variables, because
+               -- only plain locals get a value object there.
+               for index, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[index]
+                  if lhs_node.tag == "Index" then
+                     record_table_write(lhs_node, written, item, state, 0)
+                     note_element_write(lhs_node, written, item, state)
+                  end
+               end
+
+               for _, value in pairs(item.set_variables or {}) do
+                  local value_taint = taint_of_expr(value.node, item, state, 0)
+
+                  if not set_is_empty(value_taint) then
+                     local existing = state.value_taint[value]
+                     if not existing then
+                        existing = new_set()
+                        state.value_taint[value] = existing
+                     end
+                     if set_union_into(existing, value_taint) then changed = true end
+                  end
+
+                  if value.node then
+                     record_table_write(value.node, nil, item, state, 0)
+                  end
+               end
+
+               -- Globals have no reaching-definition model, so track them by name.
+               for index, lhs_node in ipairs(item.lhs or {}) do
+                  if lhs_node.tag == "Id" and not lhs_node.var and item.rhs then
+                     local rhs_node = item.rhs[index]
+                     if rhs_node and rhs_node.tag == "Table" then
+                        state.global_tables[lhs_node[1]] = rhs_node
+                        record_table_write(rhs_node, nil, item, state, 0)
+                     end
+                     local value_taint = taint_of_expr(item.rhs[1], item, state, 0)
+                     if not set_is_empty(value_taint) then
+                        local existing = state.global_taint[lhs_node[1]]
+                        if not existing then
+                           existing = new_set()
+                           state.global_taint[lhs_node[1]] = existing
+                        end
+                        if set_union_into(existing, value_taint) then changed = true end
+                     end
+                  elseif lhs_node.tag == "Index" and lhs_node[1].tag == "Id"
+                        and not lhs_node[1].var and lhs_node[2] and lhs_node[2].tag == "String" then
+                     local path = lhs_node[1][1] .. "." .. lhs_node[2][1]
+                     local existing = state.global_taint[path]
+                     if not existing then
+                        existing = new_set()
+                        state.global_taint[path] = existing
+                     end
+                     if item.rhs
+                           and set_union_into(existing, taint_of_expr(item.rhs[1], item, state, 0)) then
+                        changed = true
+                     end
+                  end
+               end
+            elseif tag == "Eval" then
+               local node = item.node
+               check_calls_in(node, item, state, chstate, opts)
+               if node then
+                  record_table_write(node, nil, item, state, 0)
+               end
+            end
+         end
+      end
+
+      if not changed and not state.grew then
+         return
+      end
+   end
+end
+
+function taint.run(chstate, opts, existing_state)
+   opts = opts or {}
+   local state = existing_state or new_state()
+   state.declared_sources = {}
+   state.declared_confidence = opts.source_confidence or "high"
+   for _, name in ipairs(opts.sources or {}) do
+      state.declared_sources[name] = true
+   end
+   state.approx = chstate.resolved_locals == false
+   if existing_state then
+      state.approx = false
+   end
+
+   -- A function a profile declares as an entry point is called with request data:
+   -- its named arguments start tainted. Seeded once per state, because run() is
+   -- called again for the same state by the interprocedural pass.
+   if not state.entries_seeded then
+      state.entries_seeded = true
+      for _, line in ipairs(chstate.lines) do
+         local function_node = line.node
+         if function_node and function_node.tag == "Function" and type(function_node.name) == "string" then
+            local name = function_node.name
+            local entry = platform_api.match_entry_point(name, chstate.file_path)
+               or platform_api.match_entry_point(name:match("[^.:]+$") or name, chstate.file_path)
+            if entry then
+               local vars, vararg = taint.formals_of(function_node)
+               local positions = entry.arg or {1}
+               local every = positions == "*"
+               if every then
+                  -- Every parameter, and the vararg: a dispatcher whose arity is
+                  -- the request path does not have a fixed one.
+                  positions = {}
+                  for position = 1, #vars do positions[position] = position end
+               end
+               local function seed(var, label)
+                  local existing = state.param_taint[var] or {}
+                  state.param_taint[var] = existing
+                  set_add(existing, {
+                     channel = entry.channel,
+                     id = "entry:" .. name .. ":" .. label,
+                     name = label,
+                     line = function_node.line,
+                     confidence = entry.confidence or "medium",
+                  })
+               end
+               for _, position in ipairs(positions) do
+                  local var = vars[position]
+                  if var then
+                     seed(var, "entry-point argument " .. position .. " of " .. name)
+                  end
+               end
+               -- `function(...)` has no formal at position 1, so a position list
+               -- alone would leave it untainted however long it is.
+               if every and type(vararg) == "table" then
+                  seed(vararg, "entry-point vararg of " .. name)
+               end
+            end
+         end
+      end
+   end
+
+   -- Index each local function's return expressions once per chstate. run()
+   -- is called more than once with the same state (the interprocedural pass
+   -- re-runs propagation), so build this lazily and cache it on the state.
+   if not state.returns then
+      state.returns = {}
+      state.field_functions = {}
+      for _, line in ipairs(chstate.lines) do
+         if line.node and line.node.tag == "Function" then
+            local exprs = {}
+            for index, item in ipairs(line.items) do
+               if item.tag == "Noop" and type(item.node) == "table"
+                     and item.node.tag == "Return" then
+                  for next_index = index + 1, #line.items do
+                     local following = line.items[next_index]
+                     if following.tag ~= "Eval" then break end
+                     if type(following.node) == "table" then
+                        exprs[#exprs + 1] = {node = following.node, item = following}
+                     end
+                  end
+               end
+            end
+            state.returns[line.node] = exprs
+         end
+
+         -- Index a module field's function value, so a call through a field
+         -- access (M.id(...)) can follow the same local-function return taint
+         -- as a plain local call (id(...)). A var/key with two different
+         -- function definitions is ambiguous and recorded as false so it is
+         -- not followed.
+         for _, item in ipairs(line.items) do
+            if item.tag == "Set" or item.tag == "Local" then
+               for i = 1, #(item.lhs or {}) do
+                  local lhs_node = item.lhs[i]
+                  if lhs_node and lhs_node.tag == "Index"
+                        and lhs_node[1] and lhs_node[1].tag == "Id"
+                        and lhs_node[1].var
+                        and lhs_node[2] and lhs_node[2].tag == "String"
+                        and item.rhs then
+                     local rhs_node = item.rhs[i]
+                     if rhs_node and rhs_node.tag == "Function" then
+                        local per_var = state.field_functions[lhs_node[1].var]
+                        if not per_var then
+                           per_var = {}
+                           state.field_functions[lhs_node[1].var] = per_var
+                        end
+                        local key = lhs_node[2][1]
+                        if per_var[key] == nil then
+                           per_var[key] = rhs_node
+                        elseif per_var[key] ~= rhs_node then
+                           per_var[key] = false
+                        end
+                     end
+                  end
+               end
+            end
+         end
+      end
+   end
+
+   -- arg_binding: context-sensitive binding for the call currently being
+   -- evaluated by taint_of_call; a map from var -> taint set. nil when none.
+   state.arg_binding = state.arg_binding or {}
+   -- returning[fn] = true while we are mid-evaluation of fn's returns, so a
+   -- recursive call cannot descend into itself.
+   state.returning = state.returning or {}
+   -- return_cache: fn -> { [argkey] = taint_set }, memoising a function's
+   -- return taint for a given binding of its arguments. Cleared every
+   -- propagate iteration so cached answers cannot outlive value_taint growth.
+   state.return_cache = state.return_cache or {}
+
+   if state.approx then
+      -- One forward pass. No loops, no closures, no reaching definitions: enough
+      -- to follow a value from its assignment to a later use, and honest about
+      -- being approximate, which the caller reports as 904.
+      for _, line in ipairs(chstate.lines) do
+         for _, item in ipairs(line.items) do
+            if item.tag == "Local" or item.tag == "Set" or item.tag == "OpSet" then
+               for _, rhs_node in ipairs(item.rhs or {}) do
+                  check_calls_in(rhs_node, item, state, chstate, opts)
+               end
+               -- Approximate mode reports the same sinks the exact pass does,
+               -- less precisely. An assignment sink omitted here would make one
+               -- handler report 730 in a small file and stay silent in a large
+               -- one, for no reason a reader of the output could see.
+               check_assignment_sink(item, state, chstate, opts)
+               for index, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[index]
+                  if written and lhs_node.var then
+                     local set = new_set()
+                     set_union_into(set, taint_of_expr(written, item, state, 0))
+                     state.var_taint[lhs_node.var] = set
+                  end
+               end
+               for _, lhs_node in ipairs(item.lhs or {}) do
+                  local written = item.rhs and item.rhs[1]
+                  if lhs_node.tag == "Index" then
+                     record_table_write(lhs_node, written, item, state, 0)
+                  end
+               end
+            elseif item.tag == "Eval" then
+               local node = item.node
+               check_calls_in(node, item, state, chstate, opts)
+            end
+         end
+      end
+      return state.findings
+   end
+
+   propagate(chstate, state, opts)
+   return state.findings
+end
+
+-- Formal parameters of a function node. The vararg is a parameter like any
+-- other: resolve_locals gives its `...` node in the body the same var object the
+-- signature carries, so it is returned as a third value rather than as a
+-- boolean. `function(a, ...)` has two formals, and only the second is varargs.
+taint.formals_of = function(function_node)
+   local args = function_node[1] or {}
+   local vars, varargs = {}, false
+   for _, arg in ipairs(args) do
+      if arg.tag == "Dots" then
+         varargs = arg.var or true
+      elseif arg.var then
+         vars[#vars + 1] = arg.var
+      end
+   end
+   return vars, varargs
+end
+
+-- Arguments of a call expression, as nodes.
+taint.args_of = args_of
+taint.is_constant = const_eval.is_constant
+
+-- The line whose items are a function's body, or nil.
+-- One pass to find a function's line was O(lines) per call, and the
+-- interprocedural pass does it once per call site. Index once instead.
+local line_index_cache = {chstate = nil, by_node = nil}
+
+local function line_index(chstate)
+   if line_index_cache.chstate == chstate then return line_index_cache.by_node end
+   local by_node = {}
+   for _, line in ipairs(chstate.lines) do
+      if line.node and not by_node[line.node] then
+         by_node[line.node] = line
+      end
+   end
+   line_index_cache.chstate, line_index_cache.by_node = chstate, by_node
+   return by_node
+end
+
+taint.line_of_function = function(chstate, function_node)
+   return line_index(chstate)[function_node]
+end
+
+-- Value objects bound to a formal parameter at the function's entry item.
+taint.argument_values = function(item, var)
+   if not (item and item.used_values) then return {} end
+   return item.used_values[var] or {}
+end
+
+-- Exposed for the interprocedural pass, which reuses the same propagation.
+taint.new_state = new_state
+taint.of_expr = function(state, node, item) return live_only(taint_of_expr(node, item, state, 0)) end
+taint.return_taint = return_taint
+taint.callee_path = function(node, item, state) return callee_path(node, item, state, 0) end
+taint.add_value = function(state, value, set)
+   local existing = state.value_taint[value]
+   if not existing then
+      existing = new_set()
+      state.value_taint[value] = existing
+   end
+   return set_union_into(existing, set)
+end
+taint.set = taint
+
+return taint

@@ -15,9 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: version
-        name: The tag names the version in src/luasec/version.lua
+        name: The tag names the version in src/luadoctor/version.lua
         run: |
-          version=$(sed -n 's/^ *luasec = "\(.*\)",$/\1/p' src/luasec/version.lua)
+          version=$(sed -n 's/^ *luadoctor = "\(.*\)",$/\1/p' src/luadoctor/version.lua)
           test "v$version" = "$GITHUB_REF_NAME"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - run: make vendor
@@ -30,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "luasec $GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "lua-doctor $GITHUB_REF_NAME" --generate-notes
 
   luarocks:
     needs: release
@@ -47,13 +47,13 @@ jobs:
         if: env.LUAROCKS_API_KEY != ''
         run: |
           luarocks install dkjson
-          luarocks upload "luasec-scanner-${{ needs.release.outputs.version }}-1.rockspec" --api-key "$LUAROCKS_API_KEY"
+          luarocks upload "lua-doctor-${{ needs.release.outputs.version }}-1.rockspec" --api-key "$LUAROCKS_API_KEY"
       - if: env.LUAROCKS_API_KEY == ''
         run: echo "::notice::LUAROCKS_API_KEY is not set; skipped publishing to LuaRocks"
 
   npm:
     # Trusted publishing: npm checks this workflow's OIDC identity against the
-    # publisher configured on the package (Vaibhav91one/luasec, release.yml), so
+    # publisher configured on the package (doctor-labs/lua-doctor, release.yml), so
     # no npm token is stored anywhere. Needs npm 11.5.1 or later.
     needs: release
     runs-on: ubuntu-latest
@@ -83,15 +83,15 @@ jobs:
       - name: Update the tap
         if: env.TAP_TOKEN != ''
         run: |
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/Vaibhav91one/homebrew-luasec.git" tap
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/doctor-labs/homebrew-lua-doctor.git" tap
           mkdir -p tap/Formula
           sed -e "s/@VERSION@/${{ needs.release.outputs.version }}/g" \
-              -e "s/@SHA256@/${{ needs.release.outputs.sha256 }}/g" packaging/homebrew/luasec.rb > tap/Formula/luasec.rb
+              -e "s/@SHA256@/${{ needs.release.outputs.sha256 }}/g" packaging/homebrew/lua-doctor.rb > tap/Formula/lua-doctor.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/luasec.rb
-          git commit -m "luasec ${{ needs.release.outputs.version }}"
+          git add Formula/lua-doctor.rb
+          git commit -m "lua-doctor ${{ needs.release.outputs.version }}"
           git push
       - if: env.TAP_TOKEN == ''
         run: echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipped updating the Homebrew tap"

@@ -1,4 +1,4 @@
-# luasec - RCE checker / security analyzer for Lua in embedded firmware.
+# lua-doctor - RCE checker / security analyzer for Lua in embedded firmware.
 #
 # No luarocks, no C dependencies beyond a locally built Lua. See AGENTS.md.
 
@@ -30,7 +30,7 @@ help:
 	@echo "  make precision re-measure corpus/ and fail on any difference from the frozen numbers"
 	@echo "  make corpus     clone firmware Lua corpora into corpus/ (network)"
 	@echo "  make lua55-check  compile every src/ file under Lua 5.5 (skips without one)"
-	@echo "  make selfscan   scan src/ with luasec itself"
+	@echo "  make selfscan   scan src/ with lua-doctor itself"
 	@echo "  make self-lint  lint src/ with the vendored luacheck"
 	@echo "  make self-lint-bless   re-take test/self-lint-baseline.txt after a deliberate change"
 	@echo "  make clean      remove build artifacts"
@@ -149,9 +149,9 @@ PRECISION_REQUIRE_CORPUS ?= 0
 .PHONY: precision
 precision: lua vendor
 	@if [ ! -d corpus ]; then \
-	   echo "precision: SKIPPED - corpus/ is absent, so luasec was NOT run over the firmware corpora"; \
+	   echo "precision: SKIPPED - corpus/ is absent, so lua-doctor was NOT run over the firmware corpora"; \
 	   echo "precision: SKIPPED - the measurement was NOT taken. This is not a pass: it is not evidence"; \
-	   echo "precision: SKIPPED - that luasec still finds what docs/precision.md claims. Run: make corpus && make precision"; \
+	   echo "precision: SKIPPED - that lua-doctor still finds what docs/precision.md claims. Run: make corpus && make precision"; \
 	   if [ "$(PRECISION_REQUIRE_CORPUS)" = "1" ]; then \
 	     echo "precision: FAIL - PRECISION_REQUIRE_CORPUS=1 and corpus/ is absent"; exit 1; \
 	   fi; \
@@ -163,16 +163,16 @@ precision: lua vendor
 	       echo "precision: FAIL - so the run below would describe a different corpus than"; \
 	       echo "precision: FAIL - the frozen numbers, and it is not a measurement of either"; \
 	       exit 1; }; \
-	echo ">> luasec over corpus/ (this is the measurement)"; \
-	./bin/luasec --std +openwrt+luci+luajit --format json -o $(PRECISION_REPORT) corpus; \
+	echo ">> lua-doctor over corpus/ (this is the measurement)"; \
+	./bin/lua-doctor --std +openwrt+luci+luajit --format json -o $(PRECISION_REPORT) corpus; \
 	status=$$?; \
 	if [ $$status -gt 1 ]; then \
-	   echo "precision: FAIL - luasec exited $$status, which is an error rather than findings,"; \
+	   echo "precision: FAIL - lua-doctor exited $$status, which is an error rather than findings,"; \
 	   echo "precision: FAIL - so $(PRECISION_REPORT) is not a measurement and will not be compared"; \
 	   exit 1; \
 	fi; \
 	if [ $$status -eq 1 ]; then \
-	   echo ">> luasec exited 1: findings at or above the threshold, and files it could not"; \
+	   echo ">> lua-doctor exited 1: findings at or above the threshold, and files it could not"; \
 	   echo ">> parse. Both are expected over this corpus, and the report is written either way."; \
 	fi; \
 	$(LUA_RUN) scripts/precision-check.lua --corpus corpus --report $(PRECISION_REPORT)
@@ -250,11 +250,11 @@ lua55-check:
 
 .PHONY: selfscan
 selfscan: lua vendor
-	@./bin/luasec --format json -o /dev/null src/ && echo "selfscan: ok"
+	@./bin/lua-doctor --format json -o /dev/null src/ && echo "selfscan: ok"
 
 # Lint src/ with the luacheck that already ships in vendor/. `make selfscan`
-# above runs luasec over its own source and cannot see a global assignment -
-# luasec has no rule for that class - so a function that lost its `local`
+# above runs lua-doctor over its own source and cannot see a global assignment -
+# lua-doctor has no rule for that class - so a function that lost its `local`
 # compiled, worked and shipped as a global through a fully green build (#277).
 #
 # The comparison is against a frozen list rather than against zero, because src/
@@ -262,7 +262,7 @@ selfscan: lua vendor
 # that list fails the run, so this is a ratchet and not a rubber stamp. The two
 # halves are checked independently as well - test/spec/module_globals_spec.lua
 # asserts the same thing without reading a lint's configuration, and the lint
-# reads code the spec does not load (src/luasec/validate/child.lua is a
+# reads code the spec does not load (src/luadoctor/validate/child.lua is a
 # concatenated sandbox script, not a module).
 SELF_LINT_BASELINE ?= test/self-lint-baseline.txt
 SELF_LINT_DIR      ?= src

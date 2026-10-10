@@ -1,12 +1,12 @@
 # doctor/1 output contract
 
-Shared machine-output contract for the doctor tools: luasec, pcap-doctor, android-doctor,
+Shared machine-output contract for the doctor tools: lua-doctor, pcap-doctor, android-doctor,
 sim-doctor, ble-doctor. This file is identical in every repo (`docs/doctor-contract.md`).
 Change it in all five repos at once or not at all.
 
 ## Scope
 
-Applies to every command that produces **findings** (luasec scan, `pcap-doctor analyze`,
+Applies to every command that produces **findings** (lua-doctor scan, `pcap-doctor analyze`,
 `android-doctor audit` / `doctor scan`, `sim-doctor scan`, `ble-doctor scan` / `analyze`).
 Other commands (identify, extract, rules list, lpa-style commands, ...) may keep their own JSON.
 

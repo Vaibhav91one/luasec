@@ -37,7 +37,7 @@ end
 -- stdout. harness.cli joins the two streams, which is right for most assertions
 -- and wrong for this one.
 local function stdout_only(args)
-   local cmd = "./bin/luasec"
+   local cmd = "./bin/lua-doctor"
    for _, a in ipairs(args) do cmd = cmd .. " " .. string.format("%q", a) end
    local pipe = assert(io.popen(cmd .. " 2>/dev/null"))
    local out = pipe:read("*a")
@@ -105,7 +105,7 @@ describe("--only", function()
    it("says out loud when it selects nothing, and still exits 0", function()
       -- An empty selection cannot be an error: `--only 709` on a file with no 709
       -- is a legitimate thing to ask for, so making it one would make --only
-      -- unusable. The trade-off is the test: silence from luasec means "looked
+      -- unusable. The trade-off is the test: silence from lua-doctor means "looked
       -- at it and found nothing", and this has to distinguish that from "the
       -- pattern you meant matched nothing".
       local out, code = harness.cli({"--only", "709", "test/fixtures/clean/report.lua"})
@@ -253,10 +253,10 @@ describe("a suppression region and ground we did not cover", function()
       -- A push/pop region in the file we can read. Its findings are of a code
       -- --only drops, so the only thing left in the report is the coverage gap.
       write_file(dir .. "/pushpop.lua", table.concat({
-         "-- luasec: push",
-         "-- luasec: ignore 701",
+         "-- lua-doctor: push",
+         "-- lua-doctor: ignore 701",
          "os.execute(cmd)",
-         "-- luasec: pop",
+         "-- lua-doctor: pop",
          "os.execute(cmd)",
          "",
       }, "\n"))

@@ -3,7 +3,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match =
    harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Fixtures are read from disk and analyzed as source, so the file a vendor
 -- would hand us is the file the spec reasons about.

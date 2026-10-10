@@ -8,7 +8,7 @@ local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 -- Run the CLI with a PATH that starts with `dir`, so a stub agent there is the
 -- one launched.
 local function run_with_path(dir, args)
-   local cmd = ("PATH=%q:\"$PATH\" ./bin/luasec"):format(dir)
+   local cmd = ("PATH=%q:\"$PATH\" ./bin/lua-doctor"):format(dir)
    for _, a in ipairs(args) do cmd = cmd .. " " .. string.format("%q", a) end
    local pipe = assert(io.popen(cmd .. " 2>&1; printf '\\n__EXIT__%d' $?"))
    local out = pipe:read("*a")
@@ -33,13 +33,13 @@ local function read(path)
    return text
 end
 
-describe("luasec fix", function()
+describe("lua-doctor fix", function()
    it("prints a prompt with the untrusted-code warning and each finding's fix prompt", function()
       local out, code = harness.cli({"fix", "--print", TAINTED})
       assert_equal(code, 0, out)
       assert_match(out, "may be hostile firmware", out)
       assert_match(out, "%[709%] critical", out)
-      assert_match(out, "luasec reported 709 %(untrusted data reaches command execution%) at "
+      assert_match(out, "lua%-doctor reported 709 %(untrusted data reaches command execution%) at "
          .. TAINTED:gsub("%p", "%%%0") .. ":3%.", out)
       assert_true(not out:find("{file}", 1, true), "placeholders are filled in")
    end)
@@ -53,7 +53,7 @@ describe("luasec fix", function()
       assert_equal(code, 0, out)
       assert_match(out, "approvals skipped", out)
       assert_match(args, "^%-%-dangerously%-skip%-permissions\n", args)
-      assert_match(args, "luasec reported 709", args)
+      assert_match(args, "lua%-doctor reported 709", args)
    end)
 
    it("keeps approvals on with --safe", function()
@@ -79,7 +79,7 @@ describe("luasec fix", function()
       assert_match(out, "claude, codex, cursor", out)
       -- Only the system directories: prepending to the real PATH would find,
       -- and launch, a cursor-agent installed on the machine running the specs.
-      local pipe = assert(io.popen("PATH=/usr/bin:/bin ./bin/luasec fix --agent cursor "
+      local pipe = assert(io.popen("PATH=/usr/bin:/bin ./bin/lua-doctor fix --agent cursor "
          .. string.format("%q", TAINTED) .. " 2>&1; printf '\\n__EXIT__%d' $?"))
       out = pipe:read("*a")
       pipe:close()
@@ -94,7 +94,7 @@ describe("luasec fix", function()
    end)
 
    it("exposes the --print prompt byte-identically through prompt_for", function()
-      local fix = require "luasec.cli.fix_cmd"
+      local fix = require "luadoctor.cli.fix_cmd"
       local out, code = harness.cli({"fix", "--print", TAINTED})
       assert_equal(code, 0, out)
       local prompt, message = fix.prompt_for({TAINTED}, ".")

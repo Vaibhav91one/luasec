@@ -26,7 +26,7 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local scratch_dir = harness.scratch_dir
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Every 747 in a report, in report order.
 local function with_code(report, code)
@@ -48,7 +48,7 @@ local function drop(dir)
 end
 
 -- The repository root, for the specs below that need a path a symlink or a
--- subprocess can be built from. `harness.cli` runs `./bin/luasec`, which stops
+-- subprocess can be built from. `harness.cli` runs `./bin/lua-doctor`, which stops
 -- resolving the moment the command changes directory first.
 local function repo_root()
    local pipe = assert(io.popen("pwd"))
@@ -69,22 +69,22 @@ end
 
 --- Run the CLI from `dir` over a RELATIVE path, with `$PWD` naming nothing.
 --
--- `bin/luasec` cannot be used to do this. Its `#!/bin/sh` sets `PWD` to the real
+-- `bin/lua-doctor` cannot be used to do this. Its `#!/bin/sh` sets `PWD` to the real
 -- working directory at startup, as every POSIX shell does, so a doctored value
 -- handed to it has been overwritten before any Lua runs - which is why this
--- repeats the two lines `bin/luasec` execs rather than calling it. It is the
+-- repeats the two lines `bin/lua-doctor` execs rather than calling it. It is the
 -- documented CLI entry point either way; what changes is only that the
 -- interpreter is reached without a shell in between.
 local function cli_with_unreadable_pwd(dir, args)
    local root = repo_root()
    local interpreter = root .. "/build/lua-5.4.9/src/lua"
    local report = dir .. "/report.json"
-   local command = ("cd %s && PWD=/nonexistent-luasec-pwd exec %s -e %s %s %s > %s 2>&1")
+   local command = ("cd %s && PWD=/nonexistent-lua-doctor-pwd exec %s -e %s %s %s > %s 2>&1")
       :format(string.format("%q", dir), string.format("%q", interpreter),
               string.format("%q", "package.path='" .. root
                  .. "/src/?.lua;" .. root .. "/src/?/init.lua;"
                  .. root .. "/vendor/?.lua;" .. root .. "/vendor/?/init.lua;'..package.path"),
-              string.format("%q", root .. "/src/luasec/main.lua"),
+              string.format("%q", root .. "/src/luadoctor/main.lua"),
               table.concat(args, " "), string.format("%q", report))
    os.execute(command)
    return severity_in_json(report)
@@ -105,7 +105,7 @@ end
 
 -- A source tree, which is NOT `harness.scratch_dir`.
 --
--- That helper hands out `$TMPDIR/luasec_...`, which on macOS is under
+-- That helper hands out `$TMPDIR/lua_doctor_...`, which on macOS is under
 -- `/var/folders/<a>/<b>/T/` - the very directory the rule under test excludes.
 -- Building the tree in the repository's own (gitignored) build directory keeps
 -- it on the other side of that distinction, which is the whole of what these
@@ -344,7 +344,7 @@ describe("a credential in a test file", function()
          local out = harness.cli({"--format", "json", path},
             env and {env = "TMPDIR=" .. string.format("%q", dir)} or nil)
          local findings = out:match('"id"%s*:%s*"747".-"severity"%s*:%s*"(%a+)"')
-         assert_true(findings ~= nil, "luasec reported no 747 at all for " .. path)
+         assert_true(findings ~= nil, "lua-doctor reported no 747 at all for " .. path)
          return findings
       end
 
@@ -461,7 +461,7 @@ describe("the anonymous-FTP login identity", function()
 
    it("is recognised by its shape, so no address the client picks is missed", function()
       -- Every FTP client that has ever been written picks a different one, and
-      -- a table inside luasec would have to be given every one of them. The
+      -- a table inside lua-doctor would have to be given every one of them. The
       -- shape is what the convention is: an identity the server logs, sent in
       -- place of a password somebody chose.
       for _, value in ipairs{"anonymous@", "anonymous@anonymous.org", "ftp@ftp.acme-internal.net"} do
@@ -494,7 +494,7 @@ describe("the anonymous-FTP login identity", function()
       -- absent.
       --
       -- `admin@example.com` is NOT here for that reason. It carries `example`,
-      -- and `looks_like_secret` (`src/luasec/rules/secrets.lua`) runs its
+      -- and `looks_like_secret` (`src/luadoctor/rules/secrets.lua`) runs its
       -- `placeholders` table over the lowered value and returns false before
       -- `severity_for` is ever reached - so that literal produces no 747 at
       -- all, before this rule or after it, and asserting over it asserts

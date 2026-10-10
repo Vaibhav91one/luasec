@@ -2,14 +2,14 @@
 -- (persistence) and 750 (signature pack).
 --
 -- These four codes were added in one change, so their specs live in one file.
--- Every test uses a public seam only: `luasec.api.analyze` on a fixture, or
--- `luasec.api.check_source` on a source string built by the test.
+-- Every test uses a public seam only: `luadoctor.api.analyze` on a fixture, or
+-- `luadoctor.api.check_source` on a source string built by the test.
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local assert_nil = harness.assert_nil
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Every finding carrying one code, in report order.
 local function with_code(report, code)
@@ -294,8 +294,8 @@ describe("persistence installed by the script", function()
 end)
 
 describe("the signature pack", function()
-   local PACK_PATH = "src/luasec/registry/stds/signatures.lua"
-   local YARA_PATH = "yara/luasec_signatures.yar"
+   local PACK_PATH = "src/luadoctor/registry/stds/signatures.lua"
+   local YARA_PATH = "yara/lua_doctor_signatures.yar"
 
    -- The pack as the analyzer loads it. A data file is loaded by running it,
    -- which is the same thing the analyzer does with `require`, and the same
@@ -355,7 +355,7 @@ describe("the signature pack", function()
 
    it("loads through the public rules seam an operator uses", function()
       local ok = api.validate_options({rules = {PACK_PATH}})
-      assert_true(ok, "luasec must accept the pack file as a data file it can load")
+      assert_true(ok, "lua-doctor must accept the pack file as a data file it can load")
    end)
 
    it("carries a version, and one id, description and pattern per signature", function()
@@ -417,7 +417,7 @@ describe("the signature pack", function()
       table.sort(pack_alternatives)
       assert_equal(table.concat(yara_alternatives, ","), table.concat(pack_alternatives, ","),
          "the yara ruleset and the Lua pack must match the same text; " ..
-         "yara/luasec_signatures.yar has drifted from " .. PACK_PATH)
+         "yara/lua_doctor_signatures.yar has drifted from " .. PACK_PATH)
       assert_equal(count_keys(yara_ids), count_keys(pack_ids),
          "the yara ruleset and the Lua pack must hold the same number of signatures")
       for id in pairs(pack_ids) do

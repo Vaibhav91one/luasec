@@ -8,7 +8,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal = harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function nine_oh_nine(report)
    for _, finding in ipairs(report) do

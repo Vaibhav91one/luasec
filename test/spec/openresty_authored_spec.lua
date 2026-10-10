@@ -4,7 +4,7 @@
 -- typical request handlers, each carrying the author's intent on its first line (`-- expect: 730`, or
 -- `-- expect: none` for a handler that is safe).
 --
--- WHAT THIS MEASURES: whether luasec reports what the author meant to be reported, on handlers the
+-- WHAT THIS MEASURES: whether lua-doctor reports what the author meant to be reported, on handlers the
 -- author chose. WHAT IT DOES NOT: real-world recall or precision. The author wrote both the handlers
 -- and the intent, so it can only show that a known idiom is, or is not, handled; it cannot show the
 -- rate at which real deployments differ from the author's imagination. docs/precision.md says the same.
@@ -12,7 +12,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local CONF = "test/fixtures/openresty-authored/nginx.conf"
 
@@ -71,7 +71,7 @@ local function codes_only(reported_text)
    return #out == 0 and "none" or table.concat(out, ",")
 end
 
--- What luasec reports today for each handler, pinned. A change here is a change in behaviour on a
+-- What lua-doctor reports today for each handler, pinned. A change here is a change in behaviour on a
 -- handler somebody wrote on purpose, so it has to be made on purpose.
 local PINNED = {
    ["/healthz"] = "", ["/go"] = "730/certain", ["/next"] = "", ["/handoff"] = "709/medium",
@@ -80,14 +80,14 @@ local PINNED = {
    ["/kill"] = "701/low", ["/dns"] = "709/certain", ["/run"] = "709/high", ["/find"] = "728/high",
 }
 
--- Every handler where what luasec reports differs from the author's intent, and why. A mismatch that
+-- Every handler where what lua-doctor reports differs from the author's intent, and why. A mismatch that
 -- is not listed here fails the spec, so a gap cannot be added by accident or hidden by a pin.
 local GAPS = {
    ["/proxy"] = "missed: the registry models only the OPTIONS table of ngx.location.capture " ..
       "(CVE-2020-11724 request framing, argument 2); a tainted subrequest URI in argument 1 is " ..
       "deliberately not a sink (openresty.lua: arg = {2})",
    ["/ping-checked"] = "false positive: the host is validated with string.match before os.execute; " ..
-      "luasec has no notion of a validating guard, so the flow is reported at 709/medium",
+      "lua-doctor has no notion of a validating guard, so the flow is reported at 709/medium",
    ["/kill"] = "false positive at low confidence: tonumber + %d makes the value safe, but a non-constant " ..
       "argument to os.execute is still a 701 shape finding (low)",
 }
@@ -103,11 +103,11 @@ describe("an authored OpenResty nginx.conf (#296)", function()
          "a brace inside a Lua string closed the block early")
    end)
 
-   it("pins what luasec reports for every handler", function()
+   it("pins what lua-doctor reports for every handler", function()
       for _, block in ipairs(blocks) do
          assert_true(PINNED[block.name] ~= nil, block.name .. " has no pinned result")
          assert_equal(reported(block.body), PINNED[block.name],
-            block.name .. ": what luasec reports changed")
+            block.name .. ": what lua-doctor reports changed")
       end
    end)
 

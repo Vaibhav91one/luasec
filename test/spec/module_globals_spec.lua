@@ -2,10 +2,10 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
--- Loading luasec's modules must not add anything to _G.
+-- Loading lua-doctor's modules must not add anything to _G.
 --
 -- A global that a module defines on load is invisible everywhere: `make
--- selfscan` runs luasec over src/ and luasec has no rule for it, so the function
+-- selfscan` runs lua-doctor over src/ and lua-doctor has no rule for it, so the function
 -- works, the build is green, and the leak ships. That is how `callee_path`
 -- reached a release as a global (#277).
 --
@@ -38,7 +38,7 @@ end
 
 package.path = "./src/?.lua;./src/?/init.lua;./vendor/?.lua;./vendor/?/init.lua;" .. package.path
 
-local files = lua_files("src/luasec", {})
+local files = lua_files("src/luadoctor", {})
 table.sort(files)
 
 local before = {}
@@ -46,9 +46,9 @@ for name in pairs(_G) do before[name] = true end
 
 local failed, skipped, loaded = {}, {}, 0
 for _, path in ipairs(files) do
-   -- src/luasec/foo/bar.lua is require "luasec.foo.bar".
+   -- src/luadoctor/foo/bar.lua is require "lua-doctor.foo.bar".
    local module_name = path:gsub("^src/", ""):gsub("%.lua$", ""):gsub("/init$", ""):gsub("/", ".")
-   if module_name == "luasec.main" then
+   if module_name == "luadoctor.main" then
       -- The CLI entry point ends in `os.exit(run(arg))`, so requiring it parses
       -- a command line and leaves the process. It is the one file under src/
       -- that is not a module, and it is the one file this check cannot load.
@@ -75,7 +75,7 @@ io.write("modules ", loaded, "\n")
 for _, name in ipairs(gained) do io.write("global ", name, "\n") end
 ]==]
 
--- Globals luasec's modules add to _G today. This is a ratchet, not an
+-- Globals lua-doctor's modules add to _G today. This is a ratchet, not an
 -- endorsement: every entry below is a real leak, and none of them was caught
 -- before #277 added this spec.
 --
@@ -88,8 +88,8 @@ for _, name in ipairs(gained) do io.write("global ", name, "\n") end
 -- Remove the `local` and delete the line. Do not add to this list: the next one
 -- is the bug this spec exists for.
 local EXPECTED = {
-   ["__luasec_emit"] = "validate/child.lua: the driver and the sandbox child are one concatenated program",
-   ["__luasec_sandbox"] = "validate/child.lua: the driver and the sandbox child are one concatenated program",
+   ["__luadoctor_emit"] = "validate/child.lua: the driver and the sandbox child are one concatenated program",
+   ["__luadoctor_sandbox"] = "validate/child.lua: the driver and the sandbox child are one concatenated program",
    ["line_len_available"] = "engine/parse_context.lua: missing `local` on the function at line 178",
    ["read_attribute"] = "rules/rawscan.lua: missing `local` on the function at line 542",
    ["read_require_module"] = "rules/rawscan.lua: missing `local` on the function at line 556",
@@ -120,10 +120,10 @@ local function run_probe()
 end
 
 describe("module load", function()
-   it("loads every luasec module, so a walk that finds nothing cannot pass", function()
+   it("loads every lua-doctor module, so a walk that finds nothing cannot pass", function()
       local modules = run_probe()
       assert_true(modules > 1,
-         ("expected the probe to load luasec's modules, it loaded %d"):format(modules))
+         ("expected the probe to load lua-doctor's modules, it loaded %d"):format(modules))
    end)
 
    it("defines no global", function()

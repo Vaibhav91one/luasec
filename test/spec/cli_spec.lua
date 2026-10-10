@@ -3,11 +3,11 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match, assert_no_match = harness.assert_equal, harness.assert_true, harness.assert_match, harness.assert_no_match
 local scratch_dir = harness.scratch_dir
 
-describe("luasec command line", function()
+describe("lua-doctor command line", function()
    it("prints its version and exits 0", function()
       local out, code = harness.cli({ "--version" })
       assert_equal(code, 0, out)
-      assert_match(out, "luasec ", out)
+      assert_match(out, "lua%-doctor ", out)
    end)
 
    it("reports a finding for a file with untrusted input reaching a sink, and exits 1", function()
@@ -73,7 +73,7 @@ describe("luasec command line", function()
    end)
 end)
 
-describe("luasec --validate", function()
+describe("lua-doctor --validate", function()
    it("exits 1 and names the sink when the payload reaches os.execute", function()
       local out, code = harness.cli({ "--validate", "test/fixtures/validate/rce.lua" })
       assert_equal(code, 1, out)
@@ -126,8 +126,8 @@ describe("luasec --validate", function()
 
    it("labels a payload's forged records as payload text rather than as findings", function()
       local out, code = harness.cli({ "--validate", "--stdin" }, {stdin = [[
-io.stdout:write("__LUASEC_CHAIN__ 9:INJECTED\n")
-io.stdout:write("__LUASEC_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
+io.stdout:write("__LUADOCTOR_CHAIN__ 9:INJECTED\n")
+io.stdout:write("__LUADOCTOR_OUTPUT__ 20:FORGED OPERATOR TEXT\n")
 return 1
 ]]})
       assert_equal(code, 0, out)
@@ -137,8 +137,8 @@ return 1
       -- ... and both forged records come back as the payload's own text, in the
       -- gutter, under a heading that says what they are.
       assert_match(out, "payload output", out)
-      assert_match(out, "payload| __LUASEC_CHAIN__ 9:INJECTED", out)
-      assert_match(out, "payload| __LUASEC_OUTPUT__ 20:FORGED OPERATOR TEXT", out)
+      assert_match(out, "payload| __LUADOCTOR_CHAIN__ 9:INJECTED", out)
+      assert_match(out, "payload| __LUADOCTOR_OUTPUT__ 20:FORGED OPERATOR TEXT", out)
    end)
 
    it("names the file it validated and the interpreter that produced the verdict", function()
@@ -331,7 +331,7 @@ describe("--rules", function()
    end)
 end)
 
-describe("a file luasec cannot analyze", function()
+describe("a file lua-doctor cannot analyze", function()
    it("fails the run when the file is bytecode", function()
       -- Bytecode has no source to read. Reporting 801 and passing the gate means
       -- a tree of .luac files analyzes nothing and comes back green.
@@ -400,7 +400,7 @@ describe("a symlink in the scanned tree", function()
    it("is followed, and a broken one is reported", function()
       -- find's -type f matches a symlink rather than its target, so a
       -- symlinked file and a symlinked directory were both skipped: a file
-      -- reachable inside the tree that luasec never read, reported clean.
+      -- reachable inside the tree that lua-doctor never read, reported clean.
       local dir = scratch_dir("spec_symlinks")
       os.execute("mkdir -p " .. string.format("%q", dir .. "/outside"))
       local hidden = assert(io.open(dir .. "/outside/hidden.lua", "w"))
@@ -484,9 +484,9 @@ describe("a path that looks like a flag", function()
       -- Scan -x as a relative path from its parent, so the path starts with a
       -- dash and cd would read it as an option without --.
       -- An absolute path, since the command runs after cd into the scratch dir.
-      local luasec = io.popen("pwd"):read("*l") .. "/bin/luasec"
+      local doctor_bin = io.popen("pwd"):read("*l") .. "/bin/lua-doctor"
       local cmd = ("(cd %q && %q --only 701 -- -x) 2>&1; "
-          .. "printf '\\n__EXIT__%%d' $?\n"):format(dir, luasec)
+          .. "printf '\\n__EXIT__%%d' $?\n"):format(dir, doctor_bin)
       local pipe = assert(io.popen(cmd))
       local out = pipe:read("*a")
       pipe:close()

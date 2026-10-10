@@ -5,8 +5,8 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
-local api = require "luasec.api"
-local profiles = require "luasec.registry.profiles"
+local api = require "luadoctor.api"
+local profiles = require "luadoctor.registry.profiles"
 
 local function codes(report)
    local out = {}
@@ -120,7 +120,7 @@ describe("store hop (729)", function()
    end)
 
    it("pairs across --jobs workers", function()
-      local pipe = assert(io.popen("./bin/luasec --no-progress --std cgilua --jobs 2 --format json "
+      local pipe = assert(io.popen("./bin/lua-doctor --no-progress --std cgilua --jobs 2 --format json "
          .. "test/fixtures/store_hop/writer.lua test/fixtures/store_hop/reader.lua 2>/dev/null"))
       local out = pipe:read("*a")
       pipe:close()

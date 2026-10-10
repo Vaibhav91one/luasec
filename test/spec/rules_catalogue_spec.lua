@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_true, assert_equal = harness.assert_true, harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 describe("rule catalogue", function()
    it("documents every registered code in docs/rules.md", function()

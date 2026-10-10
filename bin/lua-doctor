@@ -1,0 +1,16 @@
+#!/bin/sh
+# lua-doctor entry point. Prefers the locally built Lua, falls back to whatever
+# `lua` is on PATH (must be 5.3+).
+set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -x "$here/build/lua-5.4.9/src/lua" ]; then
+  lua="$here/build/lua-5.4.9/src/lua"
+else
+  lua="${LUA:-lua}"
+fi
+# The payload validator runs the payload in a child interpreter, and it has to be
+# the same one running us or a verdict would describe a different Lua.
+LUA_DOCTOR_LUA="$lua"
+export LUA_DOCTOR_LUA
+exec "$lua" -e "package.path='$here/src/?.lua;$here/src/?/init.lua;$here/vendor/?.lua;$here/vendor/?/init.lua;'..package.path" \
+  "$here/src/luadoctor/main.lua" "$@"

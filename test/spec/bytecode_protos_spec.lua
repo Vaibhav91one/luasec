@@ -1,4 +1,4 @@
--- Prototype walk. luasec.bytecode.protos is not a public seam, so these specs
+-- Prototype walk. luadoctor.bytecode.protos is not a public seam, so these specs
 -- go through what the walk is for: the sink names that reach the report. The
 -- layouts themselves are pinned by the bytecode header spec and by the
 -- fixtures, which are real luac output for 5.1 to 5.4.
@@ -6,7 +6,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- Compile with the repo's luac into a temp path, analyze it, return the codes.
 local function analyze_chunk(source_text, name)

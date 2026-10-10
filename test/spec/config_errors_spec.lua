@@ -2,7 +2,7 @@
 -- must not depend on which function they happened to call:
 --
 --   api.validate_options  returns nil plus a message
---   the entry points      raise the {luasec_config_error = true} object
+--   the entry points      raise the {lua_doctor_config_error = true} object
 --
 -- A Lua traceback is neither of those. It is what `profiles.split` raised when
 -- `std` arrived as a table, and a library caller cannot tell a typo in its own
@@ -14,7 +14,7 @@ local assert_equal, assert_true, assert_false, assert_nil =
    harness.assert_equal, harness.assert_true, harness.assert_false, harness.assert_nil
 local assert_match = harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- The options table `api` is handed, refused the way a library caller refuses it:
 -- no raising, a message, and nothing installed. `validate_options` and
@@ -35,7 +35,7 @@ local function rejected_by_entry(fn, ...)
    assert_false(ok, "expected a configuration error, got a clean return")
    assert_equal(type(err), "table",
       "expected the config-error object, got a Lua traceback: " .. tostring(err))
-   assert_true(err.luasec_config_error, "the raised error must be marked as a config error")
+   assert_true(err.lua_doctor_config_error, "the raised error must be marked as a config error")
    assert_equal(type(err.message), "string", "the raised error must carry a message")
    return err.message
 end
@@ -106,7 +106,7 @@ describe("configuration errors", function()
    it("still accepts a configuration that is entirely well formed", function()
       local ok, message = api.validate_options({
          std = "+openwrt+luci",
-         rules = {"src/luasec/registry/stds/openwrt.lua"},
+         rules = {"src/luadoctor/registry/stds/openwrt.lua"},
          only = {"709", "rce"},
          ignore = {"012"},
          sources = {"uci.get"},
@@ -248,7 +248,7 @@ describe("a source declared through the options table", function()
       -- a declaration, so `entry.pattern` was nil and this raised out of
       -- check_source. Nothing caught it because nothing in the suite declared a
       -- source this way, so the whole declaration path was untested.
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local ok, report = pcall(api.check_source, [[
 local function run(host)
    os.execute(vendor.get(host))

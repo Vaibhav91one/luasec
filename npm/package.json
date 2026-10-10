@@ -1,13 +1,13 @@
 {
-  "name": "luasec",
+  "name": "lua-doctor",
   "version": "0.6.0",
-  "description": "Static security scanner for Lua in embedded firmware: finds remote code execution. Runs luasec without installing Lua tooling.",
-  "bin": { "luasec": "bin/luasec.js" },
-  "files": ["bin/luasec.js", "README.md"],
+  "description": "Static security scanner for Lua in embedded firmware: finds remote code execution. Runs lua-doctor without installing Lua tooling.",
+  "bin": { "lua-doctor": "bin/lua-doctor.js" },
+  "files": ["bin/lua-doctor.js", "README.md"],
   "engines": { "node": ">=18" },
   "os": ["darwin", "linux"],
-  "repository": { "type": "git", "url": "git+https://github.com/Vaibhav91one/luasec.git" },
-  "homepage": "https://github.com/Vaibhav91one/luasec",
+  "repository": { "type": "git", "url": "git+https://github.com/doctor-labs/lua-doctor.git" },
+  "homepage": "https://github.com/doctor-labs/lua-doctor",
   "license": "MIT",
   "keywords": ["lua", "security", "static-analysis", "firmware", "sarif", "openwrt"]
 }

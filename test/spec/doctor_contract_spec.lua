@@ -6,8 +6,8 @@ local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 local assert_match, assert_no_match = harness.assert_match, harness.assert_no_match
 
-local api = require "luasec.api"
-local findings = require "luasec.report.findings"
+local api = require "luadoctor.api"
+local findings = require "luadoctor.report.findings"
 
 local FIXTURE = "test/fixtures/tainted_exec/handler.lua"
 
@@ -26,10 +26,10 @@ describe("the doctor/1 envelope", function()
       local doc, code, out = run({"--json", FIXTURE})
       assert_equal(code, 1)
       assert_equal(doc.schema, "doctor/1")
-      assert_equal(doc.tool, "luasec")
+      assert_equal(doc.tool, "lua-doctor")
       assert_true(type(doc.version) == "string" and doc.version:match("^%d+%.%d+%.%d+$"), "semver")
       assert_equal(doc.exit_code, code, "exit_code is the real exit code")
-      assert_equal(doc.score.model, "luasec/1")
+      assert_equal(doc.score.model, "lua-doctor/1")
       assert_true(type(doc.score.value) == "number" and doc.score.value >= 0 and doc.score.value <= 100)
       assert_true(({good = 1, ["needs work"] = 1, critical = 1, incomplete = 1})[doc.score.label])
       assert_equal(doc.score.coverage_gaps, 0)
@@ -70,7 +70,7 @@ describe("the doctor/1 envelope", function()
       os.remove(sarif_path)
       local result = sarif.runs[1].results[1]
       assert_equal(result.partialFingerprints["doctorFinding/v1"], doc.findings[1].fingerprint)
-      assert_equal(sarif.runs[1].properties.score.model, "luasec/1")
+      assert_equal(sarif.runs[1].properties.score.model, "lua-doctor/1")
    end)
 
    it("accepts --fail-on info and rejects a word that is not a severity", function()
@@ -108,7 +108,7 @@ describe("sanitization (doctor/1 section 8)", function()
    end)
 
    it("keeps them out of the validator report too", function()
-      local validate_report = require "luasec.validate.report"
+      local validate_report = require "luadoctor.validate.report"
       local out = validate_report.render({verdict = "rce", exit_reason = "x", reason_source = "payload",
          sinks_reached = {}, payload_result = HOSTILE, payload_output = HOSTILE}, "p.lua")
       assert_no_match(out, "\27")
@@ -123,7 +123,7 @@ describe("sanitization (doctor/1 section 8)", function()
    end)
 end)
 
-describe("luasec mcp", function()
+describe("lua-doctor mcp", function()
    it("serves scan over stdio and returns the CLI's envelope unchanged", function()
       local requests = table.concat({
          '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}',
@@ -141,7 +141,7 @@ describe("luasec mcp", function()
          local reply = findings.decode(line)
          replies[reply.id] = reply
       end
-      assert_equal(replies[1].result.serverInfo.name, "luasec")
+      assert_equal(replies[1].result.serverInfo.name, "lua-doctor")
       assert_equal(replies[2].result.tools[1].name, "scan")
       assert_equal(replies[3].result.isError, false)
       local expected = harness.cli({"--json", "--fail-on=high", FIXTURE})

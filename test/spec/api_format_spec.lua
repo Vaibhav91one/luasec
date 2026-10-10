@@ -1,12 +1,12 @@
 -- The library must render a report exactly the way the command line does, so a
 -- caller that drives `api.analyze` and `api.format` itself produces bytes a human
--- could not tell from `bin/luasec --format <name>`. The CLI's `emit` appends one
+-- could not tell from `bin/lua-doctor --format <name>`. The CLI's `emit` appends one
 -- trailing newline to whatever `render` produces; the library call returns the
 -- rendered report and does not add that newline, so it is stripped here.
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_nil, assert_match = harness.assert_equal, harness.assert_nil, harness.assert_match
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 -- A fixture that yields at least one finding: a file whose only line runs
 -- untrusted data to a command-execution sink.

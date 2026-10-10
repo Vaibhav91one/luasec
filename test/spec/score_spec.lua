@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_true, assert_equal = harness.assert_true, harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local CATEGORIES = {exec = true, firmware = true, payload = true, artifact = true, meta = true}
 

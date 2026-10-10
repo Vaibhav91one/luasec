@@ -50,15 +50,15 @@ describe("absolute symlinks in an extracted rootfs", function()
    end)
 
    it("never follows a target that climbs out of the scanned root with ..", function()
-      -- luasec-outside/tool sits beside the scanned directory. Honouring the `..`
-      -- in /../luasec-outside/tool would reach it from the scan root, and no host
-      -- has /luasec-outside, so the link is dangling on any machine.
+      -- lua-doctor-outside/tool sits beside the scanned directory. Honouring the `..`
+      -- in /../lua-doctor-outside/tool would reach it from the scan root, and no host
+      -- has /lua-doctor-outside, so the link is dangling on any machine.
       local dir = harness.scratch_dir("rootfs_escape")
-      os.execute("mkdir -p " .. q(dir .. "/img/bin") .. " " .. q(dir .. "/luasec-outside"))
-      local handle = assert(io.open(dir .. "/luasec-outside/tool", "w"))
+      os.execute("mkdir -p " .. q(dir .. "/img/bin") .. " " .. q(dir .. "/lua-doctor-outside"))
+      local handle = assert(io.open(dir .. "/lua-doctor-outside/tool", "w"))
       handle:write("not lua\n")
       handle:close()
-      os.execute("ln -s /../luasec-outside/tool " .. q(dir .. "/img/bin/escape"))
+      os.execute("ln -s /../lua-doctor-outside/tool " .. q(dir .. "/img/bin/escape"))
       local out, code = harness.cli({dir .. "/img"})
       os.execute("rm -rf " .. q(dir))
       assert_equal(code, 1, out)

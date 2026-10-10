@@ -9,8 +9,8 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
-local rawscan = require "luasec.rules.rawscan"
+local api = require "luadoctor.api"
+local rawscan = require "luadoctor.rules.rawscan"
 
 local function fixture_source(name)
    local handle = assert(io.open("test/fixtures/rawscan/" .. name, "r"))

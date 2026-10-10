@@ -7,7 +7,7 @@ local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
 local function q(text) return string.format("%q", text) end
 
--- Run luasec with `keys` on stdin (a pipe, so the menu only runs because of
+-- Run lua-doctor with `keys` on stdin (a pipe, so the menu only runs because of
 -- --interactive), from `cwd`, and return combined output and the exit code.
 local function drive(keys, args, cwd)
    local root = io.popen("pwd"):read("*l")
@@ -16,7 +16,7 @@ local function drive(keys, args, cwd)
    handle:write(keys)
    handle:close()
    local command = ("cd %s && %s %s < %s 2>&1; printf '\\n__EXIT__%%d' $?"):format(
-      q(cwd or root), q(root .. "/bin/luasec"), args, q(script))
+      q(cwd or root), q(root .. "/bin/lua-doctor"), args, q(script))
    local pipe = assert(io.popen(command))
    local out = pipe:read("*a")
    pipe:close()
@@ -36,7 +36,7 @@ end
 
 describe("the findings browser model", function()
    it("groups by category in order with counts, worst first, headers not in cursors", function()
-      local review = require "luasec.cli.review"
+      local review = require "luadoctor.cli.review"
       local list = {
          {code = "901", severity = "low", confidence = "low", file = "z.lua", line = 9, column = 1, message = "meta one"},
          {code = "721", severity = "high", confidence = "low", file = "b.lua", line = 2, column = 1, message = "firmware one"},
@@ -68,8 +68,8 @@ end)
 
 describe("the findings browser detail", function()
    it("shows the title, the code frame with the > marker, the fix and the refs", function()
-      local review = require "luasec.cli.review"
-      local api = require "luasec.api"
+      local review = require "luadoctor.cli.review"
+      local api = require "luadoctor.api"
       local root = io.popen("pwd"):read("*l")
       local report = api.analyze({TAINTED}, {})
       assert_true(#report >= 1, "the fixture reports")
@@ -82,8 +82,8 @@ describe("the findings browser detail", function()
    end)
 
    it("shows a traced flow as source arrow sink lines", function()
-      local review = require "luasec.cli.review"
-      local api = require "luasec.api"
+      local review = require "luadoctor.cli.review"
+      local api = require "luadoctor.api"
       local root = io.popen("pwd"):read("*l")
       local report = api.analyze({TAINTED}, {})
       local text = table.concat(review.detail(report[1], root), "\n")
@@ -130,7 +130,7 @@ describe("the findings browser run", function()
    end)
 
    it("restores the terminal and reports instead of raising when rendering fails", function()
-      local review = require "luasec.cli.review"
+      local review = require "luadoctor.cli.review"
       local saved_read, saved_popen = io.read, io.popen
       io.read = function() return "q" end
       local err_text = {}

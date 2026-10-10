@@ -1,4 +1,4 @@
--- Lint luasec's own source with the vendored luacheck.
+-- Lint lua-doctor's own source with the vendored luacheck.
 --
 --   lua test/self-lint.lua [--baseline FILE] [--bless] [DIR]
 --
@@ -8,7 +8,7 @@
 -- not folded into exit 1: a lint that cannot read its input must say which of
 -- the three it was rather than report a clean tree.
 --
--- Why a baseline at all. `make selfscan` runs luasec over src/ and luasec has
+-- Why a baseline at all. `make selfscan` runs lua-doctor over src/ and lua-doctor has
 -- no rule for a global assignment, so a function that lost its `local`
 -- compiled, worked, and shipped as a global; nothing in the build noticed
 -- (#277). luacheck's 111 does notice it. But src/ does not currently lint

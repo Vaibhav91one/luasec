@@ -5,7 +5,7 @@
 local harness = require "harness"
 local describe, it, assert_equal = harness.describe, harness.it, harness.assert_equal
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function codes_of(source)
    local out = {}

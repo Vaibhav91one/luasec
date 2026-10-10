@@ -1,6 +1,6 @@
 # Firmware standards: the path and mode tables
 
-`src/luasec/rules/firmware.lua` owns codes 721 to 728. Everything it matches
+`src/luadoctor/rules/firmware.lua` owns codes 721 to 728. Everything it matches
 against lives in four tables at the top of that file, not scattered through the
 detectors, so a vendor can read the whole set at once and extend it without
 touching matching code. This file explains what the tables mean and why the
@@ -81,7 +81,7 @@ write we cannot see, and neither can we call the file safe.
 
 727 is the rule that was most expensive to get right, and the measurement is
 worth recording. The first version asked a single question - is the loop limit a
-literal constant - and it reported **65 findings on luasec's own source**, every
+literal constant - and it reported **65 findings on lua-doctor's own source**, every
 one of them a false positive:
 
 ```
@@ -176,7 +176,7 @@ suppresses itself in both cases, which is correct and is why nothing is
 duplicated, but it also means a 722 reaches the report without its `chain` field
 on exactly those statements.
 
-The fix belongs in `src/luasec/engine/taint.lua`, in `check_sink`, and is three
+The fix belongs in `src/luadoctor/engine/taint.lua`, in `check_sink`, and is three
 lines: skip `kind == "config"` sinks there, since this module owns 722 and is the
 only layer that can name the config path the value lands in. With that in place
 every 722 carries a `chain`, a tainted config write is a 722 rather than a 709

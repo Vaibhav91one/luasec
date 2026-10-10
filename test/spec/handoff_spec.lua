@@ -21,7 +21,7 @@ local function shim_dir(scripts)
       handle:close()
       os.execute(("chmod +x %q"):format(dir .. "/" .. name))
    end
-   -- bin/luasec and the shims need dirname and cat, so link the system's
+   -- bin/lua-doctor and the shims need dirname and cat, so link the system's
    -- copies in: PATH stays restricted to this dir, with no clipboard tool.
    for _, tool in ipairs({"dirname", "cat"}) do
       local pipe = io.popen("command -v " .. tool .. " 2>/dev/null")
@@ -40,7 +40,7 @@ end
 
 describe("handoff base64", function()
    it("encodes the RFC 4648 vectors exactly", function()
-      local handoff = require "luasec.cli.handoff"
+      local handoff = require "luadoctor.cli.handoff"
       assert_equal(handoff.osc52(""), "\27]52;c;\7", "empty")
       assert_equal(handoff.osc52("f"), "\27]52;c;Zg==\7", "f")
       assert_equal(handoff.osc52("fo"), "\27]52;c;Zm8=\7", "fo")
@@ -58,7 +58,7 @@ describe("the agent hand-off submenu", function()
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_equal(code, 1, "the exit code is the scan's: " .. out)
       assert_match(out, "Hand these findings to an agent", out)
-      assert_match(out, "You are fixing security findings that luasec", out)
+      assert_match(out, "You are fixing security findings that lua%-doctor", out)
       assert_nil(log, "no agent was launched")
    end)
 
@@ -71,7 +71,7 @@ describe("the agent hand-off submenu", function()
       assert_equal(code, 1, "the exit code is the scan's: " .. out)
       assert_match(out, "approval prompts ON", out)
       assert_match(out, "Launch claude%? %[y/N%]", out)
-      assert_match(out, "You are fixing security findings that luasec", out)
+      assert_match(out, "You are fixing security findings that lua%-doctor", out)
       assert_nil(log, "answering n launches nothing")
    end)
 
@@ -85,7 +85,7 @@ describe("the agent hand-off submenu", function()
       assert_equal(code, 1, "the exit code is the scan's: " .. out)
       assert_equal(log, "invoked\n", "the agent runs exactly once")
       assert_true(args:find("dangerously", 1, true) == nil, "no approval skip: " .. tostring(args))
-      assert_match(tostring(args), "luasec reported 709", "the prompt is the argument: " .. out)
+      assert_match(tostring(args), "lua%-doctor reported 709", "the prompt is the argument: " .. out)
    end)
 
    it("copies through pbcopy when it is on PATH", function()
@@ -99,7 +99,7 @@ describe("the agent hand-off submenu", function()
       os.execute("rm -rf " .. string.format("%q", dir))
       assert_equal(code, 1, "the exit code is the scan's: " .. out)
       assert_match(out, "copied with pbcopy", out)
-      local fix = require "luasec.cli.fix_cmd"
+      local fix = require "luadoctor.cli.fix_cmd"
       -- The menu hands its own argv down, so the re-run line keeps --interactive.
       local prompt = assert(fix.prompt_for({"--interactive", TAINTED}, "."))
       assert_equal(got, prompt, "the clipboard gets the prompt byte-identically")

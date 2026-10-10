@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true, assert_match = harness.assert_equal, harness.assert_true, harness.assert_match
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function codes(report)
    local out = {}
@@ -22,10 +22,10 @@ describe("in-source directives", function()
       assert_equal(codes(api.check_source(SINK)), "709")
    end)
 
-   it("silences a finding with -- luasec: ignore on the line above", function()
+   it("silences a finding with -- lua-doctor: ignore on the line above", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: ignore 709
+   -- lua-doctor: ignore 709
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
@@ -37,7 +37,7 @@ end
 local function first(host)
    os.execute("ping " .. http.formvalue("a"))
 end
--- luasec: ignore 709
+-- lua-doctor: ignore 709
 local function second(host)
    os.execute("ping " .. http.formvalue("b"))
 end
@@ -49,7 +49,7 @@ end
    it("honours a code pattern with a character class", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: ignore 7[0-9][0-9]
+   -- lua-doctor: ignore 7[0-9][0-9]
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
@@ -59,7 +59,7 @@ end
    it("honours a name after a colon", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: ignore 709:os.execute
+   -- lua-doctor: ignore 709:os.execute
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
@@ -69,17 +69,17 @@ end
    it("does not silence a different sink from the same code", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: ignore 709:io.popen
+   -- lua-doctor: ignore 709:io.popen
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
       assert_equal(codes(report), "709")
    end)
 
-   it("lets -- luasec: enable override a command line ignore", function()
+   it("lets -- lua-doctor: enable override a command line ignore", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: enable 709
+   -- lua-doctor: enable 709
    os.execute("ping " .. http.formvalue("host"))
 end
 ]], {ignore = {"709"}})
@@ -89,7 +89,7 @@ end
    it("reports a malformed directive instead of ignoring it", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: nonsense 709
+   -- lua-doctor: nonsense 709
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
@@ -99,7 +99,7 @@ end
    it("reports a directive that names no code", function()
       local report = api.check_source([[
 local function go(host)
-   -- luasec: ignore
+   -- lua-doctor: ignore
    os.execute("ping " .. http.formvalue("host"))
 end
 ]])
@@ -115,7 +115,7 @@ end)
 
 describe("a directive the analyzer cannot read", function()
    it("reports it as unreadable rather than raising", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       local handle = assert(io.open("test/fixtures/malformed_directive.lua", "r"))
       local report = api.check_source(handle:read("*a"), {std = "luajit"})
       handle:close()
@@ -137,7 +137,7 @@ end)
 
 describe("every malformed code pattern", function()
    it("completes the scan and never hides a finding", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       -- The property that matters, whichever way Lua reads the pattern: a
       -- suppression that cannot be read must not hide what it named. Handing
       -- the operator's text to string.match unguarded raised "malformed
@@ -146,7 +146,7 @@ describe("every malformed code pattern", function()
       local forms = {"[708", "70(", "70)", "70%", "7[0", "70[0-9", "%", "%1",
                      "701:[bad", "701:(", "701:)", "701:%"}
       for _, form in ipairs(forms) do
-         local source = "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n"
+         local source = "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n"
          local report = api.check_source(source, {std = "luajit"})
 
          local kept = false
@@ -159,8 +159,8 @@ describe("every malformed code pattern", function()
    end)
 
    it("reports the forms Lua rejects outright as 012", function()
-      local api = require "luasec.api"
-      local report = api.check_source("-- luasec: ignore [708\nos.execute(cmd)\n",
+      local api = require "luadoctor.api"
+      local report = api.check_source("-- lua-doctor: ignore [708\nos.execute(cmd)\n",
          {std = "luajit"})
       local unreadable = false
       for _, finding in ipairs(report) do
@@ -170,10 +170,10 @@ describe("every malformed code pattern", function()
    end)
 
    it("still applies a pattern it can read", function()
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       for _, form in ipairs({"701", "70[0-9]", "701:os.execute"}) do
          local report = api.check_source(
-            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
+            "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
          assert_equal(#report, 0,
             "a valid suppression still suppresses: " .. form)
       end
@@ -185,11 +185,11 @@ describe("a suppression pattern with too many repetition quantifiers", function(
       -- Issue #66: a pattern with more than three repetition quantifiers
       -- (-, *, +, ?) can force Lua's matcher into exponential backtracking
       -- against the 127-byte probe that is_valid_pattern uses to sanity-check
-      -- readability. `-- luasec: ignore .-.-.-.-.-` costs ~127^k where k is the
+      -- readability. `-- lua-doctor: ignore .-.-.-.-.-` costs ~127^k where k is the
       -- number of quantifiers; k=4 takes seconds, k=5 never returns. The
       -- pattern must be refused before string.match is ever called, treated as
       -- unreadable, and the finding it would have hidden stays reported.
-      local source = "-- luasec: ignore .-.-.-.-.-.\nos.execute(cmd)\n"
+      local source = "-- lua-doctor: ignore .-.-.-.-.-.\nos.execute(cmd)\n"
       local start = os.clock()
       local report = api.check_source(source, {std = "luajit"})
       local elapsed = os.clock() - start
@@ -215,7 +215,7 @@ describe("a suppression pattern with too many repetition quantifiers", function(
       local forms = {"70[0-9]", "701:os%.execute"}
       for _, form in ipairs(forms) do
          local report = api.check_source(
-            "-- luasec: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
+            "-- lua-doctor: ignore " .. form .. "\nos.execute(cmd)\n", {std = "luajit"})
          assert_equal(#report, 0,
             "a bounded suppression still suppresses: " .. form
             .. " left " .. codes(report))

@@ -1,4 +1,4 @@
-name: luasec
+name: lua-doctor
 description: Scan Lua firmware code for remote code execution, and upload the result to code scanning.
 branding:
   icon: shield
@@ -14,7 +14,7 @@ inputs:
     description: Fail the job at or above this severity (low, medium, high, critical).
     default: high
   args:
-    description: Extra luasec arguments.
+    description: Extra lua-doctor arguments.
     default: ""
   upload-sarif:
     description: Upload the SARIF report to GitHub code scanning (needs security-events write).
@@ -26,39 +26,39 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build luasec
+    - name: Build lua-doctor
       shell: bash
       run: make -C "$GITHUB_ACTION_PATH" lua vendor
     - name: Scan
       id: scan
       shell: bash
       env:
-        LUASEC_PATHS: ${{ inputs.path }}
-        LUASEC_STD: ${{ inputs.std }}
-        LUASEC_FAIL_ON: ${{ inputs.fail-on }}
-        LUASEC_ARGS: ${{ inputs.args }}
+        LUA_DOCTOR_PATHS: ${{ inputs.path }}
+        LUA_DOCTOR_STD: ${{ inputs.std }}
+        LUA_DOCTOR_FAIL_ON: ${{ inputs.fail-on }}
+        LUA_DOCTOR_ARGS: ${{ inputs.args }}
       run: |
         std=()
-        if [ -n "$LUASEC_STD" ]; then std=(--std "$LUASEC_STD"); fi
+        if [ -n "$LUA_DOCTOR_STD" ]; then std=(--std "$LUA_DOCTOR_STD"); fi
         # shellcheck disable=SC2086
         set +e
-        # Keep --format/-o after $LUASEC_ARGS so user args cannot override where the SARIF goes.
-        "$GITHUB_ACTION_PATH/bin/luasec" "${std[@]}" --fail-on "$LUASEC_FAIL_ON" $LUASEC_ARGS \
-          --format sarif -o luasec.sarif $LUASEC_PATHS
+        # Keep --format/-o after $LUA_DOCTOR_ARGS so user args cannot override where the SARIF goes.
+        "$GITHUB_ACTION_PATH/bin/lua-doctor" "${std[@]}" --fail-on "$LUA_DOCTOR_FAIL_ON" $LUA_DOCTOR_ARGS \
+          --format sarif -o lua-doctor.sarif $LUA_DOCTOR_PATHS
         status=$?
-        score=$(jq -r '.runs[0].properties.score.value // empty' luasec.sarif 2>/dev/null || true)
+        score=$(jq -r '.runs[0].properties.score.value // empty' lua-doctor.sarif 2>/dev/null || true)
         set -e
         echo "score=$score" >> "$GITHUB_OUTPUT"
-        if [ -n "$score" ]; then echo "luasec score: $score/100" >> "$GITHUB_STEP_SUMMARY"; else echo "luasec score: unavailable" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ -n "$score" ]; then echo "lua-doctor score: $score/100" >> "$GITHUB_STEP_SUMMARY"; else echo "lua-doctor score: unavailable" >> "$GITHUB_STEP_SUMMARY"; fi
         echo "status=$status" >> "$GITHUB_OUTPUT"
     - name: Upload SARIF
       if: ${{ always() && inputs.upload-sarif == 'true' }}
       uses: github/codeql-action/upload-sarif@v3
       with:
-        sarif_file: luasec.sarif
-        category: luasec
+        sarif_file: lua-doctor.sarif
+        category: lua-doctor
     - name: Gate
       shell: bash
       env:
-        LUASEC_STATUS: ${{ steps.scan.outputs.status }}
-      run: exit "$LUASEC_STATUS"
+        LUA_DOCTOR_STATUS: ${{ steps.scan.outputs.status }}
+      run: exit "$LUA_DOCTOR_STATUS"

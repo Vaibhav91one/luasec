@@ -7,7 +7,7 @@ local TAINTED = "test/fixtures/tainted_exec/handler.lua"
 
 local function q(text) return string.format("%q", text) end
 
--- Run luasec with `keys` on stdin (a pipe, so the menu only runs because of
+-- Run lua-doctor with `keys` on stdin (a pipe, so the menu only runs because of
 -- --interactive), from `cwd`, and return combined output and the exit code.
 local function drive(keys, args, cwd)
    local root = io.popen("pwd"):read("*l")
@@ -16,7 +16,7 @@ local function drive(keys, args, cwd)
    handle:write(keys)
    handle:close()
    local command = ("cd %s && %s %s < %s 2>&1; printf '\\n__EXIT__%%d' $?"):format(
-      q(cwd or root), q(root .. "/bin/luasec"), args, q(script))
+      q(cwd or root), q(root .. "/bin/lua-doctor"), args, q(script))
    local pipe = assert(io.popen(command))
    local out = pipe:read("*a")
    pipe:close()
@@ -81,7 +81,7 @@ describe("the interactive menu", function()
       local out = drive("b" .. dir .. "/b.json\nq", "--interactive " .. TAINTED)
       local again, code = harness.cli({"--baseline", dir .. "/b.json", TAINTED})
       os.execute("rm -rf " .. q(dir))
-      assert_match(out, "use luasec %-%-baseline", out)
+      assert_match(out, "use lua%-doctor %-%-baseline", out)
       assert_equal(code, 0, "nothing is new against its own baseline: " .. again)
    end)
 
@@ -90,13 +90,13 @@ describe("the interactive menu", function()
       -- submenu, q quits the menu.
       local out = drive("fwqq", "--interactive " .. TAINTED)
       assert_match(out, "Hand these findings to an agent", out)
-      assert_match(out, "You are fixing security findings that luasec", out)
+      assert_match(out, "You are fixing security findings that lua%-doctor", out)
       assert_true(not out:find("launching", 1, true), "nothing was launched: " .. out)
       assert_true(not out:find("Agent [claude", 1, true), "the old agent prompt is gone: " .. out)
    end)
 
    it("recommends review for critical or high findings, saving otherwise", function()
-      local menu = require "luasec.cli.menu"
+      local menu = require "luadoctor.cli.menu"
       assert_equal(menu.recommended({
          {severity = "critical"}, {severity = "low"},
       }), "r", "critical recommends review")
@@ -109,8 +109,8 @@ describe("the interactive menu", function()
       local dir = harness.scratch_dir("menu_setup")
       local root = io.popen("pwd"):read("*l")
       drive("ciq", "--interactive " .. q(root .. "/" .. TAINTED), dir)
-      local workflow = io.open(dir .. "/.github/workflows/luasec.yml", "rb")
-      local skill = io.open(dir .. "/.claude/skills/luasec/SKILL.md", "rb")
+      local workflow = io.open(dir .. "/.github/workflows/lua-doctor.yml", "rb")
+      local skill = io.open(dir .. "/.claude/skills/lua-doctor/SKILL.md", "rb")
       local made = {workflow ~= nil, skill ~= nil}
       if workflow then workflow:close() end
       if skill then skill:close() end

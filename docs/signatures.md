@@ -2,11 +2,11 @@
 
 Code 750 is "this file matches a known exploit or malware signature". What it
 matches is a **pack**: a versioned list of signatures, held as data, that ships
-with `luasec` and is matched against every file it analyzes.
+with `lua-doctor` and is matched against every file it analyzes.
 
-    src/luasec/registry/stds/signatures.lua   the pack: the signatures
-    yara/luasec_signatures.yar                 the same signatures as yara rules
-    src/luasec/rules/payloads.lua             the detector that matches them
+    src/luadoctor/registry/stds/signatures.lua   the pack: the signatures
+    yara/lua_doctor_signatures.yar                 the same signatures as yara rules
+    src/luadoctor/rules/payloads.lua             the detector that matches them
     test/spec/signatures_spec.lua              the drift check between the two
 
 Current pack version: **2026.09.1**
@@ -72,19 +72,19 @@ saying so helps nobody.
 
 ## The yara ruleset
 
-`yara/luasec_signatures.yar` is the same pack in yara syntax, one rule per
+`yara/lua_doctor_signatures.yar` is the same pack in yara syntax, one rule per
 signature, so the same question can be asked of a whole firmware image rather
-than of a file `luasec` parsed:
+than of a file `lua-doctor` parsed:
 
 ```
-yara -r yara/luasec_signatures.yar firmware/
+yara -r yara/lua_doctor_signatures.yar firmware/
 ```
 
-Each rule is named `luasec_sig_<id with dashes as underscores>` and carries the
+Each rule is named `lua_doctor_sig_<id with dashes as underscores>` and carries the
 signature in `meta`:
 
 ```yara
-rule luasec_sig_mirai_default_credentials
+rule lua_doctor_sig_mirai_default_credentials
 {
    meta:
       id = "mirai-default-credentials"
@@ -140,7 +140,7 @@ source and not strings that merely look unusual.
 
 1. Add it to `signatures.lua` with an `id`, a `description`, a `pattern` and a
    `reference`.
-2. Add its rule to `yara/luasec_signatures.yar`: the same id in `meta`, one
+2. Add its rule to `yara/lua_doctor_signatures.yar`: the same id in `meta`, one
    `$sN` per alternative of the pattern, `any of them`.
 3. Add a firing fixture under `test/fixtures/signatures/` and a silent one, and
    a spec that asserts both - the silent one matters as much, because a pack
@@ -161,8 +161,8 @@ version says which list each answer came from.
 - **It does not know the pack is complete.** Nine signatures catch nine things.
   Everything else needs a new entry.
 - **A comment silences it, as it silences every other code.** The pack file
-  itself carries `-- luasec: ignore 750`, because every string in it is a
+  itself carries `-- lua-doctor: ignore 750`, because every string in it is a
   signature and a finding there is not news. That is the same escape hatch
-  `-- luasec: ignore` gives a developer everywhere else, and it is there on
+  `-- lua-doctor: ignore` gives a developer everywhere else, and it is there on
   purpose: a suppression a reader can see in the file beats a detector with a
   special case for one path.

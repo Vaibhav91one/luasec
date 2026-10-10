@@ -1,13 +1,13 @@
 -- Adversarial regression suite.
 --
 -- Written by the verifier, not by the implementer: each spec is an attempt to
--- make luasec wrong in a way its own suite does not check. A spec here failing
+-- make lua-doctor wrong in a way its own suite does not check. A spec here failing
 -- is a product bug until proven otherwise.
 local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local api = require "luasec.api"
+local api = require "luadoctor.api"
 
 local function codes(report)
    local out = {}

@@ -1,8 +1,8 @@
 # Reports
 
-`luasec` writes four formats. They are not four renderers over four shapes: every
+`lua-doctor` writes four formats. They are not four renderers over four shapes: every
 one of them is rendered from the same normalized finding list
-(`src/luasec/report/findings.lua`), so they cannot disagree about what a finding
+(`src/luadoctor/report/findings.lua`), so they cannot disagree about what a finding
 is or in what order it appears.
 
 | Flag | For | Notes |
@@ -20,7 +20,7 @@ tools: `schema`, `tool`, `version`, `exit_code`, `score`, `findings`, `data`, an
 `baseline` under `--baseline`. A field outside the contract may change without
 notice, and a consumer must ignore keys it does not know.
 
-One luasec finding in the envelope:
+One lua-doctor finding in the envelope:
 
 | Field | Type | Always present | Meaning |
 | --- | --- | --- | --- |
@@ -34,8 +34,8 @@ One luasec finding in the envelope:
 | `remedy` | string or null | yes | the first paragraph of the rule page's "How to fix" section; `null` when the page is not installed |
 | `evidence` | array | no | `[{"ref": "snippet", "value": ...}]` when the finding has a snippet |
 | `baseline_state` | string | with `--baseline` | `new` or `unchanged` |
-| `cwe`, `name`, `sink`, `source`, `end_column` | | yes | luasec extras: `""` rather than `null` when empty; `end_column` is one past the last column |
-| `trace`, `sanitizer`, `guarded_by`, `channels`, `exposed_as` | | no | luasec extras, present when they apply; `trace` is omitted when there is no proven flow |
+| `cwe`, `name`, `sink`, `source`, `end_column` | | yes | lua-doctor extras: `""` rather than `null` when empty; `end_column` is one past the last column |
+| `trace`, `sanitizer`, `guarded_by`, `channels`, `exposed_as` | | no | lua-doctor extras, present when they apply; `trace` is omitted when there is no proven flow |
 
 What moved from the 0.5 document: `luasecVersion` is `version`, `reportVersion` is
 `data.report_version`, `score.categories` is `data.categories`, `code` is `id`,
@@ -72,8 +72,8 @@ guaranteed by the contract rather than by whatever order an engine happened to
 produce them in.
 
 The envelope's `score` is `{value, label, model, coverage_gaps}` with `model`
-`"luasec/1"`; the per-category counts are in `data.categories`. It is computed
-from the findings, so the finding shape itself is unchanged. The `luasec/1`
+`"lua-doctor/1"`; the per-category counts are in `data.categories`. It is computed
+from the findings, so the finding shape itself is unchanged. The `lua-doctor/1`
 formula: the score is 100 minus, for each finding, its severity weight (critical
 25, high 10, medium 4, low 1) times its confidence (certain or high 1, medium 0.6,
 low 0.3), rounded down and floored at 0. Labels: `good` at 90 and above, `needs
@@ -130,7 +130,7 @@ the wrong text is worse than no location.
   somebody inserts a comment.
 
 `primaryLocationLineHash` is not written. It is GitHub's own hash of the source
-line, GitHub computes it on upload, and an earlier luasec wrote `code:name:line`
+line, GitHub computes it on upload, and an earlier lua-doctor wrote `code:name:line`
 there, which GitHub answered with an "inconsistent fingerprint" warning on every
 result (#311).
 
@@ -166,9 +166,9 @@ reading of SARIF would allow:
 ## Baseline mode
 
 ```sh
-luasec --json -o baseline.json src/                 # record
-luasec --baseline baseline.json src/                # what is new since then
-luasec --json --baseline baseline.json -o baseline.json src/   # accept the fixes
+lua-doctor --json -o baseline.json src/                 # record
+lua-doctor --baseline baseline.json src/                # what is new since then
+lua-doctor --json --baseline baseline.json -o baseline.json src/   # accept the fixes
 ```
 
 The baseline is a previous `--json` envelope, matched by `fingerprint` only
@@ -207,7 +207,7 @@ has to be looked at.
 
 A separate code rather than reusing 1 is what lets a build script say "fail only
 if something is new" without parsing the report. A baseline that cannot be read
-or is not a luasec report exits **2**, not 0: a mistyped path must stop the run,
+or is not a lua-doctor report exits **2**, not 0: a mistyped path must stop the run,
 not silently turn the gate off.
 
 Under `--json --baseline` the envelope lists the whole run: every finding with

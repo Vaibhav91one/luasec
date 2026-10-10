@@ -5,7 +5,7 @@
 --
 -- Three copies of one measurement are held against each other here:
 --
---   the run       what luasec just found over corpus/
+--   the run       what lua-doctor just found over corpus/
 --   the golden     scripts/precision-golden.lua, the frozen copy
 --   the document   docs/precision.md, the prose copy
 --
@@ -22,7 +22,7 @@
 -- with no Lua in it are all 2 or a named failure, never a pass: a gate that
 -- cannot run must not come out green.
 --
--- The report is read with luasec's own reader and the file count with luasec's
+-- The report is read with lua-doctor's own reader and the file count with lua-doctor's
 -- own walk, because both are the tool's definitions of its own output. Reading
 -- the JSON with a parser written here instead would be a second definition of
 -- what a finding is, and the two would disagree one day without anyone noticing
@@ -92,7 +92,7 @@ if not golden then usage(golden_error) end
 local report_text, report_read_error = read_file(opts.report)
 if not report_text then usage(report_read_error) end
 
-local findings_module = require "luasec.report.findings"
+local findings_module = require "luadoctor.report.findings"
 local document, document_error = findings_module.read_document(report_text)
 if not document then usage(opts.report .. ": " .. tostring(document_error)) end
 
@@ -110,7 +110,7 @@ end
 --
 --   collected  the .lua files under the tree: the denominator docs/precision.md
 --              quotes, and what `make corpus` prints per corpus.
---   scanned    the files luasec itself selected, asked of luasec. The walk reads
+--   scanned    the files lua-doctor itself selected, asked of lua-doctor. The walk reads
 --              cgi-bin handlers and the extensionless scripts beside them, and
 --              declines a few *.lua files on their name, so this is the analyzer's
 --              real denominator and not the document's.
@@ -127,7 +127,7 @@ local function collected_lua_files(root)
    return tonumber((answer or ""):match("%d+"))
 end
 
-local walk = require "luasec.cli.walk"
+local walk = require "luadoctor.cli.walk"
 local files, walk_error = walk.collect({opts.corpus})
 if not files then usage("could not walk " .. opts.corpus .. ": " .. tostring(walk_error)) end
 
@@ -226,7 +226,7 @@ if total ~= golden.total then
 end
 
 if #files ~= golden.scanned_files then
-   difference(string.format("scanned files: luasec analyzed %d, the frozen measurement says %d",
+   difference(string.format("scanned files: lua-doctor analyzed %d, the frozen measurement says %d",
       #files, golden.scanned_files))
 end
 
@@ -277,7 +277,7 @@ end
 if headline_files == nil then
    difference(opts.doc .. ": the headline does not say how many files it measured")
 -- The headline carries the ANALYZED count, not the collected one: the findings
--- were divided by the files luasec looked at, so that is the denominator a
+-- were divided by the files lua-doctor looked at, so that is the denominator a
 -- reader quoting the headline is quoting. The corpus table's own figure is
 -- checked against corpus_files below.
 elseif headline_files ~= golden.scanned_files then

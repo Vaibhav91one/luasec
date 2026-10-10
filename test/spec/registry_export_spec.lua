@@ -2,7 +2,7 @@ local harness = require "harness"
 local describe, it = harness.describe, harness.it
 local assert_equal, assert_true = harness.assert_equal, harness.assert_true
 
-local profiles = require "luasec.registry.profiles"
+local profiles = require "luadoctor.registry.profiles"
 
 -- Every dotted name in the registry is a claim: some function exists, and the
 -- command or value it reads is where `arg` says it is. Four such claims were
@@ -466,7 +466,7 @@ describe("registry declarations name functions that exist", function()
       -- The behaviour half, here so this file is not only a data check: both
       -- take the command first (process.c:31 reads position 1 as the path and
       -- hands it to execvp or execve), so position 1 is the command.
-      local api = require "luasec.api"
+      local api = require "luadoctor.api"
       for _, source in ipairs({
          'nixio.execp(luci.http.formvalue("cmd"))',
          'nixio.exece(luci.http.formvalue("cmd"), {})',
