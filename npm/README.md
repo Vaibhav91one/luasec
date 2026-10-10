@@ -1,10 +1,10 @@
-# lua-doctor (npm launcher)
+# @doctor-labs/lua-doctor (npm launcher)
 
 lua-doctor is a static security scanner for Lua in embedded firmware: it finds
 remote code execution without installing Lua tooling.
 
 ```sh
-npx lua-doctor <path>
+npx @doctor-labs/lua-doctor <path>
 ```
 
 Requirements: macOS or Linux; Lua 5.3+ on PATH, or `make` plus a C compiler

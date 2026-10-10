@@ -53,7 +53,7 @@ jobs:
 
   npm:
     # Trusted publishing: npm checks this workflow's OIDC identity against the
-    # publisher configured on the package (doctor-labs/lua-doctor, release.yml), so
+    # publisher configured on the package @doctor-labs/lua-doctor (repo doctor-labs/lua-doctor, release.yml), so
     # no npm token is stored anywhere. Needs npm 11.5.1 or later.
     needs: release
     runs-on: ubuntu-latest

@@ -23,7 +23,7 @@ the source they claim to be. `--validate` runs one candidate payload in a
 sandboxed child process and reports whether it actually reaches execution.
 
 ```sh
-npx lua-doctor rootfs/
+npx @doctor-labs/lua-doctor rootfs/
 lua-doctor why <file>:<line>
 lua-doctor fix --print rootfs/
 ```
@@ -53,7 +53,7 @@ Four ways to get it. The npm, LuaRocks and Homebrew packages are published
 from the v0.6.0 release.
 
 ```sh
-npx lua-doctor <path>
+npx @doctor-labs/lua-doctor <path>
 ```
 
 ```sh

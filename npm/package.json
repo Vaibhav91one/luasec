@@ -1,8 +1,9 @@
 {
-  "name": "lua-doctor",
+  "name": "@doctor-labs/lua-doctor",
   "version": "0.6.0",
   "description": "Static security scanner for Lua in embedded firmware: finds remote code execution. Runs lua-doctor without installing Lua tooling.",
   "bin": { "lua-doctor": "bin/lua-doctor.js" },
+  "publishConfig": { "access": "public" },
   "files": ["bin/lua-doctor.js", "README.md"],
   "engines": { "node": ">=18" },
   "os": ["darwin", "linux"],
