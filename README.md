@@ -1,53 +1,40 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-    <img src="docs/assets/logo-light.svg" alt="lua-doctor" width="360">
-  </picture>
-</p>
+<p align="center"><img src="docs/assets/hero.svg" alt="lua-doctor illustration" width="100%"></p>
 
-<p align="center">
-  <a href="https://github.com/doctor-labs/lua-doctor/actions/workflows/ci.yml"><img src="https://github.com/doctor-labs/lua-doctor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Lua-5.3%2B-000000?style=flat&color=000000&labelColor=000000" alt="Lua 5.3+">
-  <img src="https://img.shields.io/badge/license-MIT-000000?style=flat&color=000000&labelColor=000000" alt="license MIT">
-  <img src="https://img.shields.io/badge/telemetry-none-000000?style=flat&color=000000&labelColor=000000" alt="telemetry none">
-</p>
+<h1><img src="docs/assets/logo.svg" width="36" height="36" alt="" align="absmiddle"> lua-doctor</h1>
 
-**Lua Doctor** finds remote code execution in Lua that ships inside embedded firmware.
+<a href="https://github.com/doctor-labs/lua-doctor/actions/workflows/ci.yml"><img src="https://github.com/doctor-labs/lua-doctor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://www.npmjs.com/package/@doctor-labs/lua-doctor"><img src="https://img.shields.io/npm/v/@doctor-labs/lua-doctor" alt="npm"></a>
+<a href="https://luarocks.org/modules/vaibhav91one/lua-doctor"><img src="https://img.shields.io/luarocks/v/vaibhav91one/lua-doctor" alt="LuaRocks"></a>
+<img src="https://img.shields.io/badge/license-MIT-8aa0ad" alt="license MIT">
+<img src="https://img.shields.io/badge/contract-doctor%2F1-19c3ab" alt="contract doctor/1">
+<img src="https://img.shields.io/badge/telemetry-none-2fd27a" alt="telemetry none">
 
-Embedded Lua is often the web layer of a device running as root: a LuCI
-handler, an HTTP API, a CGI script. `lua-doctor` answers one question about it:
-**can attacker-controlled input reach code or command execution?** It also
-looks for malicious or backdoored Lua already in the image: obfuscated loaders,
-decoded payloads reaching a sink, default credentials, and files that are not
-the source they claim to be. `--validate` runs one candidate payload in a
-sandboxed child process and reports whether it actually reaches execution.
+**Embedded Lua security doctor: can attacker-controlled input reach code or command execution?**
 
-```sh
-npx @doctor-labs/lua-doctor rootfs/
-lua-doctor why <file>:<line>
-lua-doctor fix --print rootfs/
+Point `lua-doctor` at the Lua inside a firmware image (a LuCI handler, an HTTP API, a CGI script) and it traces
+untrusted input to execution sinks. It also looks for backdoored Lua: obfuscated loaders, decoded payloads
+reaching a sink, default credentials, and files that are not the source they claim to be. `--validate` runs
+one candidate payload in a sandboxed child process and reports whether it actually reaches execution.
+
+```text
+$ bin/lua-doctor --view doctor --no-color test/fixtures/tainted_exec/handler.lua
+┌────────────────────────────────────────────┐
+│ lua-doctor  test/fixtures/tainted_exec/han…│
+│                                            │
+│ 75 / 100  needs work                       │
+│ ███████████████░░░░░                       │
+│                                            │
+│ 1 finding in 1 file: critical 1            │
+│ exec 1                                     │
+└────────────────────────────────────────────┘
+
+✖ 709  untrusted data reaches command execution  critical · certain
+    test/fixtures/tainted_exec/handler.lua:3
+
+Next: lua-doctor why <file>:<line>  ·  lua-doctor rules explain <code>  ·  lua-doctor fix <path>  ·  lua-doctor --summary
 ```
 
-## Contents
-
-- [Get started](#get-started)
-- [What it catches](#what-it-catches)
-- [Measured behaviour](#measured-behaviour)
-- [What it will not tell you](#what-it-will-not-tell-you)
-- [Silence means it looked](#silence-means-it-looked)
-- [Suppressions](#suppressions)
-- [Exit codes](#exit-codes)
-- [Build and test](#build-and-test)
-- [Documentation](#documentation)
-- [CLI reference](#cli-reference)
-- [Privacy and telemetry](#privacy-and-telemetry)
-- [Status](#status)
-- [Why firmware](#why-firmware)
-- [License](#license)
-
-## Get started
-
-### 1. Install
+## Install
 
 Four ways to get it. The npm, LuaRocks and Homebrew packages are published
 from the v0.6.0 release.
@@ -71,7 +58,42 @@ make lua vendor
 bin/lua-doctor
 ```
 
-### 2. First scan
+## Use
+
+| Command | What it does |
+| --- | --- |
+| `lua-doctor <path>...` | scan files or directories (scan is the default; `--validate` swaps in the payload validator) |
+| `lua-doctor why <file>:<line>` | explain a finding: source-to-sink flow, code frame, fix |
+| `lua-doctor --json <path>` / `--sarif FILE` | `doctor/1` envelope / SARIF 2.1.0 (see [Machine output and MCP](#machine-output-and-mcp)) |
+| `lua-doctor --scope changed` / `--staged` | scan only changed or staged files |
+| `lua-doctor mcp` | serve the `scan` tool over MCP on stdio |
+| `lua-doctor fix [--print] <path>` | hand the findings to an AI coding agent |
+| `lua-doctor install` | write agent guidance (Claude skill, Cursor rule, AGENTS.md) |
+
+Full list: [CLI reference](#cli-reference).
+
+## Contents
+
+- [Install](#install)
+- [Use](#use)
+- [Get started](#get-started)
+- [What it catches](#what-it-catches)
+- [Measured behaviour](#measured-behaviour)
+- [What it will not tell you](#what-it-will-not-tell-you)
+- [Silence means it looked](#silence-means-it-looked)
+- [Suppressions](#suppressions)
+- [Exit codes](#exit-codes)
+- [Build and test](#build-and-test)
+- [Documentation](#documentation)
+- [CLI reference](#cli-reference)
+- [Privacy and telemetry](#privacy-and-telemetry)
+- [Status](#status)
+- [Why firmware](#why-firmware)
+- [License](#license)
+
+## Get started
+
+### 1. First scan
 
 Point it at a file or a directory. On a terminal the default report is a
 grouped digest, worst first (`--view doctor` forces it; `--view list` forces
@@ -119,7 +141,7 @@ bin/lua-doctor --score test/fixtures/tainted_exec/handler.lua
 75
 ```
 
-### 3. Understand and fix
+### 2. Understand and fix
 
 `why` explains every finding on one line — the finding, its data flow, and
 how to fix it:
@@ -247,7 +269,7 @@ files. Raw firmware images must be extracted first (lua-doctor says so instead o
 scanning them), and in an extracted image absolute symlinks resolve against
 the image root.
 
-### 4. Gate CI
+### 3. Gate CI
 
 `ci install` writes a workflow that runs the lua-doctor action on every push and
 pull request, pinned to the version of the lua-doctor that wrote it:
@@ -289,7 +311,7 @@ The first run stores the baseline (it exits `1`, findings are present); the
 second run prints nothing new and exits `0`. See
 [docs/usage.md](docs/usage.md#ci-and-exit-codes) for the full contract.
 
-### 5. Configure
+### 4. Configure
 
 `lua-doctor.config.lua` in the current directory is loaded when it exists.
 `--config <file>` loads that file instead; `--no-config` skips it.
@@ -707,3 +729,7 @@ all built around that one use.
 ## License
 
 MIT. Vendored luacheck is MIT, see `vendor/luacheck/LICENSE`.
+
+---
+
+Part of [doctor·labs](https://github.com/doctor-labs) — offline security doctors.
